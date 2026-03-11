@@ -275,7 +275,10 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
                     }
                 };
 
-                let is_merge = latest_activity.is_some();
+                // "Unknown" 进程名不做合并：无法区分是哪个进程，强制新建
+                // 防止所有识别失败的进程时长累积到同一条记录导致统计失真
+                let is_merge = latest_activity.is_some()
+                    && active_window.app_name != "Unknown";
 
                 if is_merge {
                     // === 合并路径：不保存截图，只做 OCR ===

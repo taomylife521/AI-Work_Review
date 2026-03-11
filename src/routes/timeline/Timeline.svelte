@@ -600,15 +600,17 @@
         <!-- 截图预览 -->
         <div>
           <span class="text-sm font-medium text-slate-500 dark:text-slate-400">屏幕截图</span>
-          <div class="mt-2 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-700">
+          <!-- 容器居中对齐，避免图片尺寸小时产生大面积空白 -->
+          <div class="mt-2 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-700 flex items-center justify-center min-h-[120px]">
             {#if selectedActivity.thumbnailLoading}
-              <div class="w-full h-48 flex items-center justify-center">
+              <div class="py-12 flex items-center justify-center">
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
               </div>
             {:else if selectedActivity.thumbnail}
-              <img src={selectedActivity.thumbnail} alt="屏幕截图" class="w-full h-auto" />
+              <!-- max-h 限制高度防止超高图片撑开弹窗，object-contain 保持比例居中 -->
+              <img src={selectedActivity.thumbnail} alt="屏幕截图" class="max-w-full max-h-96 object-contain" />
             {:else}
-              <div class="w-full h-48 flex items-center justify-center text-slate-400">
+              <div class="py-12 flex items-center justify-center text-slate-400">
                 <span>截图加载失败</span>
               </div>
             {/if}
@@ -617,16 +619,17 @@
 
         <div>
           <span class="text-sm font-medium text-slate-500 dark:text-slate-400">窗口标题</span>
-          <p class="text-slate-800 dark:text-white mt-1 break-all">{selectedActivity.window_title || '无标题'}</p>
+          <!-- 字号略大，提升可读性 -->
+          <p class="text-base text-slate-800 dark:text-white mt-1 break-all leading-relaxed">{selectedActivity.window_title || '无标题'}</p>
         </div>
         <div class="grid grid-cols-2 gap-4">
           <div>
             <span class="text-sm font-medium text-slate-500 dark:text-slate-400">记录时间</span>
-            <p class="text-slate-800 dark:text-white mt-1">{formatTime(selectedActivity.timestamp)}</p>
+            <p class="text-base text-slate-800 dark:text-white mt-1 font-mono">{formatTime(selectedActivity.timestamp)}</p>
           </div>
           <div>
             <span class="text-sm font-medium text-slate-500 dark:text-slate-400">持续时长</span>
-            <p class="text-slate-800 dark:text-white mt-1">{formatDuration(selectedActivity.duration)}</p>
+            <p class="text-base text-slate-800 dark:text-white mt-1">{formatDuration(selectedActivity.duration)}</p>
           </div>
         </div>
         {#if selectedActivity.browser_url}

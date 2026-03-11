@@ -19,6 +19,9 @@ pub fn get_active_window() -> Result<ActiveWindow> {
     use winapi::um::psapi::GetModuleBaseNameW;
     use winapi::um::winnt::PROCESS_QUERY_INFORMATION;
     use winapi::um::winuser::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId};
+    // PROCESS_QUERY_LIMITED_INFORMATION 是 Vista+ 专为低权限场景设计的标志
+    // 无需 PROCESS_VM_READ，对 UAC 保护进程、Store 应用等成功率远高于完整权限
+    const PROCESS_QUERY_LIMITED: u32 = 0x1000;
 
     unsafe {
         let hwnd = GetForegroundWindow();
@@ -47,22 +50,70 @@ pub fn get_active_window() -> Result<ActiveWindow> {
         let mut pid: u32 = 0;
         GetWindowThreadProcessId(hwnd, &mut pid);
 
-        // 获取进程名
+        // 获取进程名，使用多级备用策略确保 Win10 低权限下能正确读取
         let app_name = if pid > 0 {
-            let handle = OpenProcess(PROCESS_QUERY_INFORMATION | 0x0010, 0, pid);
-            if !handle.is_null() {
+            // 方法一：PROCESS_QUERY_LIMITED_INFORMATION + GetModuleBaseNameW
+            // 对大多数普通进程（Word、VSCode、WPS 等）有效
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED, 0, pid);
+            let name_opt = if !handle.is_null() {
                 let mut name: [u16; 256] = [0; 256];
                 let len = GetModuleBaseNameW(handle, std::ptr::null_mut(), name.as_mut_ptr(), 256);
                 CloseHandle(handle);
                 if len > 0 {
-                    OsString::from_wide(&name[..len as usize])
-                        .to_string_lossy()
-                        .to_string()
+                    Some(
+                        OsString::from_wide(&name[..len as usize])
+                            .to_string_lossy()
+                            .to_string(),
+                    )
                 } else {
-                    "Unknown".to_string()
+                    None
                 }
             } else {
-                "Unknown".to_string()
+                None
+            };
+
+            if let Some(n) = name_opt {
+                n
+            } else {
+                // 方法二：回退完整权限（覆盖 GetModuleBaseNameW 需要 PROCESS_VM_READ 的场景）
+                let handle2 = OpenProcess(PROCESS_QUERY_INFORMATION | 0x0010, 0, pid);
+                let name_opt2 = if !handle2.is_null() {
+                    let mut name: [u16; 256] = [0; 256];
+                    let len =
+                        GetModuleBaseNameW(handle2, std::ptr::null_mut(), name.as_mut_ptr(), 256);
+                    CloseHandle(handle2);
+                    if len > 0 {
+                        Some(
+                            OsString::from_wide(&name[..len as usize])
+                                .to_string_lossy()
+                                .to_string(),
+                        )
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                if let Some(n) = name_opt2 {
+                    n
+                } else {
+                    // 方法三：QueryFullProcessImageNameW，只需低权限，返回完整路径取文件名
+                    get_process_name_by_image(pid).unwrap_or_else(|| {
+                        // 方法四：从窗口标题最后一段推断（如 "文件名 - 应用名" 取最后段）
+                        // 避免进程全部落入 Unknown 导致时长无法区分统计
+                        if !window_title.is_empty() {
+                            window_title
+                                .split(" - ")
+                                .last()
+                                .map(|s| s.trim().to_string())
+                                .filter(|s| !s.is_empty() && s.len() < 40)
+                                .unwrap_or_else(|| "Unknown".to_string())
+                        } else {
+                            "Unknown".to_string()
+                        }
+                    })
+                }
             }
         } else {
             "Unknown".to_string()
@@ -76,6 +127,45 @@ pub fn get_active_window() -> Result<ActiveWindow> {
             window_title,
             browser_url,
         })
+    }
+}
+
+/// 通过 QueryFullProcessImageNameW 获取进程可执行文件名，仅需低权限
+/// 返回 exe 文件名（不含路径，如 "WINWORD.EXE"），作为 GetModuleBaseNameW 的备用
+#[cfg(target_os = "windows")]
+fn get_process_name_by_image(pid: u32) -> Option<String> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use winapi::um::handleapi::CloseHandle;
+    use winapi::um::processthreadsapi::OpenProcess;
+    use winapi::um::winbase::QueryFullProcessImageNameW;
+
+    unsafe {
+        // 只需 PROCESS_QUERY_LIMITED_INFORMATION，对 UAC 保护进程也有效
+        let handle = OpenProcess(0x1000, 0, pid);
+        if handle.is_null() {
+            return None;
+        }
+
+        let mut buf: [u16; 512] = [0; 512];
+        let mut size: u32 = 512;
+        let ok = QueryFullProcessImageNameW(handle, 0, buf.as_mut_ptr(), &mut size);
+        CloseHandle(handle);
+
+        if ok == 0 || size == 0 {
+            return None;
+        }
+
+        // 返回完整路径（如 C:\...\WINWORD.EXE），提取最后一段作为进程名
+        let full_path = OsString::from_wide(&buf[..size as usize])
+            .to_string_lossy()
+            .to_string();
+
+        full_path
+            .split('\\')
+            .last()
+            .map(|s| s.to_string())
+            .filter(|s| !s.is_empty())
     }
 }
 

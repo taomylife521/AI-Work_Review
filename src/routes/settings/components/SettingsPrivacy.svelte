@@ -299,6 +299,8 @@
             <span class="text-xs text-slate-400">暂无敏感词</span>
           {/if}
         </div>
+        <!-- 敏感词匹配说明 -->
+        <p class="text-xs text-slate-400 mt-2">OCR 识别内容包含该词时自动过滤，不区分大小写</p>
       </div>
 
       <!-- 域名黑名单 -->
@@ -347,6 +349,8 @@
             <span class="text-xs text-slate-400">暂无黑名单域名</span>
           {/if}
         </div>
+        <!-- 域名黑名单格式说明 -->
+        <p class="text-xs text-slate-400 mt-2">填写完整域名如 <code class="bg-slate-100 dark:bg-slate-700 px-1 rounded">example.com</code>，该域名下所有页面均不会被记录</p>
       </div>
     </div>
   </div>
