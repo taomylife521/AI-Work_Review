@@ -22,69 +22,31 @@ impl ScreenLockMonitor {
     }
 
     /// 检查屏幕是否锁定 (Windows)
+    /// 使用 OpenInputDesktop 方式判断：锁屏时系统桌面切换到 Winlogon 桌面，
+    /// 此时当前线程无法打开输入桌面，可靠性远高于 GetForegroundWindow/quser
     #[cfg(target_os = "windows")]
     pub fn is_locked(&self) -> bool {
-        use std::ffi::OsString;
-        use std::os::windows::ffi::OsStringExt;
-        use winapi::um::winuser::{GetForegroundWindow, GetWindowTextW};
+        use winapi::um::winnt::GENERIC_ALL;
+        use winapi::um::winuser::{CloseDesktop, OpenInputDesktop, SwitchDesktop};
 
         unsafe {
-            // 方法1: 检查前台窗口是否为锁屏窗口
-            let hwnd = GetForegroundWindow();
-            if hwnd.is_null() {
-                // 没有前台窗口，可能处于锁屏状态
+            // 尝试打开当前输入桌面
+            // 锁屏时系统会切换到 Winlogon 桌面，当前进程无权限打开，返回 null
+            let desktop = OpenInputDesktop(0, 0, GENERIC_ALL);
+            if desktop.is_null() {
+                // 无法打开输入桌面，说明已经锁屏
+                log::debug!("锁屏检测: OpenInputDesktop 返回 null，判断为锁屏");
                 return true;
             }
 
-            // 获取窗口标题
-            let mut title: [u16; 256] = [0; 256];
-            let len = GetWindowTextW(hwnd, title.as_mut_ptr(), 256);
-            if len > 0 {
-                let window_title = OsString::from_wide(&title[..len as usize])
-                    .to_string_lossy()
-                    .to_lowercase();
+            // 尝试切换到该桌面（如果切换失败，说明是受限的 Winlogon 桌面）
+            let switched = SwitchDesktop(desktop);
+            CloseDesktop(desktop);
 
-                // 检查是否为锁屏相关窗口
-                if window_title.contains("windows 登录")
-                    || window_title.contains("windows security")
-                    || window_title.contains("lock screen")
-                    || window_title.contains("锁屏")
-                {
-                    return true;
-                }
-            }
-        }
-
-        // 方法2: 检查工作站锁定状态
-        {
-            use std::os::windows::process::CommandExt;
-            use std::process::Command;
-
-            // CREATE_NO_WINDOW 标志，防止弹出黑色控制台窗口
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-            // 使用 PowerShell 检查会话锁定状态
-            let output = Command::new("powershell")
-                .args([
-                    "-NoProfile",
-                    "-Command",
-                    r#"
-                    $query = quser 2>$null
-                    if ($query -match 'Disc') { 
-                        'locked' 
-                    } else { 
-                        'unlocked' 
-                    }
-                    "#,
-                ])
-                .creation_flags(CREATE_NO_WINDOW)
-                .output();
-
-            if let Ok(out) = output {
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                if stdout.trim() == "locked" {
-                    return true;
-                }
+            if switched == 0 {
+                // SwitchDesktop 失败，说明是锁屏桌面
+                log::debug!("锁屏检测: SwitchDesktop 失败，判断为锁屏");
+                return true;
             }
         }
 
