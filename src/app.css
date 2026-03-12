@@ -110,10 +110,10 @@
   @apply w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200;
 }
 
-/* 应用图标样式 - 优化清晰度 */
+/* 应用图标样式 - 高清渲染 */
 .app-icon {
+  image-rendering: auto;
   image-rendering: -webkit-optimize-contrast;
-  image-rendering: crisp-edges;
   object-fit: contain;
 }
 

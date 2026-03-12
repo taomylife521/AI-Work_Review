@@ -1068,6 +1068,21 @@ pub async fn is_screen_locked() -> Result<bool, AppError> {
     Ok(monitor.is_locked())
 }
 
+/// 检查 macOS 系统权限状态（屏幕录制 + 辅助功能）
+/// Windows 上始终返回全部已授权
+#[tauri::command]
+pub async fn check_permissions() -> Result<serde_json::Value, AppError> {
+    let screen_capture = crate::screenshot::has_screen_capture_permission();
+    let accessibility = crate::screenshot::has_accessibility_permission(false);
+
+    Ok(serde_json::json!({
+        "screen_capture": screen_capture,
+        "accessibility": accessibility,
+        "all_granted": screen_capture && accessibility,
+        "platform": std::env::consts::OS,
+    }))
+}
+
 /// 检查是否在工作时间内
 #[tauri::command]
 pub async fn is_work_time(state: State<'_, Arc<Mutex<AppState>>>) -> Result<bool, AppError> {
@@ -1440,48 +1455,133 @@ async fn get_app_icon_impl(app_name: &str) -> Result<String, AppError> {
     Ok(String::new())
 }
 
-/// Windows 实现：使用 Shell API 获取应用图标
+/// Windows 实现：使用 Shell API 获取高清应用图标
+/// 优先提取 256x256 (JUMBO) 图标，降级到 48x48 (EXTRALARGE)，最后回退到 32x32
+/// 带磁盘缓存，避免重复启动 PowerShell
 #[cfg(target_os = "windows")]
 async fn get_app_icon_impl(app_name: &str) -> Result<String, AppError> {
     use std::os::windows::process::CommandExt;
-    use std::path::Path;
     use std::process::Command;
 
-    // CREATE_NO_WINDOW 标志，防止弹出黑色控制台窗口
+    // CREATE_NO_WINDOW 标志
     const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-    // 首先尝试在常见路径中查找应用
-    let possible_paths = [
-        format!("C:\\Program Files\\{}\\{}.exe", app_name, app_name),
-        format!("C:\\Program Files (x86)\\{}\\{}.exe", app_name, app_name),
-    ];
+    // 磁盘缓存：检查是否已有缓存
+    let cache_dir = std::env::temp_dir().join("work_review_icons");
+    let _ = std::fs::create_dir_all(&cache_dir);
+    let safe_name = app_name.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
+    let cache_file = cache_dir.join(format!("{safe_name}.b64"));
 
-    // 使用 PowerShell 获取应用图标
-    // 更可靠的方式是从可执行文件提取图标
+    if cache_file.exists() {
+        if let Ok(metadata) = std::fs::metadata(&cache_file) {
+            // 缓存有效期 24 小时
+            if let Ok(modified) = metadata.modified() {
+                if modified.elapsed().unwrap_or_default().as_secs() < 86400 {
+                    if let Ok(cached) = std::fs::read_to_string(&cache_file) {
+                        if cached.len() > 100 {
+                            return Ok(cached);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // PowerShell 脚本：使用 SHGetImageList 提取 JUMBO (256x256) 图标
+    // 降级链：JUMBO → EXTRALARGE (48x48) → ExtractAssociatedIcon (32x32)
     let ps_script = format!(
         r#"
-        Add-Type -AssemblyName System.Drawing
-        $app = Get-Process -Name '{}' -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($app -and $app.Path) {{
-            $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($app.Path)
-            if ($icon) {{
-                $srcBitmap = $icon.ToBitmap()
-                # 缩放到 128x128 提高清晰度
-                $destBitmap = New-Object System.Drawing.Bitmap(128, 128)
-                $graphics = [System.Drawing.Graphics]::FromImage($destBitmap)
-                $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-                $graphics.DrawImage($srcBitmap, 0, 0, 128, 128)
-                $graphics.Dispose()
-                $ms = New-Object System.IO.MemoryStream
-                $destBitmap.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
-                $bytes = $ms.ToArray()
-                $destBitmap.Dispose()
-                $srcBitmap.Dispose()
-                [Convert]::ToBase64String($bytes)
+Add-Type -AssemblyName System.Drawing
+Add-Type @'
+using System;
+using System.Drawing;
+using System.Runtime.InteropServices;
+
+public class JumboIconExtractor {{
+    [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
+    struct SHFILEINFO {{
+        public IntPtr hIcon;
+        public int iIcon;
+        public uint dwAttributes;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=260)]
+        public string szDisplayName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=80)]
+        public string szTypeName;
+    }}
+
+    [DllImport("shell32.dll", CharSet=CharSet.Unicode)]
+    static extern IntPtr SHGetFileInfo(string pszPath, uint dwFileAttributes,
+        ref SHFILEINFO psfi, uint cbFileInfo, uint uFlags);
+
+    [DllImport("shell32.dll")]
+    static extern int SHGetImageList(int iImageList, ref Guid riid, out IntPtr ppv);
+
+    [DllImport("comctl32.dll")]
+    static extern IntPtr ImageList_GetIcon(IntPtr himl, int i, int flags);
+
+    [DllImport("user32.dll")]
+    static extern bool DestroyIcon(IntPtr hIcon);
+
+    // 从 ImageList 提取指定大小的图标
+    static Icon GetIconFromList(string path, int listType) {{
+        SHFILEINFO shfi = new SHFILEINFO();
+        uint cbSize = (uint)Marshal.SizeOf(typeof(SHFILEINFO));
+        SHGetFileInfo(path, 0, ref shfi, cbSize, 0x4000); // SHGFI_SYSICONINDEX
+
+        Guid iid = new Guid("46EB5926-582E-4017-9FDF-E8998DAA0950"); // IImageList
+        IntPtr hImgList;
+        int hr = SHGetImageList(listType, ref iid, out hImgList);
+        if (hr != 0 || hImgList == IntPtr.Zero) return null;
+
+        IntPtr hIcon = ImageList_GetIcon(hImgList, shfi.iIcon, 0);
+        if (hIcon == IntPtr.Zero) return null;
+
+        Icon icon = (Icon)Icon.FromHandle(hIcon).Clone();
+        DestroyIcon(hIcon);
+        return icon;
+    }}
+
+    public static string Extract(string path) {{
+        // 尝试 JUMBO (256x256) — listType=4
+        Icon icon = GetIconFromList(path, 4);
+
+        // 降级到 EXTRALARGE (48x48) — listType=2
+        if (icon == null || icon.Width < 48)
+            icon = GetIconFromList(path, 2);
+
+        // 最终回退到 ExtractAssociatedIcon (32x32)
+        if (icon == null || icon.Width < 32)
+            icon = Icon.ExtractAssociatedIcon(path);
+
+        if (icon == null) return "";
+
+        Bitmap bmp = icon.ToBitmap();
+        // 如果图标大于 128，缩放到 128 节省传输大小；否则保持原始尺寸
+        Bitmap output;
+        if (bmp.Width > 128) {{
+            output = new Bitmap(128, 128);
+            using (Graphics g = Graphics.FromImage(output)) {{
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                g.DrawImage(bmp, 0, 0, 128, 128);
             }}
+        }} else {{
+            output = bmp;
         }}
-        "#,
-        app_name.replace(".exe", "")
+
+        using (var ms = new System.IO.MemoryStream()) {{
+            output.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+            return Convert.ToBase64String(ms.ToArray());
+        }}
+    }}
+}}
+'@
+
+$app = Get-Process -Name '{}' -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($app -and $app.Path) {{
+    [JumboIconExtractor]::Extract($app.Path)
+}}
+"#,
+        app_name.replace(".exe", "").replace('\'', "")
     );
 
     let output = Command::new("powershell")
@@ -1493,6 +1593,8 @@ async fn get_app_icon_impl(app_name: &str) -> Result<String, AppError> {
     if output.status.success() {
         let base64_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if !base64_str.is_empty() && base64_str.len() > 100 {
+            // 缓存到磁盘
+            let _ = std::fs::write(&cache_file, &base64_str);
             return Ok(base64_str);
         }
     }

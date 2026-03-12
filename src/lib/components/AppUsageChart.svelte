@@ -11,6 +11,10 @@
   import { onDestroy } from 'svelte';
   onDestroy(() => unsubIcons());
 
+  // 展开/收起状态
+  const DEFAULT_COUNT = 8;
+  let expanded = false;
+
   // 格式化时长
   function formatDuration(seconds) {
     const hours = Math.floor(seconds / 3600);
@@ -28,16 +32,17 @@
 
   // 数据变化时预加载图标
   $: if (data) {
-    preloadAppIcons(data.slice(0, 8).map(a => a.app_name), invoke);
+    preloadAppIcons(displayApps.map(a => a.app_name), invoke);
   }
 
-  // 计算最大时长用于计算比例
-  $: topApps = data.slice(0, 8);
-  $: maxDuration = topApps.length > 0 ? Math.max(...topApps.map(a => a.duration)) : 1;
+  // 展开时显示全部，收起时显示前 8
+  $: displayApps = expanded ? data : data.slice(0, DEFAULT_COUNT);
+  $: hasMore = data.length > DEFAULT_COUNT;
+  $: maxDuration = displayApps.length > 0 ? Math.max(...displayApps.map(a => a.duration)) : 1;
 </script>
 
 <div class="space-y-2.5">
-  {#each topApps as app, i}
+  {#each displayApps as app, i}
     <div class="flex items-center gap-2.5">
       <!-- 应用图标或序号 -->
       <div class="w-6 h-6 flex-shrink-0 flex items-center justify-center">
@@ -60,4 +65,13 @@
       <span class="text-xs text-slate-500 dark:text-slate-400 w-14 text-right flex-shrink-0">{formatDuration(app.duration)}</span>
     </div>
   {/each}
+
+  {#if hasMore}
+    <button
+      class="w-full text-center text-xs text-slate-400 hover:text-primary-500 dark:text-slate-500 dark:hover:text-primary-400 py-1.5 transition-colors"
+      on:click={() => expanded = !expanded}
+    >
+      {expanded ? '收起' : `展开全部 (${data.length} 个应用)`}
+    </button>
+  {/if}
 </div>

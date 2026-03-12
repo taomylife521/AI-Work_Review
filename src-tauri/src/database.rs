@@ -1,9 +1,28 @@
 use crate::error::{AppError, Result};
-use chrono::Local;
+use chrono::{Local, NaiveDateTime, TimeZone, MappedLocalTime};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Mutex;
+
+/// 安全地将 NaiveDateTime 转换为本地时间戳
+/// 在 DST 跳变时不会 panic：
+/// - Ambiguous（秋季回拨）：取较早的时间
+/// - None（春季前跳）：向前偏移1小时后重试
+fn safe_local_timestamp(ndt: NaiveDateTime) -> i64 {
+    match Local.from_local_datetime(&ndt) {
+        MappedLocalTime::Single(dt) => dt.timestamp(),
+        MappedLocalTime::Ambiguous(dt, _) => dt.timestamp(),
+        MappedLocalTime::None => {
+            // DST 跳变导致该本地时间不存在，向前偏移1小时
+            let shifted = ndt + chrono::Duration::hours(1);
+            Local.from_local_datetime(&shifted)
+                .earliest()
+                .map(|dt| dt.timestamp())
+                .unwrap_or_else(|| ndt.and_utc().timestamp())
+        }
+    }
+}
 
 /// 活动记录
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -313,19 +332,15 @@ impl Database {
         // 获取今天的开始时间戳（当天 00:00:00）
         let today_start = {
             let now = chrono::Local::now();
-            now.date_naive()
-                .and_hms_opt(0, 0, 0)
-                .unwrap()
-                .and_local_timezone(chrono::Local)
-                .unwrap()
-                .timestamp()
+            let ndt = now.date_naive().and_hms_opt(0, 0, 0).unwrap();
+            safe_local_timestamp(ndt)
         };
 
         let mut stmt = conn.prepare(
-            "SELECT id, timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url 
-             FROM activities 
+            "SELECT id, timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url
+             FROM activities
              WHERE app_name = ?1 AND timestamp >= ?2
-             ORDER BY id DESC 
+             ORDER BY id DESC
              LIMIT 1"
         )?;
 
@@ -356,12 +371,8 @@ impl Database {
 
         let today_start = {
             let now = chrono::Local::now();
-            now.date_naive()
-                .and_hms_opt(0, 0, 0)
-                .unwrap()
-                .and_local_timezone(chrono::Local)
-                .unwrap()
-                .timestamp()
+            let ndt = now.date_naive().and_hms_opt(0, 0, 0).unwrap();
+            safe_local_timestamp(ndt)
         };
 
         // 规范化输入 URL
@@ -554,17 +565,12 @@ impl Database {
         let date_parsed = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
             .map_err(|e| AppError::Config(e.to_string()))?;
 
-        let start_ts = date_parsed
-            .and_hms_opt(0, 0, 0)
-            .unwrap()
-            .and_local_timezone(chrono::Local)
-            .unwrap()
-            .timestamp();
+        let start_ts = safe_local_timestamp(date_parsed.and_hms_opt(0, 0, 0).unwrap());
         let end_ts = start_ts + 86400;
 
         // 获取当天所有活动
         let mut stmt = conn.prepare(
-            "SELECT id, app_name, browser_url, duration FROM activities 
+            "SELECT id, app_name, browser_url, duration FROM activities
              WHERE timestamp >= ?1 AND timestamp < ?2",
         )?;
 
@@ -678,27 +684,14 @@ impl Database {
         let date_parsed = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
             .map_err(|e| AppError::Config(e.to_string()))?;
 
-        let start_ts = date_parsed
-            .and_hms_opt(0, 0, 0)
-            .unwrap()
-            .and_local_timezone(Local)
-            .unwrap()
-            .timestamp();
+        let start_ts = safe_local_timestamp(date_parsed.and_hms_opt(0, 0, 0).unwrap());
         let end_ts = start_ts + 86400;
 
-        // 计算工作时间范围的时间戳
-        let work_start_ts = date_parsed
-            .and_hms_opt(work_start_hour as u32, 0, 0)
-            .unwrap()
-            .and_local_timezone(Local)
-            .unwrap()
-            .timestamp();
-        let work_end_ts = date_parsed
-            .and_hms_opt(work_end_hour as u32, 0, 0)
-            .unwrap()
-            .and_local_timezone(Local)
-            .unwrap()
-            .timestamp();
+        // 计算工作时间范围的时间戳（clamp 到合法小时范围）
+        let ws = (work_start_hour as u32).min(23);
+        let we = (work_end_hour as u32).min(23);
+        let work_start_ts = safe_local_timestamp(date_parsed.and_hms_opt(ws, 0, 0).unwrap());
+        let work_end_ts = safe_local_timestamp(date_parsed.and_hms_opt(we, 0, 0).unwrap());
 
         // 获取总时长和截图数
         let (total_duration, screenshot_count): (i64, i64) = conn.query_row(
@@ -933,13 +926,9 @@ impl Database {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
 
-        let start_ts = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
-            .map_err(|e| AppError::Config(e.to_string()))?
-            .and_hms_opt(0, 0, 0)
-            .unwrap()
-            .and_local_timezone(Local)
-            .unwrap()
-            .timestamp();
+        let date_parsed = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+            .map_err(|e| AppError::Config(e.to_string()))?;
+        let start_ts = safe_local_timestamp(date_parsed.and_hms_opt(0, 0, 0).unwrap());
         let end_ts = start_ts + 86400;
 
         let limit_val = limit.unwrap_or(1000);
@@ -1044,13 +1033,11 @@ impl Database {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
 
-        let start_ts = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
-            .map_err(|e| AppError::Config(e.to_string()))?
-            .and_hms_opt(0, 0, 0)
-            .unwrap()
-            .and_local_timezone(Local)
-            .unwrap()
-            .timestamp();
+        let start_ts = {
+            let date_parsed = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+                .map_err(|e| AppError::Config(e.to_string()))?;
+            safe_local_timestamp(date_parsed.and_hms_opt(0, 0, 0).unwrap())
+        };
         let end_ts = start_ts + 86400;
 
         let mut stmt = conn.prepare(
@@ -1129,13 +1116,10 @@ impl Database {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
 
-        let start_ts = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
-            .map_err(|e| AppError::Config(e.to_string()))?
-            .and_hms_opt(hour as u32, 0, 0)
-            .unwrap()
-            .and_local_timezone(Local)
-            .unwrap()
-            .timestamp();
+        let date_parsed = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+            .map_err(|e| AppError::Config(e.to_string()))?;
+        let h = (hour as u32).min(23);
+        let start_ts = safe_local_timestamp(date_parsed.and_hms_opt(h, 0, 0).unwrap());
         let end_ts = start_ts + 3600; // 1小时
 
         let mut stmt = conn.prepare(

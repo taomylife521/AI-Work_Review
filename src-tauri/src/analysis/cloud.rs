@@ -121,10 +121,10 @@ impl CloudAnalyzer {
         );
 
         let response = self.client
-            .post("https://api.openai.com/v1/chat/completions")
+            .post(format!("https://api.openai.com/v1/chat/completions"))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&json!({
-                "model": "gpt-4o-mini",
+                "model": self.model,
                 "messages": [
                     {
                         "role": "system",

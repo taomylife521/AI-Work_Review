@@ -1,4 +1,4 @@
-use crate::error::{AppError, Result};
+use crate::error::Result;
 
 /// 活动窗口信息
 #[derive(Debug, Clone)]
@@ -171,10 +171,29 @@ fn get_process_name_by_image(pid: u32) -> Option<String> {
 
 /// 从窗口标题提取浏览器 URL (Windows)
 /// 大多数浏览器会在标题栏显示页面标题，部分会包含 URL
+/// 使用缓存避免频繁启动 PowerShell 进程（UI Automation 操作较重）
 #[cfg(target_os = "windows")]
-fn get_browser_url_windows(app_name: &str, _window_title: &str) -> Option<String> {
+fn get_browser_url_windows(app_name: &str, window_title: &str) -> Option<String> {
     use std::os::windows::process::CommandExt;
-    
+    use std::sync::Mutex;
+    use std::time::Instant;
+
+    // 缓存结构：(app_name, window_title, cached_url, fetch_time)
+    static URL_CACHE: std::sync::LazyLock<Mutex<(String, String, Option<String>, Instant)>> =
+        std::sync::LazyLock::new(|| Mutex::new((String::new(), String::new(), None, Instant::now())));
+
+    const CACHE_TTL_SECS: u64 = 30;
+
+    // 检查缓存：同一浏览器+同一标题（标签页未切换）且未过期，直接返回
+    if let Ok(cache) = URL_CACHE.lock() {
+        if cache.0 == app_name
+            && cache.1 == window_title
+            && cache.3.elapsed().as_secs() < CACHE_TTL_SECS
+        {
+            return cache.2.clone();
+        }
+    }
+
     let app_lower = app_name.to_lowercase();
 
     // 检查是否为浏览器进程（包括国产浏览器）
@@ -297,7 +316,7 @@ fn get_browser_url_windows(app_name: &str, _window_title: &str) -> Option<String
         .output()
         .ok()?;
 
-    if output.status.success() {
+    let result = if output.status.success() {
         let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if !url.is_empty() {
             // 如果不是完整 URL，添加 https:// 前缀
@@ -313,7 +332,19 @@ fn get_browser_url_windows(app_name: &str, _window_title: &str) -> Option<String
         }
     } else {
         None
+    };
+
+    // 更新缓存
+    if let Ok(mut cache) = URL_CACHE.lock() {
+        *cache = (
+            app_name.to_string(),
+            window_title.to_string(),
+            result.clone(),
+            Instant::now(),
+        );
     }
+
+    result
 }
 
 /// 获取当前活动窗口信息 (macOS)
@@ -747,18 +778,20 @@ pub fn categorize_app(app_name: &str) -> String {
         return "development".to_string();
     }
 
-    // 浏览器（支持市面上所有主流浏览器）
+    // 浏览器（支持市面上所有主流浏览器，包含 Windows 进程名）
+    // 注意：短名称用精确匹配或 starts_with，避免误匹配系统进程
+    // 例如 "arc" 会匹配 SearchHost（s-e-a-r-c-h），"cent" 会匹配 recent
     if app_lower.contains("chrome")
         || app_lower.contains("firefox")
         || app_lower.contains("safari")
-        || app_lower.contains("edge")
+        || app_lower.contains("msedge")        // Microsoft Edge (进程名 msedge.exe)
         || app_lower.contains("opera")
         || app_lower.contains("brave")
-        || app_lower.contains("arc")
+        || app_lower.starts_with("arc")         // Arc 浏览器（避免匹配 searchhost 等）
         || app_lower.contains("vivaldi")
         || app_lower.contains("chromium")
         || app_lower.contains("orion")
-        || app_lower.contains("zen")
+        || app_lower.starts_with("zen")         // Zen Browser（避免匹配 citizen 等）
         || app_lower.contains("sidekick")
         || app_lower.contains("wavebox")
         || app_lower.contains("maxthon")
@@ -767,9 +800,20 @@ pub fn categorize_app(app_name: &str) -> String {
         || app_lower.contains("tor browser")
         || app_lower.contains("duckduckgo")
         || app_lower.contains("yandex")
-        || app_lower.contains("whale")
+        || app_lower.starts_with("whale")       // Naver Whale（避免误匹配）
         || app_lower.contains("naver")
         || app_lower.contains("uc browser")
+        // Windows 进程名（英文）
+        || app_lower.contains("qqbrowser")       // QQ 浏览器
+        || app_lower.contains("360se")           // 360 安全浏览器
+        || app_lower.contains("360chrome")       // 360 极速浏览器
+        || app_lower.contains("sogouexplorer")   // 搜狗浏览器
+        || app_lower.contains("2345explorer")    // 2345 浏览器
+        || app_lower.contains("liebao")          // 猎豹浏览器
+        || app_lower.contains("theworld")        // 世界之窗
+        || app_lower.contains("centbrowser")     // Cent Browser（精确匹配进程名）
+        || app_lower.contains("iexplore")        // IE 浏览器
+        // 中文显示名（macOS / 窗口标题匹配）
         || app_lower.contains("qq浏览器")
         || app_lower.contains("360浏览器")
         || app_lower.contains("搜狗浏览器")
@@ -777,14 +821,14 @@ pub fn categorize_app(app_name: &str) -> String {
         return "browser".to_string();
     }
 
-    // 通讯工具
+    // 通讯工具（注意：qq 的匹配要排除已被浏览器捕获的 qqbrowser）
     if app_lower.contains("slack")
         || app_lower.contains("teams")
         || app_lower.contains("zoom")
         || app_lower.contains("discord")
         || app_lower.contains("wechat")
         || app_lower.contains("微信")
-        || app_lower.contains("qq")
+        || (app_lower.contains("qq") && !app_lower.contains("qqbrowser"))
         || app_lower.contains("telegram")
         || app_lower.contains("skype")
         || app_lower.contains("dingtalk")

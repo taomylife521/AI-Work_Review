@@ -74,7 +74,6 @@ fn get_data_dir() -> PathBuf {
 async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::WebviewWindow) {
     // ===== 精确时长计算变量 =====
     // 初始化变量
-    let _last_capture_time = std::time::Instant::now();
     let mut last_app_change_time = std::time::Instant::now();
     let mut _last_app_change_wall_time = Local::now(); // 记录墙钟时间用于跨天检测（预留）
     let mut last_app_name: Option<String> = None;
@@ -93,9 +92,11 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
     const MIN_CAPTURE_INTERVAL_MS: u128 = 3000; // 最小截图间隔3秒（防抖）
     const POLL_INTERVAL_SECS: u64 = 5; // 轮询间隔5秒（更精确的时长计算）
 
+    // 锁屏检测器（无内部状态，复用同一实例避免重复分配）
+    let screen_lock_monitor = screen_lock::ScreenLockMonitor::new();
+
     loop {
         // 检测屏幕锁定状态，锁屏时不统计时长
-        let screen_lock_monitor = screen_lock::ScreenLockMonitor::new();
         if screen_lock_monitor.is_locked() {
             log::info!("🔒 屏幕已锁定，暂停活动统计");
             // 重置计时基准，避免解锁后累加锁屏期间的时长
@@ -108,7 +109,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
 
         // 首先检查录制状态并获取配置
         let (should_continue, screenshot_interval) = {
-            let state_guard = state.lock().unwrap();
+            let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
             if !state_guard.is_recording || state_guard.is_paused {
                 (false, 1u64)
             } else {
@@ -135,7 +136,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
 
         // 再次检查状态
         let should_capture = {
-            let state_guard = state.lock().unwrap();
+            let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
             state_guard.is_recording && !state_guard.is_paused
         };
 
@@ -221,7 +222,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
         // 使用距离上次截图的实际经过时间作为本次记录的时长
         // 而非固定的 POLL_INTERVAL_SECS，避免截图间隔大于轮询间隔时丢失时长
         let (privacy_action, duration_to_record) = {
-            let state_guard = state.lock().unwrap();
+            let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
             let action = state_guard
                 .privacy_filter
                 .check_privacy(&active_window.app_name, &active_window.window_title);
@@ -261,7 +262,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
                 };
 
                 // 短暂获取锁写入数据库
-                let state_guard = state.lock().unwrap();
+                let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
                 match state_guard.database.insert_activity(&activity) {
                     Ok(_) => Some(activity),
                     Err(e) => {
@@ -276,7 +277,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
 
                 // 先检查是否有可合并的记录（在截屏之前判断，避免不必要的截图保存）
                 let latest_activity = {
-                    let state_guard = state.lock().unwrap();
+                    let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
                     if let Some(ref url) = active_window.browser_url {
                         if !url.is_empty() {
                             state_guard
@@ -312,7 +313,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
 
                     // 截屏到内存，保存为临时文件供 OCR 使用
                     let screenshot_result = {
-                        let state_guard = state.lock().unwrap();
+                        let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
                         state_guard.screenshot_service.capture()
                     };
 
@@ -343,7 +344,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
                     // 合并记录（不更新 screenshot_path，保留活动创建时的原始截图）
                     // 即使 effective_duration 为 0，也需要更新时间戳以保持记录活跃
                     if effective_duration > 0 {
-                        let state_guard = state.lock().unwrap();
+                        let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
                         match state_guard.database.merge_activity(
                             latest_id,
                             effective_duration,
@@ -370,7 +371,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
                         let temp_path = screenshot.path.clone();
                         let state_clone = state.clone();
                         let data_dir_clone = {
-                            let state_guard = state.lock().unwrap();
+                            let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
                             state_guard.data_dir.clone()
                         };
 
@@ -446,7 +447,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
                 } else {
                     // === 新建路径：正常截屏并保存 ===
                     let screenshot_result = {
-                        let state_guard = state.lock().unwrap();
+                        let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
                         state_guard.screenshot_service.capture()
                     };
 
@@ -471,7 +472,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
                             };
 
                             let (relative_path, data_dir_clone) = {
-                                let state_guard = state.lock().unwrap();
+                                let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
                                 (
                                     state_guard
                                         .screenshot_service
@@ -493,7 +494,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
                             };
 
                             let inserted = {
-                                let state_guard = state.lock().unwrap();
+                                let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
                                 state_guard.database.insert_activity(&activity)
                             };
 
@@ -579,7 +580,7 @@ fn generate_and_save_summary(
     use analysis::hourly::{generate_fallback_summary, HourlyStats};
 
     let activities = {
-        let state_guard = state.lock().unwrap();
+        let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
         state_guard.database.get_hourly_activities(date, hour)
     };
 
@@ -604,7 +605,7 @@ fn generate_and_save_summary(
             };
 
             let save_result = {
-                let state_guard = state.lock().unwrap();
+                let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
                 state_guard.database.save_hourly_summary(&hourly_summary)
             };
 
@@ -661,7 +662,7 @@ async fn hourly_summary_task(state: Arc<Mutex<AppState>>) {
 
         // 检查是否已有摘要
         let should_generate = {
-            let state_guard = state.lock().unwrap();
+            let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
             match state_guard
                 .database
                 .has_hourly_summary(&target_date, target_hour)
@@ -730,16 +731,26 @@ async fn main() {
     // 初始化截屏服务
     let screenshot_service = ScreenshotService::new(&data_dir);
 
-    // macOS: 启动时检查屏幕录制权限
-    // 只在首次启动时触发权限请求，避免重复弹窗
+    // macOS: 启动时检查并请求必要的系统权限
     #[cfg(target_os = "macos")]
     {
+        // 1. 屏幕录制权限（截图功能必需）
         if !screenshot::has_screen_capture_permission() {
-            log::warn!("屏幕录制权限未授权，请在系统设置中授权后重启应用");
-            // 触发一次截屏尝试来请求权限（系统会弹出授权对话框）
-            let _ = screenshot_service.capture();
+            log::warn!("⚠️  屏幕录制权限未授权，正在请求...");
+            log::warn!("   请在「系统设置 → 隐私与安全性 → 屏幕录制」中授权 Work Review，然后重启应用");
+            screenshot::request_screen_capture_permission();
         } else {
-            log::info!("屏幕录制权限已授权");
+            log::info!("✅ 屏幕录制权限已授权");
+        }
+
+        // 2. 辅助功能权限（读取窗口标题、浏览器 URL 必需）
+        if !screenshot::has_accessibility_permission(false) {
+            log::warn!("⚠️  辅助功能权限未授权，正在请求...");
+            log::warn!("   请在「系统设置 → 隐私与安全性 → 辅助功能」中授权 Work Review");
+            // prompt=true 会弹出系统引导对话框
+            screenshot::has_accessibility_permission(true);
+        } else {
+            log::info!("✅ 辅助功能权限已授权");
         }
     }
 
@@ -877,7 +888,7 @@ async fn main() {
 
             // 启动时清理当天的重复记录
             {
-                let state_guard = state.inner().lock().unwrap();
+                let state_guard = state.inner().lock().unwrap_or_else(|e| e.into_inner());
                 let today = chrono::Local::now().format("%Y-%m-%d").to_string();
                 match state_guard.database.cleanup_duplicate_activities(&today) {
                     Ok((deleted, paths)) => {
@@ -948,6 +959,7 @@ async fn main() {
             commands::clear_old_activities,
             commands::get_ocr_log,
             commands::is_screen_locked,
+            commands::check_permissions,
             commands::is_work_time,
             commands::check_ocr_available,
             commands::run_ocr,
@@ -958,7 +970,7 @@ async fn main() {
         ])
         .build(tauri::generate_context!())
         .expect("构建 Tauri 应用时出错")
-        .run(|app_handle, event| match event {
+        .run(|_app_handle, event| match event {
             // 处理 macOS Dock 点击：显示隐藏的窗口（仅 macOS）
             #[cfg(target_os = "macos")]
             tauri::RunEvent::Reopen { has_visible_windows, .. } => {

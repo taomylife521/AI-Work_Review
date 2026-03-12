@@ -46,7 +46,10 @@ impl StorageManager {
         // 1. 清理过期的截图文件
         let mut screenshots_deleted = self.cleanup_old_screenshots()?;
 
-        // 2. 检查存储空间是否超限
+        // 2. 清理过期的 OCR 日志文件
+        let ocr_logs_deleted = self.cleanup_old_ocr_logs()?;
+
+        // 3. 检查存储空间是否超限
         let current_size = self.calculate_storage_size()?;
         let total_size_mb = current_size as f64 / 1024.0 / 1024.0;
 
@@ -56,7 +59,7 @@ impl StorageManager {
         }
 
         log::info!(
-            "存储清理完成: 删除 {screenshots_deleted} 个截图, 当前占用 {total_size_mb:.1} MB"
+            "存储清理完成: 删除 {screenshots_deleted} 个截图目录, {ocr_logs_deleted} 个 OCR 日志, 当前占用 {total_size_mb:.1} MB"
         );
 
         Ok(CleanupResult {
@@ -106,6 +109,44 @@ impl StorageManager {
         Ok(deleted_count)
     }
 
+    /// 清理过期 OCR 日志文件
+    /// 日志文件格式: ocr_logs/YYYY-MM-DD.txt，与截图使用相同的保留天数
+    fn cleanup_old_ocr_logs(&self) -> Result<u32> {
+        let ocr_dir = self.data_dir.join("ocr_logs");
+        if !ocr_dir.exists() {
+            return Ok(0);
+        }
+
+        let cutoff_date = Local::now().date_naive()
+            - Duration::days(self.config.screenshot_retention_days as i64);
+        let mut deleted_count = 0u32;
+
+        for entry in fs::read_dir(&ocr_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if path.is_file() {
+                if let Some(stem) = path.file_stem().and_then(|n| n.to_str()) {
+                    if let Ok(date) = NaiveDate::parse_from_str(stem, "%Y-%m-%d") {
+                        if date < cutoff_date {
+                            match fs::remove_file(&path) {
+                                Ok(_) => {
+                                    deleted_count += 1;
+                                    log::info!("已删除过期 OCR 日志: {stem}.txt");
+                                }
+                                Err(e) => {
+                                    log::warn!("删除 OCR 日志失败 {stem}: {e}");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(deleted_count)
+    }
+
     /// 当存储超限时，删除最旧的数据直到低于限制
     fn cleanup_oldest_until_under_limit(&self) -> Result<u32> {
         let screenshots_dir = self.data_dir.join("screenshots");
@@ -114,6 +155,7 @@ impl StorageManager {
         }
 
         let limit_bytes = self.config.storage_limit_mb as u64 * 1024 * 1024;
+        let mut current_size = self.calculate_storage_size()?;
         let mut deleted_count = 0u32;
 
         // 收集所有日期目录并排序
@@ -132,17 +174,24 @@ impl StorageManager {
         // 按日期升序排序（最旧的在前）
         date_dirs.sort_by_key(|(date, _)| *date);
 
-        // 删除最旧的目录直到低于限制
+        // 删除最旧的目录直到低于限制（使用递减计算避免重复扫描）
         for (date, path) in date_dirs {
-            let current_size = self.calculate_storage_size()?;
             if current_size < limit_bytes {
                 break;
             }
 
+            // 先计算该目录大小，删除后从总量中扣减
+            let dir_size: u64 = walk_dir_recursive(&path)
+                .iter()
+                .filter_map(|p| fs::metadata(p).ok())
+                .map(|m| m.len())
+                .sum();
+
             match fs::remove_dir_all(&path) {
                 Ok(_) => {
                     deleted_count += 1;
-                    log::info!("存储超限，已删除最旧目录: {date}");
+                    current_size = current_size.saturating_sub(dir_size);
+                    log::info!("存储超限，已删除最旧目录: {date} (释放 {:.1} MB)", dir_size as f64 / 1024.0 / 1024.0);
                 }
                 Err(e) => {
                     log::warn!("删除目录失败 {date}: {e}");

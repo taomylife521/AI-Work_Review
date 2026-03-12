@@ -5,26 +5,67 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 /// 检查 macOS 屏幕录制权限（不触发授权弹窗）
+/// 使用 CGPreflightScreenCaptureAccess (macOS 10.15+)
 /// 返回 true 表示已授权，false 表示未授权
 #[cfg(target_os = "macos")]
 pub fn has_screen_capture_permission() -> bool {
-    use std::process::Command;
-    
-    // 使用 screencapture 命令测试权限
-    // 如果没有权限，命令会失败但不会触发授权弹窗
-    let output = Command::new("screencapture")
-        .arg("-x")  // 静音
-        .arg("-c")  // 输出到剪贴板
-        .output();
-    
-    match output {
-        Ok(result) => result.status.success(),
-        Err(_) => false,
+    // CGPreflightScreenCaptureAccess: 仅检查，不弹窗
+    // macOS 10.15+ 提供，10.14 及以下默认返回 true（不需要权限）
+    extern "C" {
+        fn CGPreflightScreenCaptureAccess() -> bool;
+    }
+    unsafe { CGPreflightScreenCaptureAccess() }
+}
+
+/// 请求 macOS 屏幕录制权限（触发系统弹窗引导用户到设置）
+/// 使用 CGRequestScreenCaptureAccess (macOS 10.15+)
+/// 注意：此函数仅触发系统提示，用户需要手动在系统设置中授权后重启应用
+#[cfg(target_os = "macos")]
+pub fn request_screen_capture_permission() {
+    extern "C" {
+        fn CGRequestScreenCaptureAccess() -> bool;
+    }
+    unsafe {
+        CGRequestScreenCaptureAccess();
+    }
+}
+
+/// 检查 macOS 辅助功能（Accessibility）权限
+/// AppleScript 读取窗口标题、浏览器 URL 均需要此权限
+/// prompt=true 时弹出系统授权引导
+#[cfg(target_os = "macos")]
+pub fn has_accessibility_permission(prompt: bool) -> bool {
+    use core_foundation::base::TCFType;
+    use core_foundation::boolean::CFBoolean;
+    use core_foundation::dictionary::CFDictionary;
+    use core_foundation::string::CFString;
+
+    extern "C" {
+        fn AXIsProcessTrustedWithOptions(
+            options: core_foundation::dictionary::CFDictionaryRef,
+        ) -> bool;
+    }
+
+    if prompt {
+        let key = CFString::new("AXTrustedCheckOptionPrompt");
+        let value = CFBoolean::true_value();
+        let options = CFDictionary::from_CFType_pairs(&[(key, value)]);
+        unsafe { AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef()) }
+    } else {
+        let key = CFString::new("AXTrustedCheckOptionPrompt");
+        let value = CFBoolean::false_value();
+        let options = CFDictionary::from_CFType_pairs(&[(key, value)]);
+        unsafe { AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef()) }
     }
 }
 
 #[cfg(not(target_os = "macos"))]
 pub fn has_screen_capture_permission() -> bool {
+    true
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn has_accessibility_permission(_prompt: bool) -> bool {
     true
 }
 

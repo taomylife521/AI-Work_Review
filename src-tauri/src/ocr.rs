@@ -554,7 +554,8 @@ return outputText
 
     /// 检查 PaddleOCR 是否可用
     pub fn check_paddle_available() -> bool {
-        let output = Command::new("python")
+        let python_cmd = Self::get_python_path();
+        let output = Command::new(&python_cmd)
             .args(["-c", "import paddleocr; print('ok')"])
             .output();
 
@@ -662,8 +663,8 @@ pub fn filter_sensitive_text(text: &str) -> String {
         result = re.replace_all(&result, "[身份证号]").to_string();
     }
 
-    // 过滤银行卡号
-    if let Ok(re) = Regex::new(r"\d{16,19}") {
+    // 过滤银行卡号（要求独立出现的 16-19 位数字，或 4 位一组以空格/横线分隔）
+    if let Ok(re) = Regex::new(r"(?<!\d)\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{0,3}(?!\d)") {
         result = re.replace_all(&result, "[银行卡号]").to_string();
     }
 

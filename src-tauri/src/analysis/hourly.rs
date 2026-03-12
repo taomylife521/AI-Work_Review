@@ -121,7 +121,7 @@ impl HourlyStats {
             .collect();
 
         serde_json::json!({
-            "hour": format!("{:02}:00-{:02}:00", self.hour, self.hour + 1),
+            "hour": format!("{:02}:00-{:02}:00", self.hour, (self.hour + 1) % 24),
             "total_duration_min": self.total_duration / 60,
             "activity_count": self.activity_count,
             "main_apps": main_apps,

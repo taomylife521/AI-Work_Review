@@ -36,11 +36,6 @@ impl SummaryAnalyzer {
         }
     }
 
-    /// 判断是否为 Ollama 服务
-    fn is_ollama(&self) -> bool {
-        matches!(self.provider, AiProvider::Ollama)
-    }
-
     /// 使用 Ollama 生成报告
     async fn generate_with_ollama(&self, prompt: &str) -> Result<String> {
         log::info!("使用 Ollama 生成: {} / {}", self.endpoint, self.model);
@@ -111,6 +106,104 @@ impl SummaryAnalyzer {
             .as_str()
             .unwrap_or("")
             .to_string())
+    }
+
+    /// 使用 Anthropic Claude Messages API 生成报告
+    async fn generate_with_claude(&self, prompt: &str) -> Result<String> {
+        log::info!("使用 Claude API 生成: {} / {}", self.endpoint, self.model);
+
+        let api_key = self.api_key.as_deref().unwrap_or("");
+        if api_key.is_empty() {
+            return Err(AppError::Analysis("Claude API Key 未配置".to_string()));
+        }
+
+        let response = self.client
+            .post(format!("{}/messages", self.endpoint))
+            .header("x-api-key", api_key)
+            .header("anthropic-version", "2023-06-01")
+            .header("content-type", "application/json")
+            .json(&json!({
+                "model": self.model,
+                "max_tokens": 5000,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                "system": "你是一个专业的工作效率分析助手，帮助用户分析和总结每日工作。请用中文回答。"
+            }))
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(AppError::Analysis(format!("Claude API 错误: {error_text}")));
+        }
+
+        let result: serde_json::Value = response.json().await?;
+        // Claude 返回格式: {"content": [{"type": "text", "text": "..."}]}
+        Ok(result["content"][0]["text"]
+            .as_str()
+            .unwrap_or("")
+            .to_string())
+    }
+
+    /// 使用 Google Gemini API 生成报告
+    async fn generate_with_gemini(&self, prompt: &str) -> Result<String> {
+        log::info!("使用 Gemini API 生成: {} / {}", self.endpoint, self.model);
+
+        let api_key = self.api_key.as_deref().unwrap_or("");
+        if api_key.is_empty() {
+            return Err(AppError::Analysis("Gemini API Key 未配置".to_string()));
+        }
+
+        // Gemini REST API: POST /v1/models/{model}:generateContent?key={apiKey}
+        let url = format!(
+            "{}/models/{}:generateContent?key={}",
+            self.endpoint, self.model, api_key
+        );
+
+        let response = self.client
+            .post(&url)
+            .json(&json!({
+                "contents": [{
+                    "parts": [{
+                        "text": format!("你是一个专业的工作效率分析助手，帮助用户分析和总结每日工作。请用中文回答。\n\n{}", prompt)
+                    }]
+                }],
+                "generationConfig": {
+                    "temperature": 0.2,
+                    "maxOutputTokens": 5000
+                }
+            }))
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(AppError::Analysis(format!("Gemini API 错误: {error_text}")));
+        }
+
+        let result: serde_json::Value = response.json().await?;
+        // Gemini 返回格式: {"candidates": [{"content": {"parts": [{"text": "..."}]}}]}
+        Ok(result["candidates"][0]["content"]["parts"][0]["text"]
+            .as_str()
+            .unwrap_or("")
+            .to_string())
+    }
+
+    /// 根据提供商调用对应的 AI API
+    async fn generate_ai_content(&self, prompt: &str) -> Result<String> {
+        match self.provider {
+            AiProvider::Ollama => self.generate_with_ollama(prompt).await,
+            AiProvider::Claude => self.generate_with_claude(prompt).await,
+            AiProvider::Gemini => self.generate_with_gemini(prompt).await,
+            _ => {
+                // OpenAI 及所有兼容 API（DeepSeek、Qwen、Zhipu、Moonshot、Doubao、SiliconFlow）
+                self.generate_with_openai_compatible(prompt).await
+            }
+        }
     }
 
     /// 提取活动关键词（从窗口标题和 OCR 文本）
@@ -184,7 +277,7 @@ impl SummaryAnalyzer {
             prompt.push_str(&format!(
                 "\n### {:02}:00-{:02}:00（{}分钟）\n{}\n主要应用：{}\n",
                 summary.hour,
-                summary.hour + 1,
+                (summary.hour + 1) % 24,
                 summary.total_duration / 60,
                 summary.summary,
                 summary.main_apps
@@ -407,21 +500,11 @@ impl Analyzer for SummaryAnalyzer {
         );
 
         // 调用 AI
-        let ai_content = if self.is_ollama() {
-            match self.generate_with_ollama(&prompt).await {
-                Ok(content) => content.trim().to_string(),
-                Err(e) => {
-                    log::warn!("Ollama 生成失败: {e}");
-                    self.generate_fallback_ai_content(&[], &apps_list)
-                }
-            }
-        } else {
-            match self.generate_with_openai_compatible(&prompt).await {
-                Ok(content) => content.trim().to_string(),
-                Err(e) => {
-                    log::warn!("API 生成失败: {e}");
-                    self.generate_fallback_ai_content(&[], &apps_list)
-                }
+        let ai_content = match self.generate_ai_content(&prompt).await {
+            Ok(content) => content.trim().to_string(),
+            Err(e) => {
+                log::warn!("AI 生成失败: {e}");
+                self.generate_fallback_ai_content(&[], &apps_list)
             }
         };
 
