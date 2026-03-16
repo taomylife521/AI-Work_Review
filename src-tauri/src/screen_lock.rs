@@ -59,6 +59,14 @@ impl ScreenLockMonitor {
     pub fn is_locked(&self) -> bool {
         use std::process::Command;
 
+        // 方法0 (最可靠): CGSessionCopyCurrentDictionary
+        // 返回当前登录会话字典，包含 CGSSessionScreenIsLocked 键
+        // 锁屏、睡眠、Power Nap 唤醒等场景均能准确检测
+        if Self::is_session_locked() {
+            log::debug!("锁屏检测: CGSession 报告屏幕已锁定");
+            return true;
+        }
+
         // 方法1: 检查是否有屏幕保护程序运行
         let output = Command::new("pgrep")
             .args(["-x", "ScreenSaverEngine"])
@@ -117,6 +125,48 @@ impl ScreenLockMonitor {
         }
 
         false
+    }
+
+    /// macOS: 通过 CGSessionCopyCurrentDictionary 检测锁屏
+    /// 这是最可靠的方式，在 Power Nap 唤醒、合盖睡眠等场景均可准确检测
+    #[cfg(target_os = "macos")]
+    fn is_session_locked() -> bool {
+        use core_foundation::base::{CFRelease, CFTypeRef, TCFType};
+        use core_foundation::boolean::CFBoolean;
+        use core_foundation::dictionary::CFDictionaryRef;
+        use core_foundation::string::CFString;
+
+        #[link(name = "ApplicationServices", kind = "framework")]
+        extern "C" {
+            fn CGSessionCopyCurrentDictionary() -> CFDictionaryRef;
+        }
+
+        unsafe {
+            let dict = CGSessionCopyCurrentDictionary();
+            if dict.is_null() {
+                // 无法获取会话信息（可能在睡眠或无用户登录），视为锁定
+                return true;
+            }
+
+            let key = CFString::new("CGSSessionScreenIsLocked");
+            let mut value_ref: CFTypeRef = std::ptr::null();
+            let found = core_foundation::dictionary::CFDictionaryGetValueIfPresent(
+                dict,
+                key.as_CFTypeRef() as *const _,
+                &mut value_ref,
+            );
+
+            let locked = if found != 0 && !value_ref.is_null() {
+                // 值是 CFBoolean，检查是否为 true
+                let cf_bool = CFBoolean::wrap_under_get_rule(value_ref as _);
+                cf_bool == CFBoolean::true_value()
+            } else {
+                false
+            };
+
+            CFRelease(dict as _);
+            locked
+        }
     }
 
     /// 检查屏幕是否锁定 (其他平台)

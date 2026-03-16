@@ -156,7 +156,8 @@ pub fn generate_fallback_summary(stats: &HourlyStats) -> String {
     }
 
     let apps_str = main_apps.join("、");
-    let duration_min = stats.total_duration / 60;
+    // 向上取整，与前端 Math.round() 保持一致，避免 "1分钟" vs "0分钟" 的矛盾
+    let duration_min = (stats.total_duration + 59) / 60;
 
     let mut summary = format!("使用 {apps_str} 等应用 {duration_min}分钟");
 
