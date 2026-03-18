@@ -227,14 +227,21 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
         // 保存 app_name 副本供浮动窗口检测使用（在 move 之前）
         let frontmost_app_name = active_window.app_name.clone();
 
-        // 更新上一个应用的信息（无论是否截图）
+        if !should_take_screenshot {
+            // 如果是因为冷却时间未到而没有截图，但应用/标签页实际上已经变化了
+            // 那么我们**不要**更新 _last_* 变量，这样下一个轮询周期 app_changed 仍然为 true
+            if !app_changed {
+                last_app_name = Some(active_window.app_name.clone());
+                _last_app_window_title = Some(active_window.window_title.clone());
+                _last_browser_url = active_window.browser_url.clone();
+            }
+            continue;
+        }
+
+        // 取决定截图后，才更新上一个应用的信息
         last_app_name = Some(active_window.app_name.clone());
         _last_app_window_title = Some(active_window.window_title.clone());
         _last_browser_url = active_window.browser_url.clone();
-
-        if !should_take_screenshot {
-            continue;
-        }
 
         // 更新截图时间
         last_capture_time = std::time::Instant::now();
@@ -353,8 +360,23 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
                 // 时间间隔超过 10 分钟也不合并：上午/下午用同一个 app 属于不同工作段
                 const MERGE_GAP_SECS: i64 = 600;
                 let is_merge = if let Some(ref latest) = latest_activity {
-                    active_window.app_name != "Unknown"
-                        && (current_timestamp - latest.timestamp) <= MERGE_GAP_SECS
+                    let mut merge = active_window.app_name != "Unknown"
+                        && (current_timestamp - latest.timestamp) <= MERGE_GAP_SECS;
+                        
+                    // 如果由于某种原因 browser_url 获取失败，但它确实是一个浏览器
+                    // 我们必须强制让 window_title 完全相同才能合并，否则不同标签页的切换会被死死合并成一条记录。
+                    if merge && active_window.browser_url.is_none() {
+                        let lower_name = active_window.app_name.to_lowercase();
+                        let is_browser = lower_name.contains("chrome") || lower_name.contains("msedge") 
+                            || lower_name.contains("safari") || lower_name.contains("firefox")
+                            || lower_name.contains("browser") || lower_name.contains("explorer");
+                        
+                        if is_browser && latest.window_title != active_window.window_title {
+                            merge = false;
+                        }
+                    }
+                    
+                    merge
                 } else {
                     false
                 };

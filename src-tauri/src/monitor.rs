@@ -295,22 +295,49 @@ fn get_url_via_uiautomation(hwnd: isize) -> Option<String> {
     // Handle 内部字段在 0.24.4 变为私有，改用 From trait 构造
     let window_element = automation.element_from_handle(Handle::from(hwnd)).ok()?;
 
-    // 使用 UIMatcher 查找浏览器窗口中的 Edit 控件（地址栏）
-    let matcher = automation
-        .create_matcher()
-        .from(window_element)
-        .control_type(ControlType::Edit)
-        .timeout(1000);
+    // 搜寻 ControlType::Edit 和 ControlType::Document
+    // 在现代 Chromium 浏览器（Windows 11）中，有时地址栏对应的是 Document
+    let mut targets = Vec::new();
+    
+    if let Ok(edits) = automation.create_matcher().from(window_element.clone()).control_type(ControlType::Edit).timeout(500).find_all() {
+        targets.extend(edits);
+    }
+    if let Ok(docs) = automation.create_matcher().from(window_element.clone()).control_type(ControlType::Document).timeout(500).find_all() {
+        targets.extend(docs);
+    }
 
-    let edits = matcher.find_all().ok()?;
-
-    for edit in &edits {
-        // 0.24 移除了 get_value_pattern() 便捷方法，改用泛型 get_pattern 并指定 UIValuePattern
+    for edit in targets {
+        let mut extracted_value = None;
+        
+        // 1. 优先尝试 UIValuePattern
         if let Ok(pattern) = edit.get_pattern::<UIValuePattern>() {
-            let value: String = match pattern.get_value() {
-                Ok(v) => v.trim().to_string(),
-                Err(_) => continue,
-            };
+            if let Ok(v) = pattern.get_value() {
+                extracted_value = Some(v.trim().to_string());
+            }
+        }
+        
+        // 2. 如果没有或者为空，尝试 UILegacyIAccessiblePattern
+        if extracted_value.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+            use uiautomation::patterns::UILegacyIAccessiblePattern;
+            if let Ok(pattern) = edit.get_pattern::<UILegacyIAccessiblePattern>() {
+                if let Ok(v) = pattern.get_value() {
+                    extracted_value = Some(v.trim().to_string());
+                }
+            }
+        }
+        
+        // 3. 作为最后手段，检查控件自身的 Name（有时地址就是 Name）
+        if extracted_value.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+            if let Ok(name) = edit.get_name() {
+                let name = name.trim();
+                // 只有明显是 URL 的才取用
+                if name.starts_with("http://") || name.starts_with("https://") {
+                    extracted_value = Some(name.to_string());
+                }
+            }
+        }
+
+        if let Some(value) = extracted_value {
             if value.is_empty() {
                 continue;
             }
