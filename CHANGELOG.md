@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.12] - 2026-03-18
+
+### 修复
+- 修复了浏览器标签页统计和累计时间错误：现在能够正确追踪同一程序内的标签页URL切换，精确计算时间归属，避免旧标签页的时长误累加问题。
+
+### 新增
+- 支持查询历史日期的日报：界面顶端现已提供日期选择器，可自由翻查并生成过往每一天的历史日报汇总。
+
 ## [1.0.11] - 2026-03-17
 
 ### 新增

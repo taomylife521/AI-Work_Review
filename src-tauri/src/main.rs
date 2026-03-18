@@ -162,8 +162,20 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
         }
 
         // ===== 检测应用切换 =====
+        let url_changed = match (&_last_browser_url, &active_window.browser_url) {
+            (Some(l), Some(r)) => l != r,
+            (None, None) => false,
+            _ => true,
+        };
+        
+        // 只有当两个标题不同时才算切换
+        let title_changed = match (&_last_app_window_title, &active_window.window_title) {
+            (Some(last_title), active_title) => last_title != active_title,
+            (None, _) => true,
+        };
+
         let app_changed = match &last_app_name {
-            Some(last) => last != &active_window.app_name,
+            Some(last) => last != &active_window.app_name || url_changed || title_changed,
             None => true,
         };
         // 保存切换前的应用名，用于时长归属修正

@@ -19,7 +19,7 @@
   let loading = false;
   let generating = false;
   let error = null;
-  let today = getLocalDateString();
+  let selectedDate = getLocalDateString();
   let isYesterdayReport = false; // 标记是否显示的是昨日日报
   let config = null; // 当前配置
 
@@ -47,22 +47,22 @@
     const unsubscribe = cache.subscribe(c => { cacheData = c; });
     unsubscribe();
     
-    if (cacheData.reports[today]?.data) {
-      report = cacheData.reports[today].data;
+    if (cacheData.reports[selectedDate]?.data) {
+      report = cacheData.reports[selectedDate].data;
       isYesterdayReport = false;
       loading = false;
       
       // 缓存有效则直接返回
-      if (cache.isValid(cacheData.reports, today)) {
+      if (cache.isValid(cacheData.reports, selectedDate)) {
         return;
       }
       
       // 后台静默刷新
       try {
-        const savedReport = await invoke('get_saved_report', { date: today });
+        const savedReport = await invoke('get_saved_report', { date: selectedDate });
         if (savedReport) {
           report = savedReport;
-          cache.setReport(today, savedReport);
+          cache.setReport(selectedDate, savedReport);
         }
       } catch (e) {
         console.warn('后台刷新日报失败:', e);
@@ -72,18 +72,26 @@
       loading = true;
       error = null;
       try {
-        const savedReport = await invoke('get_saved_report', { date: today });
+        const savedReport = await invoke('get_saved_report', { date: selectedDate });
         if (savedReport) {
           report = savedReport;
           isYesterdayReport = false;
-          cache.setReport(today, savedReport);
+          cache.setReport(selectedDate, savedReport);
         } else {
-          // 今日无日报，尝试加载昨日日报
-          const yesterday = getYesterdayDateString();
-          const yesterdayReport = await invoke('get_saved_report', { date: yesterday });
-          if (yesterdayReport) {
-            report = yesterdayReport;
-            isYesterdayReport = true;
+          // 如果选择今天且今天无日报，尝试加载昨日日报
+          if (selectedDate === getLocalDateString()) {
+            const yesterday = getYesterdayDateString();
+            const yesterdayReport = await invoke('get_saved_report', { date: yesterday });
+            if (yesterdayReport) {
+              report = yesterdayReport;
+              isYesterdayReport = true;
+            } else {
+              report = null;
+              isYesterdayReport = false;
+            }
+          } else {
+             report = null;
+             isYesterdayReport = false;
           }
         }
       } catch (e) {
@@ -94,14 +102,21 @@
     }
   }
 
+  function handleDateChange() {
+      report = null;
+      isYesterdayReport = false;
+      loadReport();
+  }
+
   async function generateReport(force = true) {
     generating = true;
     error = null;
     try {
-      const content = await invoke('generate_report', { date: today, force });
-      report = { date: today, content, created_at: Date.now() / 1000 };
+      // 只有强制生成的时候才会覆盖已有日报（后端默认规则，这里force指定传入）。
+      const content = await invoke('generate_report', { date: selectedDate, force });
+      report = { date: selectedDate, content, created_at: Date.now() / 1000 };
       isYesterdayReport = false;
-      cache.setReport(today, report);
+      cache.setReport(selectedDate, report);
     } catch (e) {
       error = e.toString();
     } finally {
@@ -127,14 +142,12 @@
     loadReport();
     loadConfig();
     
-    // 每分钟检查一次日期是否变化
+    // 如果当前选中的是今天，跨越午夜时自动更新。
     const timer = setInterval(() => {
         const newToday = getLocalDateString();
-        if (newToday !== today) {
-            today = newToday;
-            report = null; // 清空旧日报
-            isYesterdayReport = false;
-            loadReport();
+        // 这里需要保留跨夜逻辑，如果一直停留在当天并跨夜，可能需要更新
+        if (selectedDate === newToday) {
+            // 目前已经是新的一天，用户正好选了新的一天，不用特殊处理
         }
     }, 60000);
     
@@ -146,9 +159,20 @@
   <!-- 页面标题 -->
   <div class="flex items-center justify-between mb-5">
     <div>
-      <h2 class="text-xl font-bold text-slate-800 dark:text-white">今日日报</h2>
-      <p class="text-sm text-slate-400 dark:text-slate-500 mt-0.5">
-        {formatFullDate()}
+      <div class="flex items-center gap-3">
+        <h2 class="text-xl font-bold text-slate-800 dark:text-white">
+          {selectedDate === getLocalDateString() ? '今日日报' : '历史日报'}
+        </h2>
+        <input 
+          type="date" 
+          max={getLocalDateString()} 
+          bind:value={selectedDate} 
+          on:change={handleDateChange}
+          class="px-2 py-1 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+        />
+      </div>
+      <p class="text-sm text-slate-400 dark:text-slate-500 mt-1">
+        {formatReportDate(selectedDate)}
         {#if config}
           <span class="ml-1.5 px-2 py-0.5 rounded-full text-xs font-medium
             {config.ai_mode === 'summary' ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400'}">
@@ -235,9 +259,11 @@
       <div class="w-16 h-16 rounded-2xl bg-amber-50 dark:bg-amber-950/30 flex items-center justify-center mx-auto mb-5">
         <span class="text-3xl">📝</span>
       </div>
-      <h3 class="text-base font-semibold text-slate-800 dark:text-white mb-2">今日暂无日报</h3>
+      <h3 class="text-base font-semibold text-slate-800 dark:text-white mb-2">
+        {selectedDate === getLocalDateString() ? '今日暂无日报' : `${selectedDate} 暂无日报`}
+      </h3>
       <p class="text-slate-400 text-sm mb-5">
-        AI 将根据今日活动记录生成工作总结
+        AI 将根据当天的活动记录生成工作总结
       </p>
       <button
         class="px-6 py-3 text-sm font-medium rounded-xl bg-amber-500 hover:bg-amber-600 text-white transition-all"
@@ -250,7 +276,7 @@
             生成中...
           </div>
         {:else}
-          ✨ 生成今日日报
+          ✨ 生成{selectedDate === getLocalDateString() ? '今日' : '该日'}日报
         {/if}
       </button>
     </div>
