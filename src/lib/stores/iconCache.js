@@ -5,6 +5,24 @@ import { writable } from 'svelte/store';
 // 模块级缓存对象，不随组件销毁而丢失
 const _iconCache = {};
 const _pendingRequests = {};
+const _cacheKeys = [];
+const MAX_ICON_CACHE = 120;
+
+function touchCacheKey(appName) {
+    const index = _cacheKeys.indexOf(appName);
+    if (index >= 0) {
+        _cacheKeys.splice(index, 1);
+    }
+    _cacheKeys.push(appName);
+}
+
+function pruneCache() {
+    while (_cacheKeys.length > MAX_ICON_CACHE) {
+        const oldest = _cacheKeys.shift();
+        delete _iconCache[oldest];
+        delete _pendingRequests[oldest];
+    }
+}
 
 // 响应式 store，通知 Svelte 更新 UI
 export const appIconStore = writable({});
@@ -25,8 +43,12 @@ export async function loadAppIcon(appName, invoke) {
         } else {
             _iconCache[appName] = null;
         }
+        touchCacheKey(appName);
+        pruneCache();
     } catch {
         _iconCache[appName] = null;
+        touchCacheKey(appName);
+        pruneCache();
     } finally {
         delete _pendingRequests[appName];
         // 更新 store 触发 UI 重新渲染

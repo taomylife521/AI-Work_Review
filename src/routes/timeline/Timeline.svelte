@@ -4,6 +4,7 @@
   import { listen } from '@tauri-apps/api/event';
   import { open } from '@tauri-apps/plugin-shell';
   import { cache } from '../../lib/stores/cache.js';
+  import { resolveAppIconSrc } from '../../lib/utils/appVisuals.js';
 
   // 获取本地日期（避免 UTC 时区问题）
   function getLocalDateString() {
@@ -136,6 +137,10 @@
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return mins > 0 ? `${hours}小时${mins}分` : `${hours}小时`;
+  }
+
+  function getTimelineIconSrc(appName) {
+    return resolveAppIconSrc(appName, appIconCache[appName]);
   }
 
   // 优化窗口标题显示
@@ -419,12 +424,19 @@
   });
 </script>
 
-<div class="px-5 pt-1 pb-5 animate-fadeIn">
+<div class="page-shell">
   <!-- 页面标题 -->
-  <div class="flex items-center justify-between mb-5">
-    <div>
-      <h2 class="text-xl font-bold text-slate-800 dark:text-white">时间线</h2>
-      <p class="text-sm text-slate-400 dark:text-slate-500 mt-0.5">
+  <div class="page-header">
+    <div class="page-title-group">
+      <div class="page-title-badge">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M5 7h14M5 12h9M5 17h14" />
+          <circle cx="17" cy="12" r="2.5" stroke-width="1.8" />
+        </svg>
+      </div>
+      <div class="page-title-copy">
+        <h2>时间线</h2>
+        <p>
         活动记录
         {#if isToday}
           <span class="ml-1.5 inline-flex items-center gap-1.5">
@@ -432,15 +444,16 @@
             <span class="font-mono text-xs text-emerald-600 dark:text-emerald-400">{currentTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
           </span>
         {/if}
-      </p>
+        </p>
+      </div>
     </div>
-    <div class="flex items-center gap-3">
+    <div class="page-toolbar">
       <input
         type="date"
         bind:value={selectedDate}
-        class="px-3 py-2 text-sm rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+        class="page-control-input"
       />
-      <button class="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors" on:click={loadTimeline} title="刷新">
+      <button class="page-control-btn-icon" on:click={loadTimeline} title="刷新">
         <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
         </svg>
@@ -453,16 +466,19 @@
       <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
     </div>
   {:else if error}
-    <div class="card p-6 text-center">
-      <p class="text-red-500">加载失败: {error}</p>
-      <button class="btn btn-primary mt-4" on:click={loadTimeline}>重试</button>
+    <div class="page-banner-error">
+      <div>
+        <p class="font-semibold">加载时间线失败</p>
+        <p class="text-sm mt-1">{error}</p>
+      </div>
+      <button class="page-action-brand" on:click={loadTimeline}>重试</button>
     </div>
   {:else if activities.length === 0}
-    <div class="p-12 rounded-2xl bg-white dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700/60 text-center">
-      <div class="w-14 h-14 rounded-2xl bg-slate-50 dark:bg-slate-700/50 flex items-center justify-center mx-auto mb-4">
+    <div class="empty-state-lg">
+      <div class="empty-state-icon">
         <span class="text-2xl">📝</span>
       </div>
-      <p class="text-slate-400 text-sm">该日期暂无活动记录</p>
+      <p class="empty-state-copy">该日期暂无活动记录</p>
     </div>
   {:else}
     <!-- 统计摘要 -->
@@ -476,7 +492,7 @@
       <!-- 时段摘要链接 -->
         <a
           href="#/timeline/summary"
-          class="px-3 py-1.5 text-xs rounded-lg transition-colors flex items-center gap-1.5 bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300 hover:text-primary-600 dark:hover:text-primary-400"
+          class="page-control-btn"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -491,7 +507,7 @@
         </a>
     </div>
     
-    <div class="card overflow-hidden">
+    <div class="page-card overflow-hidden p-0">
       <!-- 时间线列表 -->
       <div class="divide-y divide-slate-200 dark:divide-slate-700">
         {#each activities as activity, i}
@@ -515,10 +531,10 @@
               {info.color === 'red' ? 'bg-red-100 dark:bg-red-900/30' : ''}
               {info.color === 'gray' ? 'bg-slate-100 dark:bg-slate-700' : ''}
             ">
-              {#if appIconCache[activity.app_name]}
-                <img src={`data:image/png;base64,${appIconCache[activity.app_name]}`} 
-                     alt={activity.app_name} 
-                     class="w-7 h-7 app-icon" />
+              {#if getTimelineIconSrc(activity.app_name)}
+                <img src={getTimelineIconSrc(activity.app_name)}
+                     alt={activity.app_name}
+                     class="w-7 h-7 rounded-md app-icon object-cover" />
               {:else}
                 {info.icon}
               {/if}
@@ -554,7 +570,7 @@
           <button
             on:click={loadMore}
             disabled={loadingMore}
-            class="w-full py-2 flex items-center justify-center gap-2 text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 rounded-lg transition-colors border border-dashed border-slate-300 dark:border-slate-600 hover:border-solid disabled:opacity-50 disabled:cursor-not-allowed"
+            class="w-full min-h-10 py-2 flex items-center justify-center gap-2 text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 rounded-lg transition-colors border border-dashed border-slate-300 dark:border-slate-600 hover:border-solid disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {#if loadingMore}
               <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-slate-500"></div>
@@ -602,10 +618,10 @@
               {info.color === 'red' ? 'bg-red-100 dark:bg-red-900/30' : ''}
               {info.color === 'gray' ? 'bg-slate-100 dark:bg-slate-700' : ''}
             ">
-              {#if appIconCache[selectedActivity.app_name]}
-                <img src={`data:image/png;base64,${appIconCache[selectedActivity.app_name]}`} 
-                     alt={selectedActivity.app_name} 
-                     class="w-9 h-9 app-icon" />
+              {#if getTimelineIconSrc(selectedActivity.app_name)}
+                <img src={getTimelineIconSrc(selectedActivity.app_name)}
+                     alt={selectedActivity.app_name}
+                     class="w-9 h-9 rounded-lg app-icon object-cover" />
               {:else}
                 {info.icon}
               {/if}

@@ -134,18 +134,26 @@
   });
 </script>
 
-<div class="p-5 animate-fadeIn">
-  <div class="flex justify-between items-center mb-5">
-    <div>
-      <h2 class="text-lg font-semibold text-slate-800 dark:text-white">设置</h2>
-      <p class="text-sm text-slate-400 dark:text-slate-500 mt-0.5">应用配置与隐私规则</p>
+<div class="page-shell">
+  <div class="page-header">
+    <div class="page-title-group">
+      <div class="page-title-badge">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        </svg>
+      </div>
+      <div class="page-title-copy">
+        <h2>设置</h2>
+        <p>应用配置与隐私规则</p>
+      </div>
     </div>
 
     <!-- 保存按钮 -->
     <button
       on:click={saveConfig}
       disabled={loading || saving}
-      class="px-4 py-2 text-sm font-medium rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white transition-all flex items-center gap-2 disabled:opacity-50"
+      class="settings-action-primary px-4 rounded-xl"
     >
       {#if saving}
         <div class="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
@@ -164,19 +172,21 @@
       <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
     </div>
   {:else if error}
-    <div class="p-4 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg mb-6">
-      <p class="font-bold">加载配置失败</p>
-      <p class="text-sm">{error}</p>
-      <button on:click={loadConfig} class="mt-2 text-sm underline">重试</button>
+    <div class="page-banner-error mb-6">
+      <div>
+        <p class="font-semibold">加载配置失败</p>
+        <p class="text-sm mt-1">{error}</p>
+      </div>
+      <button on:click={loadConfig} class="page-action-brand">重试</button>
     </div>
   {:else if config}
-    <div class="max-w-2xl">
+    <div class="w-full">
       <!-- 标签栏 -->
-      <div class="flex gap-1 mb-5 p-1 bg-slate-100/50 dark:bg-slate-800/50 rounded-xl">
+      <div class="page-tabs">
         {#each tabs as tab}
           <button
             on:click={() => activeTab = tab.id}
-            class="flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-medium transition-all duration-200
+            class="page-tab-btn
                    {activeTab === tab.id
                      ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}"
@@ -202,9 +212,9 @@
       {#if activeTab === 'general'}
         <SettingsGeneral bind:config on:change={() => {}} />
       {:else if activeTab === 'ai'}
-        <div class="card p-5">
-          <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1">AI 模型配置</h3>
-          <p class="text-xs text-slate-400 dark:text-slate-500 mb-4">配置 AI 模型用于生成工作日报</p>
+        <div class="page-card">
+          <h3 class="settings-card-title">AI 模型配置</h3>
+          <p class="settings-card-desc">配置 AI 模型用于生成工作日报</p>
           <SettingsAI bind:config {providers} on:change={() => {}} />
         </div>
       {:else if activeTab === 'appearance'}

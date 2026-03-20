@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store';
 
-const { subscribe, set } = writable(null);
+const { subscribe, set, update } = writable(null);
 
 let toastId = 0;
 let hideTimer = null;
@@ -10,12 +10,17 @@ export const toast = {
 };
 
 export function showToast(message, type = 'info', duration = 3000) {
+  const normalizedMessage = typeof message === 'string' ? message.trim() : '';
+  if (!normalizedMessage) {
+    return;
+  }
+
   toastId += 1;
   const currentId = toastId;
 
   set({
     id: currentId,
-    message,
+    message: normalizedMessage,
     type,
   });
 
@@ -24,7 +29,7 @@ export function showToast(message, type = 'info', duration = 3000) {
   }
 
   hideTimer = setTimeout(() => {
-    set((current) => (current?.id === currentId ? null : current));
+    update((current) => (current?.id === currentId ? null : current));
     hideTimer = null;
   }, duration);
 }

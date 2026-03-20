@@ -288,11 +288,11 @@
     2. 负责处理窗口拖动 (-webkit-app-region: drag)
     3. 按钮区域排除拖动 (-webkit-app-region: no-drag)
   -->
-  <div class="absolute top-0 left-0 w-full h-8 z-50" style="-webkit-app-region: drag;">
+  <div class="absolute top-0 left-0 w-full h-7 z-50" style="-webkit-app-region: drag;">
     <!-- 仅 Windows/Linux 平台显示自定义窗口控制按钮，macOS 使用原生控件 -->
     {#if platform && platform !== 'macos'}
     <!-- Windows 风格窗口控制按钮 (右上角) -->
-    <div class="absolute right-0 top-0 flex items-stretch h-8">
+    <div class="absolute right-0 top-0 flex items-stretch h-7">
       <!-- Minimize -->
       <button
         on:click={minimizeWindow}
@@ -333,19 +333,15 @@
   </div>
 
   <!-- 左侧边栏 -->
-  <div class="w-56 bg-white/80 dark:bg-slate-900/90 backdrop-blur-xl border-r border-slate-200/50 dark:border-slate-700/50 flex flex-col z-10"
-       class:pt-5={platform === 'macos'}
-       class:pt-2={platform !== 'macos'}>
+  <div class="w-52 bg-white/80 dark:bg-slate-900/90 backdrop-blur-xl border-r border-slate-200/50 dark:border-slate-700/50 flex flex-col pt-1 z-10">
     <Sidebar {isRecording} {isPaused} {theme} on:themeChange={handleThemeChange} />
   </div>
 
   <!-- 右侧主内容区域 -->
-  <div class="flex-1 flex flex-col overflow-hidden z-10"
-       class:pt-8={platform !== 'macos'}>
+  <div class="relative flex-1 flex flex-col overflow-hidden z-10 {platform !== 'macos' ? 'pt-7' : ''}">
     <main class="flex-1 overflow-auto">
       <Router {routes} />
     </main>
+    <Toast />
   </div>
-
-  <Toast />
 </div>

@@ -188,10 +188,10 @@ impl Analyzer for LocalAnalyzer {
         log::info!("生成本地日报（尝试调用 Ollama）");
 
         // 首先生成固定的统计部分
-        let mut report = format!("# 📈 工作日报 - {date}\n\n");
+        let mut report = format!("# 工作日报 - {date}\n\n");
 
         // 固定模板部分：数据统计
-        report.push_str("## 📊 今日概览\n\n");
+        report.push_str("## 一、今日概览\n\n");
         report.push_str(&format!(
             "- **总工作时长**: {}\n",
             format_duration(stats.total_duration)
@@ -200,7 +200,7 @@ impl Analyzer for LocalAnalyzer {
         report.push_str(&format!("- **使用应用**: {} 个\n\n", stats.app_usage.len()));
 
         // 时间分配
-        report.push_str("## ⏱️ 时间分配\n\n");
+        report.push_str("## 二、时间分配\n\n");
         for cat in &stats.category_usage {
             let percentage = if stats.total_duration > 0 {
                 (cat.duration as f64 / stats.total_duration as f64 * 100.0) as i32
@@ -216,7 +216,7 @@ impl Analyzer for LocalAnalyzer {
         }
 
         // 应用排行
-        report.push_str("\n## 🖥️ 应用使用情况\n\n");
+        report.push_str("\n## 三、应用使用情况\n\n");
         for (i, app) in stats.app_usage.iter().take(5).enumerate() {
             report.push_str(&format!(
                 "{}. **{}**: {}\n",
@@ -228,7 +228,7 @@ impl Analyzer for LocalAnalyzer {
 
         // 网站访问
         if !stats.domain_usage.is_empty() {
-            report.push_str("\n## 🌐 网站访问\n\n");
+            report.push_str("\n## 四、网站访问\n\n");
             for domain in stats.domain_usage.iter().take(5) {
                 report.push_str(&format!(
                     "- **{}**: {}\n",
@@ -248,7 +248,7 @@ impl Analyzer for LocalAnalyzer {
             Err(e) => {
                 log::warn!("Ollama 调用失败，使用备选内容: {e}");
                 // 使用简单的备选内容
-                report.push_str("\n## 🎯 今日工作内容\n\n");
+                report.push_str("\n## 五、今日工作内容\n\n");
                 let apps_list = stats
                     .app_usage
                     .iter()
@@ -260,10 +260,10 @@ impl Analyzer for LocalAnalyzer {
                     "今日主要使用 {apps_list} 等应用进行工作。持续努力中！\n"
                 ));
 
-                report.push_str("\n## 📊 专注度分析\n\n");
+                report.push_str("\n## 六、专注度分析\n\n");
                 report.push_str("今日工作整体表现不错，继续保持稳定的工作节奏。\n");
 
-                report.push_str("\n## 💡 明日建议\n\n");
+                report.push_str("\n## 七、明日建议\n\n");
                 report.push_str(
                     "建议定期休息，避免久坐。深度工作时可以关闭通讯软件通知，提高专注度。\n",
                 );

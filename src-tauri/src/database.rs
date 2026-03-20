@@ -768,7 +768,7 @@ impl Database {
              ORDER BY total_duration DESC",
         )?;
 
-        let app_usage: Vec<AppUsage> = stmt
+        let app_usage_rows: Vec<AppUsage> = stmt
             .query_map(params![start_ts, end_ts], |row| {
                 Ok(AppUsage {
                     app_name: row.get(0)?,
@@ -778,6 +778,28 @@ impl Database {
             })?
             .filter_map(|r| r.ok())
             .collect();
+
+        // 在 Rust 侧按显示名再次聚合，避免 work-review / Work Review 等别名被拆成多条
+        let mut app_usage_map: std::collections::HashMap<String, AppUsage> =
+            std::collections::HashMap::new();
+        for usage in app_usage_rows {
+            let normalized_name = crate::monitor::normalize_display_app_name(&usage.app_name);
+            let entry = app_usage_map.entry(normalized_name.clone()).or_insert(AppUsage {
+                app_name: normalized_name,
+                duration: 0,
+                count: 0,
+            });
+            entry.duration += usage.duration;
+            entry.count += usage.count;
+        }
+
+        let mut app_usage: Vec<AppUsage> = app_usage_map.into_values().collect();
+        app_usage.sort_by(|a, b| {
+            b.duration
+                .cmp(&a.duration)
+                .then_with(|| b.count.cmp(&a.count))
+                .then_with(|| a.app_name.cmp(&b.app_name))
+        });
 
         // 获取分类使用统计
         let mut stmt = conn.prepare(
@@ -1247,25 +1269,39 @@ impl Database {
     /// 获取历史应用列表（按使用时长排序）
     /// 返回去重后的应用名列表
     pub fn get_recent_apps(&self, limit: u32) -> Result<Vec<String>> {
+        use std::collections::HashMap;
+
         let conn = self.conn.lock().map_err(|e| {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
 
-        // 查询所有应用，按总时长排序
+        // 查询所有应用并在 Rust 侧做归一化合并，避免 work-review / Work Review 分裂成两条
         let mut stmt = conn.prepare(
             "SELECT app_name, SUM(duration) as total_duration 
              FROM activities 
              GROUP BY app_name 
-             ORDER BY total_duration DESC
-             LIMIT ?1",
+             ORDER BY total_duration DESC",
         )?;
 
-        let apps: Vec<String> = stmt
-            .query_map(params![limit], |row| row.get::<_, String>(0))?
+        let rows: Vec<(String, i64)> = stmt
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?
             .filter_map(|r| r.ok())
             .collect();
 
-        Ok(apps)
+        let mut merged: HashMap<String, i64> = HashMap::new();
+        for (raw_name, duration) in rows {
+            let normalized = crate::monitor::normalize_display_app_name(&raw_name);
+            *merged.entry(normalized).or_insert(0) += duration;
+        }
+
+        let mut apps: Vec<(String, i64)> = merged.into_iter().collect();
+        apps.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+
+        Ok(apps
+            .into_iter()
+            .take(limit as usize)
+            .map(|(name, _)| name)
+            .collect())
     }
 }
 
@@ -1345,6 +1381,78 @@ mod tests {
         assert_eq!(file_a.screenshot_path, "shot-b.jpg");
         assert_eq!(file_a.ocr_text.as_deref(), Some("new"));
         assert_eq!(file_b.duration, 15);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 今日统计应合并应用别名避免重复显示() {
+        let db_path = temp_db_path("daily-stats-merge");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let now = chrono::Local::now().timestamp();
+        let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+
+        let records = vec![
+            Activity {
+                id: None,
+                timestamp: now - 60,
+                app_name: "work-review".to_string(),
+                window_title: "主窗口".to_string(),
+                screenshot_path: "wr-a.jpg".to_string(),
+                ocr_text: None,
+                category: "development".to_string(),
+                duration: 540,
+                browser_url: None,
+            },
+            Activity {
+                id: None,
+                timestamp: now - 30,
+                app_name: "Work Review".to_string(),
+                window_title: "设置".to_string(),
+                screenshot_path: "wr-b.jpg".to_string(),
+                ocr_text: None,
+                category: "development".to_string(),
+                duration: 540,
+                browser_url: None,
+            },
+            Activity {
+                id: None,
+                timestamp: now - 10,
+                app_name: "Code".to_string(),
+                window_title: "main.rs".to_string(),
+                screenshot_path: "code.jpg".to_string(),
+                ocr_text: None,
+                category: "development".to_string(),
+                duration: 300,
+                browser_url: None,
+            },
+        ];
+
+        for activity in &records {
+            db.insert_activity(activity).expect("插入测试数据失败");
+        }
+
+        let stats = db
+            .get_daily_stats_with_work_time(&date, 9, 18, 0, 0)
+            .expect("读取今日统计失败");
+
+        let work_review = stats
+            .app_usage
+            .iter()
+            .find(|item| item.app_name == "Work Review")
+            .expect("未找到 Work Review 聚合结果");
+
+        assert_eq!(work_review.duration, 1080);
+        assert_eq!(work_review.count, 2);
+        assert_eq!(
+            stats
+                .app_usage
+                .iter()
+                .filter(|item| item.app_name == "work-review")
+                .count(),
+            0
+        );
+        assert_eq!(stats.app_usage.len(), 2);
 
         let _ = std::fs::remove_file(db_path);
     }

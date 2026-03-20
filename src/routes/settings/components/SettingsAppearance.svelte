@@ -86,11 +86,11 @@
 </script>
 
 <!-- 背景图片 -->
-<div class="card p-5">
-  <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1">背景图片</h3>
-  <p class="text-xs text-slate-400 dark:text-slate-500 mb-4">上传图片作为应用背景底纹</p>
+<div class="settings-card">
+  <h3 class="settings-card-title">背景图片</h3>
+  <p class="settings-card-desc">上传图片作为应用背景底纹</p>
 
-  <div class="space-y-4">
+  <div class="settings-section">
     <!-- 预览 + 上传 -->
     <div class="flex items-start gap-4">
       {#if bgPreview}
@@ -99,12 +99,12 @@
         </div>
       {:else}
         <div class="w-32 h-20 rounded-lg border-2 border-dashed border-slate-200 dark:border-slate-700 flex items-center justify-center flex-shrink-0">
-          <span class="text-xs text-slate-400">无背景</span>
+          <span class="settings-subtle">无背景</span>
         </div>
       {/if}
 
-      <div class="flex-1 space-y-2">
-        <label class="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 cursor-pointer transition-colors">
+      <div class="flex-1 settings-field">
+        <label class="settings-action-secondary cursor-pointer">
           {#if bgUploading}
             <div class="animate-spin rounded-full h-3 w-3 border-2 border-slate-500 border-t-transparent"></div>
             处理中...
@@ -117,12 +117,12 @@
         {#if bgPreview}
           <button
             on:click={clearBg}
-            class="text-xs text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 transition-colors"
+            class="settings-link-danger"
           >
             清除背景
           </button>
         {/if}
-        <p class="text-xs text-slate-400">支持 JPG/PNG，建议不超过 10MB</p>
+        <p class="settings-muted">支持 JPG/PNG，建议不超过 10MB</p>
       </div>
     </div>
 
@@ -130,10 +130,10 @@
       <hr class="border-slate-200 dark:border-slate-700" />
 
       <!-- 显示强度 -->
-      <div>
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-sm font-medium text-slate-700 dark:text-slate-300">显示强度</span>
-          <span class="text-xs text-slate-400 font-mono">{Math.round((config.background_opacity ?? 0.25) * 100)}%</span>
+      <div class="settings-block">
+        <div class="flex items-center justify-between">
+          <span class="settings-text">显示强度</span>
+          <span class="settings-value">{Math.round((config.background_opacity ?? 0.25) * 100)}%</span>
         </div>
         <input
           type="range"
@@ -142,28 +142,28 @@
           step="0.01"
           value={config.background_opacity ?? 0.25}
           on:input={(e) => updateBgOpacity(e.target.value)}
-          class="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full appearance-none cursor-pointer accent-indigo-500"
+          class="range-input"
         />
-        <div class="flex justify-between text-[10px] text-slate-400 mt-1">
+        <div class="flex justify-between text-[10px] settings-subtle">
           <span>淡雅</span>
           <span>浓郁</span>
         </div>
       </div>
 
       <!-- 模糊度 -->
-      <div>
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-sm font-medium text-slate-700 dark:text-slate-300">模糊程度</span>
-          <span class="text-xs text-slate-400">{blurLabels[config.background_blur ?? 1]}</span>
+      <div class="settings-block">
+        <div class="flex items-center justify-between">
+          <span class="settings-text">模糊程度</span>
+          <span class="settings-muted">{blurLabels[config.background_blur ?? 1]}</span>
         </div>
         <div class="flex gap-2">
           {#each [0, 1, 2] as level}
             <button
               on:click={() => updateBgBlur(level)}
-              class="flex-1 py-1.5 text-xs font-medium rounded-lg transition-all
+              class="segment-btn
                 {(config.background_blur ?? 1) === level
-                  ? 'bg-indigo-500 text-white'
-                  : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600'}"
+                  ? 'settings-segment-active'
+                  : 'settings-segment-base'}"
             >
               {blurLabels[level]}
             </button>

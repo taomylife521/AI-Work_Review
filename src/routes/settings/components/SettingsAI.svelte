@@ -159,7 +159,7 @@
 <!-- 日报模式切换：紧凑的分段控制 -->
 <!-- 模式选择与连接状态解耦，用户可先选模式再配置模型 -->
 <fieldset class="mb-5">
-  <legend class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-2">日报模式</legend>
+  <legend class="settings-label mb-2">日报模式</legend>
   <div class="flex gap-2">
     {#each aiModes as mode}
       {@const isSelected = config.ai_mode === mode.value}
@@ -176,13 +176,15 @@
             handleChange(); 
           }
         }}
-        class="flex-1 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150
+        class="flex-1 min-h-16 px-3 py-2.5 rounded-lg text-sm font-medium leading-none transition-all duration-150
                {isSelected
-                 ? 'bg-primary-500 text-white shadow-sm' 
-                 : 'bg-slate-100 dark:bg-slate-700/50 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'}"
+                 ? 'settings-segment-active'
+                 : 'settings-segment-base'}"
       >
-        <div>{mode.label}</div>
-        <div class="text-[10px] mt-0.5 {isSelected ? 'text-white/70' : 'text-slate-400 dark:text-slate-500'}">{mode.description}</div>
+        <div class="flex h-full flex-col items-center justify-center gap-1 text-center">
+          <div class="leading-none">{mode.label}</div>
+          <div class="text-[10px] leading-none {isSelected ? 'text-white/70' : 'settings-subtle'}">{mode.description}</div>
+        </div>
       </button>
     {/each}
   </div>
@@ -190,16 +192,16 @@
 
 <!-- AI 模型配置：仅在 AI 增强模式或云端模式下展开 -->
 {#if isAiMode}
-  <div class="space-y-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+  <div class="settings-block pt-3 border-t border-slate-200 dark:border-slate-700">
     <!-- 提供商 + 测试按钮 -->
     <div class="flex items-end gap-2">
       <div class="flex-1">
-        <label for="ai-provider" class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">提供商</label>
+        <label for="ai-provider" class="settings-label mb-1.5">提供商</label>
         <select
           id="ai-provider"
           value={config.text_model?.provider || 'ollama'}
           on:change={handleProviderChange}
-          class="w-full px-3 py-2 text-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-600 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+          class="control-input"
         >
           {#each providers as provider}
             <option value={provider.id}>{provider.name}</option>
@@ -211,12 +213,12 @@
       <button
         on:click={testTextModel}
         disabled={textTestStatus === 'testing' || !hasTextModelConfig}
-        class="shrink-0 px-3 py-2 text-xs font-medium rounded-lg transition-all
+        class="shrink-0 min-h-10 px-3 py-2 text-xs font-medium rounded-lg leading-none transition-all
                {textTestStatus === 'success' 
-                 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400' 
+                 ? 'settings-action-success' 
                  : textTestStatus === 'error' 
-                   ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400' 
-                   : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300'}
+                   ? 'settings-action-danger' 
+                   : 'settings-action-secondary'}
                disabled:opacity-40 disabled:cursor-not-allowed"
       >
         {#if textTestStatus === 'testing'}
@@ -236,20 +238,20 @@
     
     <!-- 测试结果消息 -->
     {#if textTestMessage}
-      <div class="px-3 py-2 rounded-lg text-xs {textTestStatus === 'success' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400' : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400'}">
+      <div class="px-3 py-2 rounded-lg text-xs {textTestStatus === 'success' ? 'settings-tone-success' : 'settings-tone-danger'}">
         {textTestMessage}
       </div>
     {/if}
 
     <!-- API 地址 -->
     <div>
-      <label for="ai-endpoint" class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">API 地址</label>
+      <label for="ai-endpoint" class="settings-label mb-1.5">API 地址</label>
       <input
         id="ai-endpoint"
         type="text"
         bind:value={config.text_model.endpoint}
         on:change={handleChange}
-        class="w-full px-3 py-2 text-sm font-mono rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-600 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+        class="control-input-mono"
         placeholder={currentProvider?.default_endpoint || 'http://localhost:11434'}
       />
     </div>
@@ -257,13 +259,13 @@
     <!-- API 密钥（按需显示） -->
     {#if requiresApiKey}
       <div>
-        <label for="ai-apikey" class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">API 密钥</label>
+        <label for="ai-apikey" class="settings-label mb-1.5">API 密钥</label>
         <input
           id="ai-apikey"
           type="password"
           bind:value={config.text_model.api_key}
           on:change={handleChange}
-          class="w-full px-3 py-2 text-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-600 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+          class="control-input"
           placeholder="sk-..."
         />
       </div>
@@ -271,23 +273,23 @@
 
     <!-- 模型名称 -->
     <div>
-      <label for="ai-model" class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">模型名称</label>
+      <label for="ai-model" class="settings-label mb-1.5">模型名称</label>
       <input
         id="ai-model"
         type="text"
         bind:value={config.text_model.model}
         on:change={handleChange}
-        class="w-full px-3 py-2 text-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-600 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+        class="control-input"
         placeholder={currentProvider?.default_model || 'qwen2.5'}
       />
       {#if currentProvider?.description}
-        <p class="mt-1 text-xs text-slate-400">{currentProvider.description}</p>
+        <p class="settings-note">{currentProvider.description}</p>
       {/if}
     </div>
   </div>
 {:else}
   <!-- 未启用 AI 模式时的提示 -->
   <div class="pt-3 border-t border-slate-200 dark:border-slate-700">
-    <p class="text-xs text-slate-400 dark:text-slate-500 text-center py-2">切换到「AI 增强」模式后可配置 AI 模型</p>
+    <p class="settings-empty">切换到「AI 增强」模式后可配置 AI 模型</p>
   </div>
 {/if}

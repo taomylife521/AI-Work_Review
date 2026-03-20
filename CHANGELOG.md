@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.15] - 2026-03-20
+
+### 修复
+- 修复应用名称重复显示的问题：`work-review / Work Review` 等别名现在会在概览统计、最近应用和运行中应用列表中统一归并，避免同一应用被拆成多条记录。
+- 修复前端图标缓存长期运行时可能持续增长的问题：全局应用图标缓存现已加入 LRU 上限，降低长时间使用后的内存累积风险。
+- 修复多页面布局密度与对齐不一致的问题：统一概览、时间线、日报、设置、关于五个页面的标题区、卡片内边距、控件高度、提示区和空状态留白，减少视觉偏移和局部过松问题。
+
+### 优化
+- 优化侧边栏视觉层级：重新梳理品牌区、导航项、底部工具区的纵向节奏，微调图标、文字、选中态蓝条和字重关系，使整体重心更稳定。
+- 优化应用图标与品牌资源：新增 Windows 高 DPI 图标生成链路，重建 `icon.ico` 多尺寸资源，补齐 `20x20`、`40x40` 等关键尺寸，改善 Windows 下任务栏、开始菜单和快捷方式的清晰度。
+- 优化页面图标与品牌映射：补充应用默认图标回退和品牌资源映射，减少部分应用取不到图标时的空白或风格不统一问题。
+- 更新项目文档：同步 README、Windows 平台说明与当前实现，明确 Windows 打包产物、OCR 现状和现有功能结构。
+
 ## [1.0.14] - 2026-03-20
 
 ### 修复

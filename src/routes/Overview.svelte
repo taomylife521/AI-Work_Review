@@ -6,6 +6,7 @@
   import AppUsageChart from '../lib/components/AppUsageChart.svelte';
   import { cache } from '../lib/stores/cache.js';
   import { appIconStore, loadAppIcon, preloadAppIcons } from '../lib/stores/iconCache.js';
+  import { resolveAppIconSrc } from '../lib/utils/appVisuals.js';
 
   let stats = null;
   let loading = true;
@@ -47,6 +48,10 @@
     if (hours > 0) return `${hours}小时${minutes}分钟`;
     if (minutes > 0) return `${minutes}分钟`;
     return `${secs}秒`;
+  }
+
+  function getAppIconSrc(appName) {
+    return resolveAppIconSrc(appName, appIcons[appName]);
   }
 
   async function loadStats(forceRefresh = false) {
@@ -122,58 +127,70 @@
   });
 </script>
 
-<div class="px-5 pt-1 pb-5 animate-fadeIn">
+<div class="page-shell">
   <!-- 页面标题 -->
-  <div class="flex items-center justify-between mb-5">
-    <div>
-      <h2 class="text-xl font-bold text-slate-800 dark:text-white">今日概览</h2>
-      <p class="text-sm text-slate-400 dark:text-slate-500 mt-0.5">
+  <div class="page-header">
+    <div class="page-title-group">
+      <div class="page-title-badge">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 6.5A2.5 2.5 0 016.5 4H10v6H4V6.5Zm10 0A2.5 2.5 0 0116.5 4H20v6h-6V4Zm-10 11A2.5 2.5 0 016.5 15H10v5H6.5A2.5 2.5 0 014 17.5V15Zm10-2.5H20v2.5A2.5 2.5 0 0117.5 20H14v-5Z" />
+        </svg>
+      </div>
+      <div class="page-title-copy">
+        <h2>今日概览</h2>
+        <p>
         {new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' })}
         <span class="ml-1.5 font-mono text-xs">{currentTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
-      </p>
+        </p>
+      </div>
     </div>
-    <div class="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+    <div class="page-status-chip text-emerald-600 dark:text-emerald-400">
       <span class="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
       实时
     </div>
   </div>
 
   <!-- 统计卡片：始终渲染，内部切换骨架/真实数据 -->
-  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
     {#if loading || !stats}
       {#each [1,2,3,4] as _}
-        <div class="p-4 rounded-2xl bg-white dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700/60 animate-pulse">
-          <div class="flex items-center justify-between mb-2">
-            <div class="h-3 bg-slate-200 dark:bg-slate-700 rounded w-20"></div>
-            <div class="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-700"></div>
+        <div class="min-h-[116px] p-5 rounded-2xl bg-white dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700/60 animate-pulse">
+          <div class="flex h-full items-center justify-between gap-4">
+            <div class="flex-1">
+              <div class="h-3 bg-slate-200 dark:bg-slate-700 rounded w-20"></div>
+              <div class="h-8 bg-slate-200 dark:bg-slate-700 rounded w-1/2 mt-6"></div>
+            </div>
+            <div class="w-11 h-11 rounded-2xl bg-slate-100 dark:bg-slate-700 shrink-0"></div>
           </div>
-          <div class="h-6 bg-slate-200 dark:bg-slate-700 rounded w-1/2"></div>
         </div>
       {/each}
     {:else}
-      <StatsCard title="当天活动总时长" value={formatDuration(stats.total_duration)} icon="⏱️" color="indigo" />
-      <StatsCard title="当天办公时长" value={formatDuration(stats.work_time_duration || 0)} icon="🏢" color="emerald" />
-      <StatsCard title="浏览器" value={formatDuration(stats.browser_duration)} icon="🌐" color="blue" />
-      <StatsCard title="应用数" value={stats.app_usage.length} icon="🖥️" color="amber" />
+      <StatsCard title="当天活动总时长" value={formatDuration(stats.total_duration)} icon="duration" color="indigo" />
+      <StatsCard title="当天办公时长" value={formatDuration(stats.work_time_duration || 0)} icon="focus" color="emerald" />
+      <StatsCard title="浏览器" value={formatDuration(stats.browser_duration)} icon="browser" color="blue" />
+      <StatsCard title="应用数" value={stats.app_usage.length} icon="apps" color="amber" />
     {/if}
   </div>
 
   {#if error}
-    <div class="card p-6 text-center mb-6">
-      <p class="text-red-500">{error}</p>
-      <button class="btn btn-primary mt-4" on:click={loadStats}>重试</button>
+    <div class="page-banner-error mb-4">
+      <div>
+        <p class="font-semibold">加载概览失败</p>
+        <p class="text-sm mt-1">{error}</p>
+      </div>
+      <button class="page-action-brand" on:click={loadStats}>重试</button>
     </div>
   {/if}
 
   <!-- 网站访问：始终渲染，加载中显示骨架，无数据显示占位文字 -->
-  <div class="p-5 rounded-2xl bg-white dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700/60 mb-5">
-    <h3 class="text-base font-semibold text-slate-700 dark:text-slate-200 mb-4">网站访问</h3>
+  <div class="page-card mb-4">
+    <h3 class="page-section-title">网站访问</h3>
     {#if loading || !stats}
       <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 animate-pulse">
         {#each [1,2] as _}
-          <div class="p-4 rounded-xl border border-slate-100 dark:border-slate-700">
-            <div class="h-4 bg-slate-200 dark:bg-slate-700 rounded w-3/4 mb-3"></div>
-            <div class="h-6 bg-slate-200 dark:bg-slate-700 rounded w-1/2 mb-2"></div>
+          <div class="p-3.5 rounded-xl border border-slate-100 dark:border-slate-700">
+            <div class="h-4 bg-slate-200 dark:bg-slate-700 rounded w-3/4 mb-2.5"></div>
+            <div class="h-6 bg-slate-200 dark:bg-slate-700 rounded w-1/2 mb-1.5"></div>
             <div class="h-3 bg-slate-100 dark:bg-slate-700/50 rounded w-2/3"></div>
           </div>
         {/each}
@@ -182,15 +199,15 @@
       <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
         {#each stats.browser_usage as browser}
           <button
-            class="group text-left p-4 rounded-xl border border-slate-100 dark:border-slate-700
+            class="group text-left p-3.5 rounded-xl border border-slate-100 dark:border-slate-700
                    bg-white dark:bg-slate-800/60
                    hover:border-slate-200 dark:hover:border-slate-600 hover:shadow-sm
                    transition-all duration-200"
             on:click={() => selectedBrowser = browser}
           >
-            <div class="flex items-center gap-2 mb-2">
-              {#if appIcons[browser.browser_name]}
-                <img src="data:image/png;base64,{appIcons[browser.browser_name]}" alt="" class="w-6 h-6 rounded" />
+            <div class="flex items-center gap-2 mb-1.5">
+              {#if getAppIconSrc(browser.browser_name)}
+                <img src={getAppIconSrc(browser.browser_name)} alt="" class="w-6 h-6 rounded-md object-cover" />
               {:else}
                 <span class="text-xl">🌐</span>
               {/if}
@@ -208,15 +225,15 @@
         {/each}
       </div>
     {:else}
-      <div class="flex items-center justify-center py-6 text-slate-300 dark:text-slate-600 text-sm">
-        今日暂无浏览器访问记录
+      <div class="flex items-center justify-center py-5">
+        <p class="empty-state-copy">今日暂无浏览器访问记录</p>
       </div>
     {/if}
   </div>
 
   <!-- 应用使用：始终渲染 -->
-  <div class="p-5 rounded-2xl bg-white dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700/60 mb-5">
-    <h3 class="text-base font-semibold text-slate-700 dark:text-slate-200 mb-4">应用使用</h3>
+  <div class="page-card mb-4">
+    <h3 class="page-section-title">应用使用</h3>
     {#if loading || !stats}
       <div class="animate-pulse">
         {#each [1,2,3,4] as _}
@@ -230,7 +247,7 @@
     {:else if stats.app_usage.length > 0}
       <AppUsageChart data={stats.app_usage} />
     {:else}
-      <p class="text-slate-500 dark:text-slate-400 text-center py-8">暂无数据</p>
+      <p class="empty-state-copy text-center py-5">暂无数据</p>
     {/if}
   </div>
 </div>
@@ -248,10 +265,10 @@
 >
   <div class="card p-0 max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col" role="dialog" aria-modal="true">
     <!-- 弹窗头部 -->
-    <div class="flex items-center justify-between p-5 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-r from-slate-50 to-white dark:from-slate-800 dark:to-slate-900">
-      <div class="flex items-center gap-3">
-        {#if appIcons[selectedBrowser.browser_name]}
-          <img src="data:image/png;base64,{appIcons[selectedBrowser.browser_name]}" alt="" class="w-8 h-8 rounded" />
+      <div class="flex items-center justify-between p-5 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-r from-slate-50 to-white dark:from-slate-800 dark:to-slate-900">
+        <div class="flex items-center gap-3">
+        {#if getAppIconSrc(selectedBrowser.browser_name)}
+          <img src={getAppIconSrc(selectedBrowser.browser_name)} alt="" class="w-8 h-8 rounded-lg object-cover" />
         {:else}
           <span class="text-3xl">🌐</span>
         {/if}

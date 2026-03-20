@@ -35,6 +35,23 @@ pub fn is_browser_app(app_name: &str) -> bool {
         || app_lower.contains("iexplore")
 }
 
+/// 统一应用显示名称，避免不同来源（进程名、数据库历史、运行中列表）出现重复项
+pub fn normalize_display_app_name(app_name: &str) -> String {
+    let trimmed = app_name
+        .trim()
+        .trim_end_matches(".exe")
+        .trim_end_matches(".EXE")
+        .trim();
+
+    let normalized = trimmed.to_lowercase();
+    match normalized.as_str() {
+        "work-review" | "work_review" | "workreview" | "work review" => {
+            "Work Review".to_string()
+        }
+        _ => trimmed.to_string(),
+    }
+}
+
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn is_probable_domain(value: &str) -> bool {
     let candidate = value.trim().trim_matches('/').to_lowercase();
@@ -509,6 +526,19 @@ pub fn get_active_window() -> Result<ActiveWindow> {
 fn normalize_electron_app_name(process_name: &str, window_title: &str) -> String {
     let process_lower = process_name.to_lowercase();
     let title_lower = window_title.to_lowercase();
+
+    let process_aliases = [
+        ("work-review", "Work Review"),
+        ("work_review", "Work Review"),
+        ("workreview", "Work Review"),
+    ];
+
+    for (pattern, real_name) in process_aliases.iter() {
+        if process_lower == *pattern {
+            log::debug!("进程名归一化: {process_name} -> {real_name}");
+            return real_name.to_string();
+        }
+    }
 
     // 优先检查窗口标题是否包含浏览器名称
     // 这对于 Chrome 等浏览器至关重要，因为它们可能被误识别为 Electron

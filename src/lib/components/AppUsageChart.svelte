@@ -1,6 +1,7 @@
 <script>
   import { invoke } from '@tauri-apps/api/core';
   import { appIconStore, preloadAppIcons } from '../stores/iconCache.js';
+  import { resolveAppIconSrc } from '../utils/appVisuals.js';
 
   export let data = [];
 
@@ -41,13 +42,14 @@
   $: maxDuration = displayApps.length > 0 ? Math.max(...displayApps.map(a => a.duration)) : 1;
 </script>
 
-<div class="space-y-2.5">
+<div class="space-y-2">
   {#each displayApps as app, i}
+    {@const iconSrc = resolveAppIconSrc(app.app_name, appIcons[app.app_name])}
     <div class="flex items-center gap-2.5">
       <!-- 应用图标或序号 -->
       <div class="w-6 h-6 flex-shrink-0 flex items-center justify-center">
-        {#if appIcons[app.app_name]}
-          <img src="data:image/png;base64,{appIcons[app.app_name]}" alt="" class="w-5 h-5 rounded" />
+        {#if iconSrc}
+          <img src={iconSrc} alt="" class="w-5 h-5 rounded-md object-cover" />
         {:else}
           <span class="w-5 h-5 flex items-center justify-center rounded bg-slate-100 dark:bg-slate-700 text-xs text-slate-500">{i + 1}</span>
         {/if}
@@ -55,7 +57,7 @@
       <!-- 应用名 -->
       <span class="w-24 text-xs text-slate-600 dark:text-slate-300 truncate flex-shrink-0">{app.app_name}</span>
       <!-- 进度条 -->
-      <div class="flex-1 h-5 bg-slate-100 dark:bg-slate-700/50 rounded-full overflow-hidden">
+      <div class="flex-1 h-4 bg-slate-100 dark:bg-slate-700/50 rounded-full overflow-hidden">
         <div
           class="h-full rounded-full transition-all duration-500"
           style="width: {Math.max((app.duration / maxDuration) * 100, 2)}%; background-color: {colors[i % colors.length]}; opacity: 0.8"
@@ -68,7 +70,7 @@
 
   {#if hasMore}
     <button
-      class="w-full text-center text-xs text-slate-400 hover:text-primary-500 dark:text-slate-500 dark:hover:text-primary-400 py-1.5 transition-colors"
+      class="w-full text-center text-xs text-slate-400 hover:text-primary-500 dark:text-slate-500 dark:hover:text-primary-400 py-1 transition-colors"
       on:click={() => expanded = !expanded}
     >
       {expanded ? '收起' : `展开全部 (${data.length} 个应用)`}

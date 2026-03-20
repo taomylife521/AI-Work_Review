@@ -333,10 +333,10 @@ impl SummaryAnalyzer {
             ));
         }
 
-        content.push_str("\n## 📊 专注度分析\n\n");
+        content.push_str("\n## 六、专注度分析\n\n");
         content.push_str("今日工作整体表现不错，继续保持稳定的工作节奏。\n");
 
-        content.push_str("\n## 💡 明日建议\n\n");
+        content.push_str("\n## 七、明日建议\n\n");
         content.push_str("建议定期休息，避免久坐。深度工作时可以关闭通讯软件通知，提高专注度。\n");
 
         content.push_str(

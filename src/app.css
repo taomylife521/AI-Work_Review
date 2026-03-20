@@ -90,7 +90,7 @@
 
 /* 按钮样式 */
 .btn {
-  @apply px-4 py-2 rounded-lg font-medium transition-all duration-200;
+  @apply inline-flex items-center justify-center gap-2 min-h-10 px-4 py-2 rounded-lg font-medium leading-none transition-all duration-200;
 }
 
 .btn-primary {
@@ -103,6 +103,447 @@
 
 .btn-ghost {
   @apply text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700;
+}
+
+/* 统一修正图标 + 文字控件的视觉中心，避免侧边栏页和提示条出现“看起来没居中” */
+:where(button, a, label)[class*='items-center'] {
+  line-height: 1;
+}
+
+:where(button, a, label)[class*='items-center'][class*='justify-center'] {
+  text-align: center;
+}
+
+:where(button, a, label)[class*='items-center'] > :where(span, div) {
+  line-height: 1;
+}
+
+:where(button, a, label)[class*='items-center'] :where(svg, img) {
+  flex-shrink: 0;
+}
+
+.page-shell {
+  @apply px-5 pt-4 pb-4 animate-fadeIn;
+}
+
+.page-header {
+  @apply flex items-start justify-between gap-3 mb-4;
+}
+
+.page-title-group {
+  @apply flex items-start gap-2.5 min-w-0;
+}
+
+.page-title-badge {
+  @apply w-10 h-10 rounded-xl border border-slate-200/70 dark:border-slate-700/70 bg-white/80 dark:bg-slate-800/80 shadow-sm flex items-center justify-center text-indigo-600 dark:text-indigo-300;
+}
+
+.page-title-badge svg {
+  @apply w-5 h-5;
+}
+
+.page-title-copy {
+  @apply min-w-0;
+}
+
+.page-title-copy h2 {
+  @apply text-xl font-bold text-slate-800 dark:text-white;
+}
+
+.page-title-copy p {
+  @apply text-sm text-slate-400 dark:text-slate-500 mt-0.5 leading-none;
+}
+
+.page-card {
+  @apply rounded-2xl bg-white dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700/60 p-5;
+}
+
+.page-card-soft {
+  @apply rounded-2xl bg-white dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700/60 p-5 text-center;
+}
+
+.page-tabs {
+  @apply flex gap-1 mb-4 p-1 bg-slate-100/50 dark:bg-slate-800/50 rounded-xl;
+}
+
+.page-tab-btn {
+  @apply flex-1 min-h-9 flex items-center justify-center gap-1.5 px-2 rounded-lg text-xs font-medium leading-none transition-all duration-200;
+}
+
+.page-toolbar {
+  @apply flex flex-wrap items-center gap-2;
+}
+
+.page-toolbar-end {
+  @apply page-toolbar justify-end;
+}
+
+.page-control-input {
+  @apply min-h-9 px-3 text-sm rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
+}
+
+.page-control-btn {
+  @apply inline-flex items-center justify-center gap-1.5 min-h-9 px-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors;
+}
+
+.page-control-btn-icon {
+  @apply page-control-btn w-9 px-0;
+}
+
+.page-control-btn-active {
+  @apply bg-indigo-50 border-indigo-200 text-indigo-700 dark:bg-indigo-950/40 dark:border-indigo-800 dark:text-indigo-300;
+}
+
+.page-action-btn {
+  @apply inline-flex items-center justify-center gap-2 min-h-10 px-4 py-2 text-sm font-medium rounded-xl transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.page-action-brand {
+  @apply page-action-btn bg-indigo-500 hover:bg-indigo-600 text-white;
+}
+
+.page-action-warn {
+  @apply page-action-btn bg-amber-500 hover:bg-amber-600 text-white;
+}
+
+.page-action-secondary {
+  @apply page-action-btn bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700;
+}
+
+.page-action-success-outline {
+  @apply page-action-btn bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 text-emerald-600 dark:text-emerald-400 hover:border-emerald-500 hover:text-emerald-700 dark:hover:border-emerald-500/50 dark:hover:text-emerald-300;
+}
+
+.page-status-chip {
+  @apply inline-flex items-center gap-1.5 min-h-9 px-3 rounded-xl bg-white/80 dark:bg-slate-800/80 border border-slate-200/70 dark:border-slate-700/70 text-xs font-medium text-slate-500 dark:text-slate-400;
+}
+
+.page-inline-chip {
+  @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium;
+}
+
+.page-inline-chip-brand {
+  @apply page-inline-chip bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400;
+}
+
+.page-inline-chip-muted {
+  @apply page-inline-chip bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400;
+}
+
+.page-section-title {
+  @apply text-base font-semibold text-slate-700 dark:text-slate-200 mb-3;
+}
+
+.page-help-text {
+  @apply text-xs text-slate-400 dark:text-slate-500;
+}
+
+.page-banner {
+  @apply rounded-xl border px-4 py-3 flex items-start justify-between gap-3;
+}
+
+.page-banner-error {
+  @apply page-banner bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-900/40 text-red-700 dark:text-red-400;
+}
+
+.page-banner-warning {
+  @apply page-banner bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400;
+}
+
+.sidebar-top {
+  @apply px-3 pt-0.5 pb-3 space-y-2.5;
+}
+
+.sidebar-brand {
+  @apply min-h-[64px] px-1 flex items-center;
+}
+
+.sidebar-brand-title {
+  @apply text-[15px] font-semibold text-slate-800 dark:text-white leading-tight tracking-tight;
+}
+
+.sidebar-brand-subtitle {
+  @apply text-[11px] font-normal text-slate-400 dark:text-slate-500 mt-0.5 tracking-[0.08em];
+}
+
+.sidebar-status {
+  @apply min-h-[48px] rounded-lg bg-slate-50 dark:bg-slate-800/50 px-3 py-2;
+}
+
+.sidebar-main {
+  @apply flex-1 min-h-0 px-3 pb-3 flex flex-col;
+}
+
+.sidebar-nav {
+  @apply flex-1 min-h-0 pt-0.5;
+}
+
+.sidebar-nav-list {
+  @apply space-y-1;
+}
+
+.sidebar-nav-item {
+  @apply relative flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all duration-150;
+}
+
+.sidebar-nav-item-active {
+  @apply bg-indigo-50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 pl-4;
+}
+
+.sidebar-nav-item-idle {
+  @apply text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/60;
+}
+
+.sidebar-nav-label {
+  @apply font-medium tracking-[0.01em] leading-none translate-y-[0.5px];
+}
+
+.sidebar-nav-label-active {
+  @apply font-semibold;
+}
+
+.sidebar-nav-icon {
+  @apply w-[18px] h-[18px] flex items-center justify-center shrink-0;
+}
+
+.sidebar-nav-icon svg {
+  @apply w-[18px] h-[18px];
+}
+
+.sidebar-nav-rail {
+  @apply absolute left-1.5 top-1/2 -translate-y-1/2 w-[2px] h-4 rounded-full bg-indigo-500;
+}
+
+.sidebar-bottom {
+  @apply pt-2.5;
+}
+
+.sidebar-footer {
+  @apply min-h-[44px] border-t border-slate-100 dark:border-slate-800 px-1 flex items-center justify-between;
+}
+
+.sidebar-footer-version {
+  @apply text-[10px] font-medium text-slate-300 dark:text-slate-600;
+}
+
+.sidebar-footer-action {
+  @apply inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-slate-300 transition-all;
+}
+
+.empty-state {
+  @apply page-card-soft py-8;
+}
+
+.empty-state-lg {
+  @apply page-card-soft py-10;
+}
+
+.empty-state-icon {
+  @apply inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-slate-50 dark:bg-slate-700/50 mx-auto mb-4;
+}
+
+.empty-state-title {
+  @apply text-base font-semibold text-slate-800 dark:text-white mb-2;
+}
+
+.empty-state-copy {
+  @apply text-sm text-slate-400 dark:text-slate-500;
+}
+
+.settings-card-title {
+  @apply text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1;
+}
+
+.settings-card-desc {
+  @apply text-xs text-slate-500 dark:text-slate-400 mb-3;
+}
+
+.settings-card {
+  @apply card p-4;
+}
+
+.settings-section {
+  @apply space-y-4;
+}
+
+.settings-block {
+  @apply space-y-2;
+}
+
+.settings-field {
+  @apply space-y-2;
+}
+
+.settings-text {
+  @apply text-sm font-medium text-slate-700 dark:text-slate-300;
+}
+
+.settings-label {
+  @apply block text-xs font-medium text-slate-600 dark:text-slate-400;
+}
+
+.settings-muted {
+  @apply text-xs text-slate-500 dark:text-slate-400;
+}
+
+.settings-subtle {
+  @apply text-xs text-slate-400 dark:text-slate-500;
+}
+
+.settings-note {
+  @apply settings-subtle mt-2;
+}
+
+.settings-value {
+  @apply text-sm font-mono text-primary-600 dark:text-primary-400;
+}
+
+.settings-panel {
+  @apply rounded-xl bg-slate-50 dark:bg-slate-700/30 p-4;
+}
+
+.settings-panel-danger {
+  @apply rounded-xl border border-red-100 dark:border-red-900/30 bg-red-50/50 dark:bg-red-900/10 p-4;
+}
+
+.settings-actions {
+  @apply flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-600;
+}
+
+.settings-link-action {
+  @apply text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 transition-colors;
+}
+
+.settings-link-danger {
+  @apply text-xs font-medium text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 transition-colors;
+}
+
+.settings-action-primary {
+  @apply control-button-sm bg-primary-500 text-white hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.settings-action-secondary {
+  @apply control-button-sm bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.settings-action-danger {
+  @apply control-button-sm bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50 disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.settings-action-success {
+  @apply control-button-sm bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.settings-chip {
+  @apply inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium;
+}
+
+.settings-chip-neutral {
+  @apply settings-chip bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300;
+}
+
+.settings-chip-success {
+  @apply settings-chip bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400;
+}
+
+.settings-chip-warn {
+  @apply settings-chip bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400;
+}
+
+.settings-chip-danger {
+  @apply settings-chip bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400;
+}
+
+.settings-chip-button {
+  @apply inline-flex items-center justify-center min-h-8 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-500 bg-white dark:bg-slate-600 text-xs font-medium text-slate-600 dark:text-slate-300 transition-colors hover:bg-primary-50 dark:hover:bg-slate-500;
+}
+
+.settings-chip-button-active {
+  @apply border-transparent bg-primary-500 text-white shadow-sm;
+}
+
+.settings-segment-base {
+  @apply segment-btn bg-slate-100 dark:bg-slate-700/50 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700;
+}
+
+.settings-segment-idle {
+  @apply segment-btn bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600;
+}
+
+.settings-segment-active {
+  @apply bg-primary-500 text-white shadow-sm;
+}
+
+.settings-segment-success {
+  @apply bg-emerald-500 text-white;
+}
+
+.settings-segment-warn {
+  @apply bg-amber-500 text-white;
+}
+
+.settings-segment-danger {
+  @apply bg-red-500 text-white;
+}
+
+.settings-tone-success {
+  @apply bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400;
+}
+
+.settings-tone-danger {
+  @apply bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400;
+}
+
+.settings-text-success {
+  @apply text-emerald-600 dark:text-emerald-400;
+}
+
+.settings-text-warn {
+  @apply text-amber-600 dark:text-amber-400;
+}
+
+.settings-text-danger {
+  @apply text-red-600 dark:text-red-400;
+}
+
+.settings-empty {
+  @apply settings-subtle text-center py-3;
+}
+
+.settings-code {
+  @apply rounded bg-slate-100 dark:bg-slate-700 px-1;
+}
+
+.control-input {
+  @apply w-full min-h-9 px-3 py-2 text-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
+}
+
+.control-input-mono {
+  @apply control-input font-mono;
+}
+
+.control-inline {
+  @apply min-h-9 flex items-center gap-1 bg-slate-50 dark:bg-slate-700/50 rounded-lg px-3 py-1.5;
+}
+
+.control-button-sm {
+  @apply inline-flex items-center justify-center gap-2 min-h-9 px-3 py-2 text-xs font-medium rounded-lg leading-none transition-colors;
+}
+
+.segment-btn {
+  @apply flex-1 min-h-9 px-3 py-2 text-xs font-medium rounded-lg leading-none transition-all;
+}
+
+.range-input {
+  @apply w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-full appearance-none cursor-pointer accent-primary-500;
+}
+
+.switch-track {
+  @apply relative w-11 h-6 rounded-full transition-colors duration-200;
+}
+
+.switch-thumb {
+  @apply absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200;
 }
 
 /* 输入框样式 */

@@ -1161,11 +1161,13 @@ fn get_running_apps_impl() -> Result<Vec<String>, AppError> {
 
     if output.status.success() {
         let apps_str = String::from_utf8_lossy(&output.stdout);
-        let apps: Vec<String> = apps_str
+        let mut apps: Vec<String> = apps_str
             .split(", ")
-            .map(|s| s.trim().to_string())
+            .map(|s| crate::monitor::normalize_display_app_name(s))
             .filter(|s| !s.is_empty())
             .collect();
+        apps.sort();
+        apps.dedup();
         Ok(apps)
     } else {
         Err(AppError::Unknown("获取应用列表失败".to_string()))
@@ -1239,8 +1241,8 @@ fn get_running_apps_impl() -> Result<Vec<String>, AppError> {
 
                 if !excluded.contains(&name_lower.as_str()) {
                     // 移除 .exe 后缀
-                    let display_name = name.trim_end_matches(".exe").trim_end_matches(".EXE");
-                    apps.insert(display_name.to_string());
+                    let display_name = crate::monitor::normalize_display_app_name(&name);
+                    apps.insert(display_name);
                 }
 
                 if Process32NextW(snapshot, &mut entry) == 0 {

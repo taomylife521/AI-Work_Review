@@ -99,22 +99,22 @@
 </script>
 
 <!-- 基本设置 -->
-<div class="card p-5">
-  <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1">基本设置</h3>
-  <p class="text-xs text-slate-400 dark:text-slate-500 mb-4">工作时间和应用行为</p>
+<div class="settings-card">
+  <h3 class="settings-card-title">基本设置</h3>
+  <p class="settings-card-desc">工作时间和应用行为</p>
 
-  <div class="space-y-4">
+  <div class="settings-section">
     <!-- 工作时间 -->
-    <div>
-      <div class="flex items-center justify-between mb-3">
-        <span class="text-sm font-medium text-slate-700 dark:text-slate-300">工作时间</span>
-        <span class="text-xs text-slate-400">共 {workHours}</span>
+    <div class="settings-block">
+      <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span class="settings-text">工作时间</span>
+        <span class="settings-muted">共 {workHours}</span>
       </div>
 
       <div class="flex items-center gap-3">
         <!-- 开始时间 -->
-        <div class="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-700/50 rounded-lg px-3 py-2">
-          <span class="text-xs text-slate-400">从</span>
+        <div class="control-inline">
+          <span class="settings-subtle">从</span>
           <input
             type="time"
             value={startTimeDisplay}
@@ -122,15 +122,15 @@
               const [h, m] = e.target.value.split(':').map(Number);
               updateStart(h, m);
             }}
-            class="bg-transparent text-sm font-mono text-slate-800 dark:text-white focus:outline-none"
+            class="w-24 bg-transparent text-sm font-mono text-slate-800 dark:text-white focus:outline-none"
           />
         </div>
 
         <span class="text-slate-300 dark:text-slate-600">—</span>
 
         <!-- 结束时间 -->
-        <div class="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-700/50 rounded-lg px-3 py-2">
-          <span class="text-xs text-slate-400">到</span>
+        <div class="control-inline">
+          <span class="settings-subtle">到</span>
           <input
             type="time"
             value={endTimeDisplay}
@@ -138,11 +138,11 @@
               const [h, m] = e.target.value.split(':').map(Number);
               updateEnd(h, m);
             }}
-            class="bg-transparent text-sm font-mono text-slate-800 dark:text-white focus:outline-none"
+            class="w-24 bg-transparent text-sm font-mono text-slate-800 dark:text-white focus:outline-none"
           />
         </div>
       </div>
-      <p class="text-xs text-slate-400 mt-2">此时间段内的活动将被计入工作时长统计</p>
+      <p class="settings-note">此时间段内的活动将被计入工作时长统计</p>
     </div>
 
     <hr class="border-slate-200 dark:border-slate-700" />
@@ -150,14 +150,14 @@
     <!-- 开机自启动 -->
     <div class="flex items-center justify-between">
       <div>
-        <div class="text-sm font-medium text-slate-700 dark:text-slate-300">开机自启动</div>
-        <div class="text-xs text-slate-400 mt-0.5">系统启动时自动运行 Work Review</div>
+        <div class="settings-text">开机自启动</div>
+        <div class="settings-muted mt-0.5">系统启动时自动运行 Work Review</div>
       </div>
       <button
         on:click={toggleAutoStart}
-        class="relative w-11 h-6 rounded-full transition-colors duration-200 {autoStartEnabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'}"
+        class="switch-track {autoStartEnabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'}"
       >
-        <span class="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200 {autoStartEnabled ? 'translate-x-5' : 'translate-x-0'}"></span>
+        <span class="switch-thumb {autoStartEnabled ? 'translate-x-5' : 'translate-x-0'}"></span>
       </button>
     </div>
 
@@ -166,14 +166,14 @@
     <!-- Dock 图标 -->
     <div class="flex items-center justify-between">
       <div>
-        <div class="text-sm font-medium text-slate-700 dark:text-slate-300">隐藏 Dock 图标</div>
-        <div class="text-xs text-slate-400 mt-0.5">隐藏后仅通过系统托盘访问应用</div>
+        <div class="settings-text">隐藏 Dock 图标</div>
+        <div class="settings-muted mt-0.5">隐藏后仅通过系统托盘访问应用</div>
       </div>
       <button
         on:click={toggleDockIcon}
-        class="relative w-11 h-6 rounded-full transition-colors duration-200 {config.hide_dock_icon ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'}"
+        class="switch-track {config.hide_dock_icon ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'}"
       >
-        <span class="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200 {config.hide_dock_icon ? 'translate-x-5' : 'translate-x-0'}"></span>
+        <span class="switch-thumb {config.hide_dock_icon ? 'translate-x-5' : 'translate-x-0'}"></span>
       </button>
     </div>
 
