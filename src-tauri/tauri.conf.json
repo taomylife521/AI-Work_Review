@@ -49,7 +49,10 @@
         "depends": [
           "xdotool",
           "xprintidle",
-          "x11-utils"
+          "x11-utils",
+          "tesseract-ocr",
+          "scrot | maim | imagemagick",
+          "procps"
         ]
       },
       "appimage": {
