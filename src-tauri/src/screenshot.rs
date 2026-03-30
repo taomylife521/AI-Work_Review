@@ -644,10 +644,9 @@ impl ScreenshotService {
                     Ok(screen) => screen,
                     Err(e) => {
                         log::warn!("按窗口坐标选屏失败，将回退到默认屏幕: {e}");
-                        let screens = Screen::all()
-                            .map_err(|err| {
-                                AppError::Screenshot(format!("获取屏幕列表失败: {err}"))
-                            })?;
+                        let screens = Screen::all().map_err(|err| {
+                            AppError::Screenshot(format!("获取屏幕列表失败: {err}"))
+                        })?;
                         screens
                             .first()
                             .copied()
@@ -734,8 +733,8 @@ impl ScreenshotService {
     fn capture_all_displays_macos(&self) -> Result<DynamicImage> {
         use screenshots::Screen;
 
-        let screens = Screen::all()
-            .map_err(|e| AppError::Screenshot(format!("获取屏幕列表失败: {e}")))?;
+        let screens =
+            Screen::all().map_err(|e| AppError::Screenshot(format!("获取屏幕列表失败: {e}")))?;
         if screens.is_empty() {
             return Err(AppError::Screenshot("没有找到屏幕".to_string()));
         }
@@ -764,7 +763,13 @@ impl ScreenshotService {
             max_x = max_x.max(offset_x + width);
             max_y = max_y.max(offset_y + height);
 
-            captured_images.push((offset_x, offset_y, width as u32, height as u32, image.into_raw()));
+            captured_images.push((
+                offset_x,
+                offset_y,
+                width as u32,
+                height as u32,
+                image.into_raw(),
+            ));
         }
 
         let canvas_width = (max_x - min_x).max(1) as u32;

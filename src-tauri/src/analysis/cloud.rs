@@ -104,7 +104,7 @@ impl CloudAnalyzer {
         // 让 AI 自由发挥，不设置固定模板格式
         let prompt = append_custom_prompt(
             format!(
-            r#"以下是一位打工人今天的工作数据：
+                r#"以下是一位打工人今天的工作数据：
 
 {stats_summary}
 
@@ -121,7 +121,7 @@ impl CloudAnalyzer {
 - 或者任何你认为有价值的洞察
 
 用 Markdown 格式书写，不需要遵循固定的模板，让这份报告既专业又有趣。"#
-        ),
+            ),
             &self.custom_prompt,
         );
 

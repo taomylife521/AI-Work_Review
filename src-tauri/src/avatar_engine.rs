@@ -322,7 +322,10 @@ pub fn sync_avatar_window(
         ensure_avatar_window(app, scale)?;
         if let Some(window) = app.get_webview_window(AVATAR_WINDOW_LABEL) {
             let normalized_scale = normalize_avatar_scale(scale);
-            let current_position = window.outer_position().ok().map(|position| (position.x, position.y));
+            let current_position = window
+                .outer_position()
+                .ok()
+                .map(|position| (position.x, position.y));
             let (x, y) =
                 default_avatar_position(app, normalized_scale, current_position.or(saved_position));
             resize_avatar_window(&window, normalized_scale);

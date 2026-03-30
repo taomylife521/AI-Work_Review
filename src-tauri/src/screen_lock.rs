@@ -177,7 +177,12 @@ impl ScreenLockMonitor {
 
         // 方法1: 通过 loginctl 检查 session 是否 locked
         if let Ok(output) = Command::new("loginctl")
-            .args(["show-session", "auto", "--property=LockedHint", "--no-legend"])
+            .args([
+                "show-session",
+                "auto",
+                "--property=LockedHint",
+                "--no-legend",
+            ])
             .output()
         {
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -188,7 +193,13 @@ impl ScreenLockMonitor {
         }
 
         // 方法2: 检查常见锁屏进程
-        for proc_name in &["cinnamon-screensaver", "gnome-screensaver", "xscreensaver", "i3lock", "swaylock"] {
+        for proc_name in &[
+            "cinnamon-screensaver",
+            "gnome-screensaver",
+            "xscreensaver",
+            "i3lock",
+            "swaylock",
+        ] {
             if let Ok(output) = Command::new("pgrep").args(["-x", proc_name]).output() {
                 if output.status.success() {
                     log::debug!("锁屏检测: 锁屏进程 {} 运行中", proc_name);
