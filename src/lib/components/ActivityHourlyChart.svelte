@@ -2,6 +2,8 @@
   import { locale, formatDurationLocalized, t } from '$lib/i18n/index.js';
 
   export let data = [];
+  export let distributionTitle = '';
+  export let distributionSubtitleKey = 'hourlyChart.distributionSubtitle';
 
   const keyHours = [0, 6, 12, 18, 23];
   $: currentLocale = $locale;
@@ -62,9 +64,11 @@
   <div class="rounded-2xl border border-slate-100 bg-white p-4 dark:border-slate-700/60 dark:bg-slate-800/80">
     <div class="mb-4 flex items-center justify-between gap-3">
       <div>
-        <p class="text-sm font-semibold text-slate-700 dark:text-slate-200">{t('hourlyChart.distributionTitle')}</p>
+        <p class="text-sm font-semibold text-slate-700 dark:text-slate-200">
+          {distributionTitle || t('hourlyChart.distributionTitle')}
+        </p>
         <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-          {t('hourlyChart.distributionSubtitle', {
+          {t(distributionSubtitleKey, {
             hour: formatHourLabel(peakBucket.hour),
             duration: formatDurationLocalized(peakBucket.duration),
           })}

@@ -54,77 +54,17 @@ impl ScreenLockMonitor {
     }
 
     /// 检查屏幕是否锁定 (macOS)
-    /// 使用多种方法检测，避免依赖 Python/pyobjc
+    /// 仅使用 CGSessionCopyCurrentDictionary (FFI)，不再 spawn 外部进程
+    /// CGSession 覆盖锁屏、睡眠、Power Nap 唤醒等全部场景，是最可靠的检测方式
     #[cfg(target_os = "macos")]
     pub fn is_locked(&self) -> bool {
-        use std::process::Command;
-
-        // 方法0 (最可靠): CGSessionCopyCurrentDictionary
+        // CGSessionCopyCurrentDictionary: 纯 FFI 调用，无进程 spawn 开销
         // 返回当前登录会话字典，包含 CGSSessionScreenIsLocked 键
-        // 锁屏、睡眠、Power Nap 唤醒等场景均能准确检测
-        if Self::is_session_locked() {
+        let locked = Self::is_session_locked();
+        if locked {
             log::debug!("锁屏检测: CGSession 报告屏幕已锁定");
-            return true;
         }
-
-        // 方法1: 检查是否有屏幕保护程序运行
-        let output = Command::new("pgrep")
-            .args(["-x", "ScreenSaverEngine"])
-            .output();
-
-        if let Ok(out) = output {
-            if out.status.success() {
-                log::debug!("锁屏检测: 屏幕保护程序运行中");
-                return true;
-            }
-        }
-
-        // 方法2: 使用 ioreg 检测显示器电源状态
-        // 当屏幕关闭（锁屏后自动关闭）时，IODisplayWrangler 的 DevicePowerState 为 0
-        let output = Command::new("ioreg")
-            .args(["-r", "-c", "IODisplayWrangler", "-d", "1"])
-            .output();
-
-        if let Ok(out) = output {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            // 检查 DevicePowerState = 0 表示显示器已关闭
-            if stdout.contains("\"DevicePowerState\" = 0") {
-                log::debug!("锁屏检测: 显示器已关闭");
-                return true;
-            }
-        }
-
-        // 方法3: 使用 osascript 检查屏幕保护状态
-        let output = Command::new("osascript")
-            .args([
-                "-e",
-                "tell application \"System Events\" to return running of screen saver preferences",
-            ])
-            .output();
-
-        if let Ok(out) = output {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            if stdout.trim() == "true" {
-                log::debug!("锁屏检测: 屏幕保护已激活");
-                return true;
-            }
-        }
-
-        // 方法4: 检查 loginwindow 进程是否在前台（用户在锁屏界面）
-        let output = Command::new("osascript")
-            .args(["-e", "tell application \"System Events\" to get name of first application process whose frontmost is true"])
-            .output();
-
-        if let Ok(out) = output {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            let frontmost = stdout.trim().to_lowercase();
-            if frontmost == "loginwindow" || frontmost == "screensaverengine" {
-                log::debug!("锁屏检测: 前台应用为锁屏界面");
-                return true;
-            }
-        }
-
-        false
+        locked
     }
 
     /// macOS: 通过 CGSessionCopyCurrentDictionary 检测锁屏
@@ -261,5 +201,16 @@ impl ScreenLockMonitor {
 impl Default for ScreenLockMonitor {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ScreenLockMonitor;
+
+    #[test]
+    fn 开始时间等于结束时间时不应视为工作时间() {
+        assert!(!ScreenLockMonitor::is_work_time(9, 0, 9, 0));
+        assert!(!ScreenLockMonitor::is_work_time(0, 0, 0, 0));
     }
 }

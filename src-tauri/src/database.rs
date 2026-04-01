@@ -235,6 +235,24 @@ fn calculate_overlap_duration(
     (overlap_end - overlap_start).max(0)
 }
 
+fn calculate_work_time_overlap_duration(
+    interval_end: i64,
+    duration: i64,
+    day_start: i64,
+    day_end: i64,
+    work_start: i64,
+    work_end: i64,
+) -> i64 {
+    if work_start == work_end {
+        0
+    } else if work_end > work_start {
+        calculate_overlap_duration(interval_end, duration, work_start, work_end)
+    } else {
+        calculate_overlap_duration(interval_end, duration, day_start, work_end)
+            + calculate_overlap_duration(interval_end, duration, work_start, day_end)
+    }
+}
+
 fn tokenize_memory_query(query: &str) -> Vec<String> {
     query
         .split_whitespace()
@@ -1066,10 +1084,14 @@ impl Database {
 
             total_duration += day_duration;
 
-            if work_end_ts > work_start_ts {
-                work_time_duration +=
-                    calculate_overlap_duration(timestamp, duration, work_start_ts, work_end_ts);
-            }
+            work_time_duration += calculate_work_time_overlap_duration(
+                timestamp,
+                duration,
+                start_ts,
+                end_ts,
+                work_start_ts,
+                work_end_ts,
+            );
 
             let interval_start = timestamp.saturating_sub(duration);
             let overlap_start = interval_start.max(start_ts);
@@ -2488,6 +2510,57 @@ mod tests {
 
         assert_eq!(stats.total_duration, 20 * 60);
         assert_eq!(stats.work_time_duration, 10 * 60);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 跨零点办公时长应累计当天两段工作窗口的交集() {
+        let db_path = temp_db_path("daily-stats-cross-midnight-work-window");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let date = "2026-03-27";
+
+        let records = vec![
+            Activity {
+                id: None,
+                timestamp: local_ts(date, 5, 30),
+                app_name: "Code".to_string(),
+                window_title: "night-ops.md".to_string(),
+                screenshot_path: "night-ops-early.jpg".to_string(),
+                ocr_text: None,
+                category: "development".to_string(),
+                duration: 120 * 60,
+                browser_url: None,
+                executable_path: None,
+                semantic_category: None,
+                semantic_confidence: None,
+            },
+            Activity {
+                id: None,
+                timestamp: local_ts(date, 23, 30),
+                app_name: "Code".to_string(),
+                window_title: "night-ops.md".to_string(),
+                screenshot_path: "night-ops-late.jpg".to_string(),
+                ocr_text: None,
+                category: "development".to_string(),
+                duration: 120 * 60,
+                browser_url: None,
+                executable_path: None,
+                semantic_category: None,
+                semantic_confidence: None,
+            },
+        ];
+
+        for record in records {
+            db.insert_activity(&record).expect("插入测试数据失败");
+        }
+
+        let stats = db
+            .get_daily_stats_with_work_time(date, 22, 6, 0, 0)
+            .expect("读取今日统计失败");
+
+        assert_eq!(stats.total_duration, 240 * 60);
+        assert_eq!(stats.work_time_duration, 210 * 60);
 
         let _ = std::fs::remove_file(db_path);
     }

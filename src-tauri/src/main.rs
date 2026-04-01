@@ -345,6 +345,8 @@ pub struct AppState {
     pub is_paused: bool,
     pub avatar_state: avatar_engine::AvatarStatePayload,
     pub avatar_generating_report: bool,
+    /// avatar 循环缓存的活动窗口（时间戳 + 窗口信息），供 screenshot 循环复用
+    pub cached_active_window: Option<(std::time::Instant, monitor::ActiveWindow)>,
 }
 
 #[derive(Default)]
@@ -731,8 +733,23 @@ fn monitoring_poll_interval_ms() -> u64 {
     monitoring_poll_interval_ms_for_platform(cfg!(target_os = "macos"))
 }
 
+const ACTIVE_WINDOW_CACHE_MAX_AGE_MS: u64 = 1250;
 const MIN_CAPTURE_INTERVAL_MS: u128 = 3000;
 const MIN_BROWSER_CHANGE_CAPTURE_INTERVAL_MS: u128 = 1200;
+
+fn reusable_cached_active_window(
+    cached: Option<&(std::time::Instant, monitor::ActiveWindow)>,
+    now: std::time::Instant,
+) -> Option<monitor::ActiveWindow> {
+    let (sampled_at, active_window) = cached?;
+    let age = now.checked_duration_since(*sampled_at)?;
+
+    if age > Duration::from_millis(ACTIVE_WINDOW_CACHE_MAX_AGE_MS) {
+        return None;
+    }
+
+    Some(active_window.clone())
+}
 
 fn should_probe_browser_url_before_change_detection(
     app_name: &str,
@@ -990,7 +1007,9 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
         };
 
         let app_category_rules = {
-            let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
+            let mut state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
+            // 写入缓存供 screenshot 循环复用，避免重复 spawn osascript
+            state_guard.cached_active_window = Some((sampled_at, active_window.clone()));
             state_guard.config.app_category_rules.clone()
         };
 
@@ -1174,11 +1193,20 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
         // 获取当前活动窗口
         // 失败原因：Windows 睡眠/待机/UAC 时无前台窗口、macOS 权限不足等
         // 此时重置计时器，避免累积的时长被错误归属到下一个真实应用
-        let mut active_window = match monitor::get_active_window() {
-            Ok(w) => w,
-            Err(_) => {
-                last_capture_time = std::time::Instant::now();
-                continue;
+        let active_window_now = std::time::Instant::now();
+        let cached_active_window = {
+            let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
+            reusable_cached_active_window(state_guard.cached_active_window.as_ref(), active_window_now)
+        };
+        let mut active_window = if let Some(window) = cached_active_window {
+            window
+        } else {
+            match monitor::get_active_window() {
+                Ok(w) => w,
+                Err(_) => {
+                    last_capture_time = std::time::Instant::now();
+                    continue;
+                }
             }
         };
 
@@ -2313,6 +2341,7 @@ async fn main() {
             initial_avatar_opacity,
         ),
         avatar_generating_report: false,
+        cached_active_window: None,
     }));
     let app_lifecycle_state = Arc::new(Mutex::new(AppLifecycleState::default()));
 
@@ -2587,6 +2616,7 @@ async fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_today_stats,
+            commands::get_overview_stats,
             commands::get_daily_stats,
             commands::get_timeline,
             commands::generate_report,
@@ -2699,14 +2729,17 @@ mod tests {
         browser_change_capture_min_interval_ms, effective_dock_visibility,
         launch_args_contain_autostart, main_window_close_behavior, monitoring_poll_interval_ms,
         monitoring_poll_interval_ms_for_platform, recording_loop_decision,
-        resolve_activity_classification, screen_lock_check_interval_ms_for_platform,
-        should_confirm_idle, should_hide_main_window_on_setup, should_prevent_exit,
+        resolve_activity_classification, reusable_cached_active_window,
+        screen_lock_check_interval_ms_for_platform, should_confirm_idle,
+        should_hide_main_window_on_setup, should_prevent_exit,
         should_probe_browser_url_before_change_detection, tray_recording_toggle_action,
         tray_recording_toggle_label, BreakReminderRuntime, BreakReminderSignal,
         MainWindowCloseBehavior, RecordingToggleAction,
     };
     use crate::avatar_engine::{apply_avatar_opacity, default_avatar_state, derive_avatar_state};
     use crate::config::{AppConfig, WebsiteSemanticRule};
+    use crate::monitor::ActiveWindow;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn 暂停录制时应重置截图计时器() {
@@ -2859,6 +2892,44 @@ mod tests {
     #[test]
     fn mac锁屏检测轮询间隔应显著降频() {
         assert_eq!(screen_lock_check_interval_ms_for_platform(true), 5000);
+    }
+
+    #[test]
+    fn 新鲜的活动窗口缓存应被截图循环复用() {
+        let now = Instant::now();
+        let cached_window = ActiveWindow {
+            app_name: "Cursor".to_string(),
+            window_title: "main.rs".to_string(),
+            browser_url: None,
+            executable_path: None,
+            window_bounds: None,
+        };
+
+        let reused = reusable_cached_active_window(Some(&(now, cached_window.clone())), now);
+
+        assert!(reused.is_some());
+        let reused = reused.expect("fresh cache should be reused");
+        assert_eq!(reused.app_name, cached_window.app_name);
+        assert_eq!(reused.window_title, cached_window.window_title);
+    }
+
+    #[test]
+    fn 过期的活动窗口缓存不应被截图循环复用() {
+        let now = Instant::now();
+        let cached_window = ActiveWindow {
+            app_name: "Cursor".to_string(),
+            window_title: "main.rs".to_string(),
+            browser_url: None,
+            executable_path: None,
+            window_bounds: None,
+        };
+        let stale_at = now
+            .checked_sub(Duration::from_millis(1500))
+            .expect("stale timestamp should be valid");
+
+        let reused = reusable_cached_active_window(Some(&(stale_at, cached_window)), now);
+
+        assert!(reused.is_none());
     }
 
     #[test]

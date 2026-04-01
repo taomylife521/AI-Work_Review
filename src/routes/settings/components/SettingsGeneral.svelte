@@ -45,8 +45,14 @@
     currentLocale;
     const startTotal = startHour * 60 + startMinute;
     const endTotal = endHour * 60 + endMinute;
-    const diffSeconds = (endTotal - startTotal) * 60;
-    workHours = diffSeconds <= 0 ? '—' : formatDurationLocalized(diffSeconds);
+    const isZeroDuration = endTotal === startTotal;
+    const diffMinutes = isZeroDuration
+      ? 0
+      : endTotal < startTotal
+        ? endTotal + 24 * 60 - startTotal
+        : endTotal - startTotal;
+    const diffSeconds = diffMinutes * 60;
+    workHours = isZeroDuration ? formatDurationLocalized(0) : formatDurationLocalized(diffSeconds);
   }
 
   function updateStart(h, m) {

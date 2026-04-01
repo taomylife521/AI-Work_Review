@@ -3,7 +3,10 @@ use crate::config::{
     AiProvider, AiProviderConfig, AppCategoryRule, AppConfig, ModelConfig, WebsiteSemanticRule,
 };
 use crate::database::Database;
-use crate::database::{Activity, DailyReport, DailyStats, MemorySearchItem};
+use crate::database::{
+    Activity, AppUsage, BrowserUsage, CategoryUsage, DailyReport, DailyStats, DomainUsage,
+    HourlyActivityBucket, MemorySearchItem, UrlDetail, UrlUsage,
+};
 use crate::error::AppError;
 use crate::privacy::PrivacyFilter;
 use crate::screenshot::ScreenshotService;
@@ -17,6 +20,7 @@ use crate::AppState;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -1904,6 +1908,350 @@ fn should_check_for_updates(settings: &UpdateSettings) -> bool {
     elapsed_hours >= interval_hours
 }
 
+fn collect_ignored_apps_for_stats(config: &AppConfig) -> Vec<String> {
+    use crate::config::PrivacyLevel;
+
+    config
+        .privacy
+        .app_rules
+        .iter()
+        .filter(|rule| rule.level == PrivacyLevel::Ignored)
+        .map(|rule| rule.app_name.to_lowercase())
+        .collect()
+}
+
+fn matches_ignored_app(app_name: &str, ignored_apps: &[String]) -> bool {
+    let app_lower = app_name.to_lowercase();
+    ignored_apps
+        .iter()
+        .any(|ignored| app_lower.contains(ignored) || ignored.contains(&app_lower))
+}
+
+fn apply_ignored_apps_to_stats(mut stats: DailyStats, ignored_apps: &[String]) -> DailyStats {
+    if ignored_apps.is_empty() {
+        return stats;
+    }
+
+    let filtered_app_usage: Vec<_> = stats
+        .app_usage
+        .into_iter()
+        .filter(|app| !matches_ignored_app(&app.app_name, ignored_apps))
+        .collect();
+
+    stats.total_duration = filtered_app_usage.iter().map(|app| app.duration).sum();
+    stats.app_usage = filtered_app_usage;
+
+    stats
+        .browser_usage
+        .retain(|browser| !matches_ignored_app(&browser.browser_name, ignored_apps));
+    stats.browser_duration = stats.browser_usage.iter().map(|browser| browser.duration).sum();
+
+    if stats.work_time_duration > stats.total_duration {
+        stats.work_time_duration = stats.total_duration;
+    }
+
+    stats
+}
+
+fn load_daily_stats_for_overview(state: &AppState, date: &str) -> Result<DailyStats, AppError> {
+    state.database.get_daily_stats_with_work_time(
+        date,
+        state.config.work_start_hour,
+        state.config.work_end_hour,
+        state.config.work_start_minute,
+        state.config.work_end_minute,
+    )
+}
+
+fn overview_week_bounds_for_date(anchor: chrono::NaiveDate) -> (String, String) {
+    use chrono::Datelike;
+
+    let monday = anchor - chrono::Duration::days(anchor.weekday().num_days_from_monday() as i64);
+    (
+        monday.format("%Y-%m-%d").to_string(),
+        anchor.format("%Y-%m-%d").to_string(),
+    )
+}
+
+#[derive(Default)]
+struct DomainAggregate {
+    duration: i64,
+    semantic_votes: HashMap<String, i64>,
+    urls: HashMap<String, i64>,
+}
+
+#[derive(Default)]
+struct BrowserAggregate {
+    duration: i64,
+    executable_path: Option<String>,
+    domains: HashMap<String, DomainAggregate>,
+}
+
+fn update_preferred_path(target: &mut Option<String>, candidate: Option<String>) {
+    if target.is_none() {
+        *target = candidate.filter(|value| !value.trim().is_empty());
+    }
+}
+
+fn record_semantic_vote(votes: &mut HashMap<String, i64>, semantic_category: Option<String>, duration: i64) {
+    if duration <= 0 {
+        return;
+    }
+
+    if let Some(category) = semantic_category
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        *votes.entry(category).or_insert(0) += duration;
+    }
+}
+
+fn resolve_primary_semantic(votes: HashMap<String, i64>) -> Option<String> {
+    votes
+        .into_iter()
+        .max_by(|(left_label, left_duration), (right_label, right_duration)| {
+            left_duration
+                .cmp(right_duration)
+                .then_with(|| right_label.cmp(left_label))
+        })
+        .map(|(label, _)| label)
+}
+
+fn sort_url_details(items: &mut [UrlDetail]) {
+    items.sort_by(|left, right| {
+        right
+            .duration
+            .cmp(&left.duration)
+            .then_with(|| right.url.cmp(&left.url))
+    });
+}
+
+fn sort_domain_usage(items: &mut [DomainUsage]) {
+    items.sort_by(|left, right| {
+        right
+            .duration
+            .cmp(&left.duration)
+            .then_with(|| left.domain.cmp(&right.domain))
+    });
+
+    for item in items {
+        sort_url_details(&mut item.urls);
+    }
+}
+
+fn build_domain_usage_from_aggregate(
+    domain: String,
+    aggregate: DomainAggregate,
+) -> DomainUsage {
+    let mut urls = aggregate
+        .urls
+        .into_iter()
+        .map(|(url, duration)| UrlDetail { url, duration })
+        .collect::<Vec<_>>();
+    sort_url_details(&mut urls);
+
+    DomainUsage {
+        domain,
+        duration: aggregate.duration,
+        semantic_category: resolve_primary_semantic(aggregate.semantic_votes),
+        urls,
+    }
+}
+
+fn merge_domain_usage_maps(target: &mut HashMap<String, DomainAggregate>, domains: Vec<DomainUsage>) {
+    for domain in domains {
+        let domain_key = domain.domain.clone();
+        let entry = target.entry(domain_key).or_default();
+        entry.duration += domain.duration;
+        record_semantic_vote(
+            &mut entry.semantic_votes,
+            domain.semantic_category.clone(),
+            domain.duration,
+        );
+
+        for url in domain.urls {
+            *entry.urls.entry(url.url).or_insert(0) += url.duration;
+        }
+    }
+}
+
+fn sum_daily_stats(days: Vec<DailyStats>) -> DailyStats {
+    let mut total_duration = 0;
+    let mut screenshot_count = 0;
+    let mut browser_duration = 0;
+    let mut work_time_duration = 0;
+
+    let mut app_usage_map: HashMap<String, AppUsage> = HashMap::new();
+    let mut category_usage_map: HashMap<String, i64> = HashMap::new();
+    let mut url_usage_map: HashMap<String, UrlUsage> = HashMap::new();
+    let mut domain_usage_map: HashMap<String, DomainAggregate> = HashMap::new();
+    let mut browser_usage_map: HashMap<String, BrowserAggregate> = HashMap::new();
+    let mut hourly_activity_distribution: Vec<HourlyActivityBucket> = (0..24)
+        .map(|hour| HourlyActivityBucket { hour, duration: 0 })
+        .collect();
+
+    for day in days {
+        total_duration += day.total_duration;
+        screenshot_count += day.screenshot_count;
+        browser_duration += day.browser_duration;
+        work_time_duration += day.work_time_duration;
+
+        for app in day.app_usage {
+            let entry = app_usage_map.entry(app.app_name.clone()).or_insert(AppUsage {
+                app_name: app.app_name.clone(),
+                duration: 0,
+                count: 0,
+                executable_path: None,
+            });
+            entry.duration += app.duration;
+            entry.count += app.count;
+            update_preferred_path(&mut entry.executable_path, app.executable_path);
+        }
+
+        for category in day.category_usage {
+            *category_usage_map.entry(category.category).or_insert(0) += category.duration;
+        }
+
+        for url in day.url_usage {
+            let entry = url_usage_map.entry(url.url.clone()).or_insert(UrlUsage {
+                url: url.url.clone(),
+                domain: url.domain.clone(),
+                duration: 0,
+            });
+            entry.duration += url.duration;
+            if entry.domain.trim().is_empty() {
+                entry.domain = url.domain;
+            }
+        }
+
+        merge_domain_usage_maps(&mut domain_usage_map, day.domain_usage);
+
+        for browser in day.browser_usage {
+            let entry = browser_usage_map
+                .entry(browser.browser_name.clone())
+                .or_default();
+            entry.duration += browser.duration;
+            update_preferred_path(&mut entry.executable_path, browser.executable_path);
+            merge_domain_usage_maps(&mut entry.domains, browser.domains);
+        }
+
+        for bucket in day.hourly_activity_distribution {
+            if (0..24).contains(&bucket.hour) {
+                hourly_activity_distribution[bucket.hour as usize].duration += bucket.duration;
+            }
+        }
+    }
+
+    let mut app_usage = app_usage_map.into_values().collect::<Vec<_>>();
+    app_usage.sort_by(|left, right| {
+        right
+            .duration
+            .cmp(&left.duration)
+            .then_with(|| left.app_name.cmp(&right.app_name))
+    });
+
+    let mut category_usage = category_usage_map
+        .into_iter()
+        .map(|(category, duration)| CategoryUsage { category, duration })
+        .collect::<Vec<_>>();
+    category_usage.sort_by(|left, right| {
+        right
+            .duration
+            .cmp(&left.duration)
+            .then_with(|| left.category.cmp(&right.category))
+    });
+
+    let mut url_usage = url_usage_map.into_values().collect::<Vec<_>>();
+    url_usage.sort_by(|left, right| {
+        right
+            .duration
+            .cmp(&left.duration)
+            .then_with(|| right.url.cmp(&left.url))
+    });
+
+    let mut domain_usage = domain_usage_map
+        .into_iter()
+        .map(|(domain, aggregate)| build_domain_usage_from_aggregate(domain, aggregate))
+        .collect::<Vec<_>>();
+    sort_domain_usage(&mut domain_usage);
+
+    let mut browser_usage = browser_usage_map
+        .into_iter()
+        .map(|(browser_name, aggregate)| {
+            let mut domains = aggregate
+                .domains
+                .into_iter()
+                .map(|(domain, domain_aggregate)| {
+                    build_domain_usage_from_aggregate(domain, domain_aggregate)
+                })
+                .collect::<Vec<_>>();
+            sort_domain_usage(&mut domains);
+
+            BrowserUsage {
+                browser_name,
+                duration: aggregate.duration,
+                executable_path: aggregate.executable_path,
+                domains,
+            }
+        })
+        .collect::<Vec<_>>();
+    browser_usage.sort_by(|left, right| {
+        right
+            .duration
+            .cmp(&left.duration)
+            .then_with(|| left.browser_name.cmp(&right.browser_name))
+    });
+
+    DailyStats {
+        total_duration,
+        screenshot_count,
+        app_usage,
+        category_usage,
+        browser_duration,
+        url_usage,
+        domain_usage,
+        browser_usage,
+        work_time_duration,
+        hourly_activity_distribution,
+    }
+}
+
+fn resolve_overview_anchor_date(date: Option<&str>) -> Result<chrono::NaiveDate, AppError> {
+    match date.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+            .map_err(|e| AppError::Config(format!("解析概览日期失败: {e}"))),
+        None => Ok(chrono::Local::now().date_naive()),
+    }
+}
+
+fn resolve_overview_date_span(
+    date: Option<&str>,
+    date_from: Option<&str>,
+    date_to: Option<&str>,
+) -> Result<(chrono::NaiveDate, chrono::NaiveDate), AppError> {
+    let fallback = resolve_overview_anchor_date(date)?;
+    let start = date_from
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+                .map_err(|e| AppError::Config(format!("解析概览开始日期失败: {e}")))
+        })
+        .transpose()?
+        .unwrap_or(fallback);
+    let end = date_to
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+                .map_err(|e| AppError::Config(format!("解析概览结束日期失败: {e}")))
+        })
+        .transpose()?
+        .unwrap_or(start);
+
+    Ok(if start <= end { (start, end) } else { (end, start) })
+}
+
 /// 获取今日统计
 #[tauri::command]
 pub async fn get_today_stats(
@@ -1911,62 +2259,74 @@ pub async fn get_today_stats(
 ) -> Result<DailyStats, AppError> {
     let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    // 使用配置的工作时间
-    let mut stats = state.database.get_daily_stats_with_work_time(
-        &today,
-        state.config.work_start_hour,
-        state.config.work_end_hour,
-        state.config.work_start_minute,
-        state.config.work_end_minute,
-    )?;
+    let stats = load_daily_stats_for_overview(&state, &today)?;
+    let ignored_apps = collect_ignored_apps_for_stats(&state.config);
+    Ok(apply_ignored_apps_to_stats(stats, &ignored_apps))
+}
 
-    // 过滤掉被隐私规则设置为 Ignored 的应用
-    use crate::config::PrivacyLevel;
-    let ignored_apps: Vec<_> = state
-        .config
-        .privacy
-        .app_rules
-        .iter()
-        .filter(|r| r.level == PrivacyLevel::Ignored)
-        .map(|r| r.app_name.to_lowercase())
-        .collect();
+/// 获取概览统计（支持今日 / 指定日期 / 本周）
+#[tauri::command]
+pub async fn get_overview_stats(
+    mode: String,
+    date: Option<String>,
+    date_from: Option<String>,
+    date_to: Option<String>,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<DailyStats, AppError> {
+    let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+    let normalized_mode = mode.trim().to_lowercase();
+    let ignored_apps = collect_ignored_apps_for_stats(&state.config);
 
-    if !ignored_apps.is_empty() {
-        // 过滤 app_usage
-        let filtered_app_usage: Vec<_> = stats
-            .app_usage
-            .into_iter()
-            .filter(|app| {
-                let app_lower = app.app_name.to_lowercase();
-                !ignored_apps
-                    .iter()
-                    .any(|ignored| app_lower.contains(ignored) || ignored.contains(&app_lower))
-            })
-            .collect();
+    let stats = match normalized_mode.as_str() {
+        "date" => {
+            let (start, end) = resolve_overview_date_span(
+                date.as_deref(),
+                date_from.as_deref(),
+                date_to.as_deref(),
+            )?;
 
-        // 重新计算总时长
-        let filtered_duration: i64 = filtered_app_usage.iter().map(|a| a.duration).sum();
-        stats.total_duration = filtered_duration;
-        stats.app_usage = filtered_app_usage;
-
-        // 过滤 browser_usage
-        stats.browser_usage.retain(|b| {
-            let browser_lower = b.browser_name.to_lowercase();
-            !ignored_apps
-                .iter()
-                .any(|ignored| browser_lower.contains(ignored) || ignored.contains(&browser_lower))
-        });
-
-        // 重新计算浏览器时长
-        stats.browser_duration = stats.browser_usage.iter().map(|b| b.duration).sum();
-
-        // 办公时长不能超过总时长（隐私过滤后的）
-        if stats.work_time_duration > stats.total_duration {
-            stats.work_time_duration = stats.total_duration;
+            if start == end {
+                let date_value = start.format("%Y-%m-%d").to_string();
+                load_daily_stats_for_overview(&state, &date_value)?
+            } else {
+                let mut daily_stats = Vec::new();
+                let mut current = start;
+                while current <= end {
+                    let current_date = current.format("%Y-%m-%d").to_string();
+                    daily_stats.push(load_daily_stats_for_overview(&state, &current_date)?);
+                    current = current.succ_opt().ok_or_else(|| {
+                        AppError::Config("计算概览日期范围失败".to_string())
+                    })?;
+                }
+                sum_daily_stats(daily_stats)
+            }
         }
-    }
+        "week" => {
+            let anchor = resolve_overview_anchor_date(date.as_deref())?;
+            let (date_from, date_to) = overview_week_bounds_for_date(anchor);
+            let start = chrono::NaiveDate::parse_from_str(&date_from, "%Y-%m-%d")
+                .map_err(|e| AppError::Config(format!("解析周概览开始日期失败: {e}")))?;
+            let end = chrono::NaiveDate::parse_from_str(&date_to, "%Y-%m-%d")
+                .map_err(|e| AppError::Config(format!("解析周概览结束日期失败: {e}")))?;
 
-    Ok(stats)
+            let mut daily_stats = Vec::new();
+            let mut current = start;
+            while current <= end {
+                let current_date = current.format("%Y-%m-%d").to_string();
+                daily_stats.push(load_daily_stats_for_overview(&state, &current_date)?);
+                current = current
+                    .succ_opt()
+                    .ok_or_else(|| AppError::Config("计算周概览日期范围失败".to_string()))?;
+            }
+            sum_daily_stats(daily_stats)
+        }
+        _ => {
+            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            load_daily_stats_for_overview(&state, &today)?
+        }
+    };
+
+    Ok(apply_ignored_apps_to_stats(stats, &ignored_apps))
 }
 
 /// 获取指定日期的统计
@@ -3003,6 +3363,10 @@ async fn test_ollama(
 }
 
 /// 测试 OpenAI 连接
+fn openai_connection_test_max_tokens() -> u32 {
+    16
+}
+
 async fn test_openai(
     client: &reqwest::Client,
     config: &AiProviderConfig,
@@ -3015,7 +3379,7 @@ async fn test_openai(
         .json(&serde_json::json!({
             "model": config.model,
             "messages": [{"role": "user", "content": "Hello"}],
-            "max_tokens": 5,
+            "max_tokens": openai_connection_test_max_tokens(),
         }))
         .send()
         .await
@@ -5559,15 +5923,20 @@ mod tests {
         detect_assistant_question_kind, detect_assistant_question_kind_with_mode,
         export_daily_report_markdown, format_browser_url_for_display, macos_score_app_bundle_name,
         merge_windows_icon_lookup_candidates, normalize_macos_app_lookup_name,
-        normalize_saved_report_ai_mode, parse_ollama_model_names, resolve_saved_report_metadata,
-        AssistantChatMessage, AssistantQuestionKind, AssistantReasoningMode,
+        normalize_saved_report_ai_mode, openai_connection_test_max_tokens,
+        overview_week_bounds_for_date, parse_ollama_model_names, resolve_saved_report_metadata,
+        sum_daily_stats, AssistantChatMessage, AssistantQuestionKind, AssistantReasoningMode,
         UPDATER_JSON_ENDPOINTS, UPDATE_CONNECT_TIMEOUT_SECS, UPDATE_REQUEST_TIMEOUT_SECS,
     };
     use crate::config::AiMode;
-    use crate::database::MemorySearchItem;
+    use crate::database::{
+        AppUsage, BrowserUsage, CategoryUsage, DailyStats, DomainUsage, HourlyActivityBucket,
+        MemorySearchItem, UrlDetail, UrlUsage,
+    };
     use crate::work_intelligence::{
         IntentAnalysisResult, IntentSummary, NamedDuration, WeeklyReviewResult, WorkSession,
     };
+    use chrono::NaiveDate;
     use std::path::{Path, PathBuf};
 
     fn sample_review() -> WeeklyReviewResult {
@@ -5656,6 +6025,180 @@ mod tests {
             ),
             "https://example.com/search?q=a%26b&name=张三"
         );
+    }
+
+    #[test]
+    fn openai兼容探测请求的输出上限不应低于十六() {
+        assert_eq!(openai_connection_test_max_tokens(), 16);
+    }
+
+    #[test]
+    fn 概览本周范围应从周一开始到锚点日期结束() {
+        let anchor = NaiveDate::from_ymd_opt(2026, 4, 1).expect("valid anchor date");
+
+        let (date_from, date_to) = overview_week_bounds_for_date(anchor);
+
+        assert_eq!(date_from, "2026-03-30");
+        assert_eq!(date_to, "2026-04-01");
+    }
+
+    #[test]
+    fn 周概览统计应合并重复应用浏览器与小时分布() {
+        let hourly = |hour, duration| HourlyActivityBucket { hour, duration };
+        let day_one = DailyStats {
+            total_duration: 120,
+            screenshot_count: 2,
+            app_usage: vec![AppUsage {
+                app_name: "Cursor".to_string(),
+                duration: 120,
+                count: 2,
+                executable_path: Some("/Applications/Cursor.app".to_string()),
+            }],
+            category_usage: vec![CategoryUsage {
+                category: "development".to_string(),
+                duration: 120,
+            }],
+            browser_duration: 60,
+            url_usage: vec![UrlUsage {
+                url: "https://docs.example.com/a".to_string(),
+                domain: "docs.example.com".to_string(),
+                duration: 60,
+            }],
+            domain_usage: vec![DomainUsage {
+                domain: "docs.example.com".to_string(),
+                duration: 60,
+                semantic_category: Some("资料阅读".to_string()),
+                urls: vec![UrlDetail {
+                    url: "https://docs.example.com/a".to_string(),
+                    duration: 60,
+                }],
+            }],
+            browser_usage: vec![BrowserUsage {
+                browser_name: "Google Chrome".to_string(),
+                duration: 60,
+                executable_path: Some("/Applications/Google Chrome.app".to_string()),
+                domains: vec![DomainUsage {
+                    domain: "docs.example.com".to_string(),
+                    duration: 60,
+                    semantic_category: Some("资料阅读".to_string()),
+                    urls: vec![UrlDetail {
+                        url: "https://docs.example.com/a".to_string(),
+                        duration: 60,
+                    }],
+                }],
+            }],
+            work_time_duration: 100,
+            hourly_activity_distribution: vec![hourly(9, 60), hourly(10, 60)],
+        };
+        let day_two = DailyStats {
+            total_duration: 180,
+            screenshot_count: 3,
+            app_usage: vec![
+                AppUsage {
+                    app_name: "Cursor".to_string(),
+                    duration: 120,
+                    count: 1,
+                    executable_path: Some("/Applications/Cursor.app".to_string()),
+                },
+                AppUsage {
+                    app_name: "Google Chrome".to_string(),
+                    duration: 60,
+                    count: 1,
+                    executable_path: Some("/Applications/Google Chrome.app".to_string()),
+                },
+            ],
+            category_usage: vec![
+                CategoryUsage {
+                    category: "development".to_string(),
+                    duration: 120,
+                },
+                CategoryUsage {
+                    category: "browser".to_string(),
+                    duration: 60,
+                },
+            ],
+            browser_duration: 120,
+            url_usage: vec![
+                UrlUsage {
+                    url: "https://docs.example.com/a".to_string(),
+                    domain: "docs.example.com".to_string(),
+                    duration: 30,
+                },
+                UrlUsage {
+                    url: "https://news.example.com/b".to_string(),
+                    domain: "news.example.com".to_string(),
+                    duration: 90,
+                },
+            ],
+            domain_usage: vec![
+                DomainUsage {
+                    domain: "docs.example.com".to_string(),
+                    duration: 30,
+                    semantic_category: Some("资料阅读".to_string()),
+                    urls: vec![UrlDetail {
+                        url: "https://docs.example.com/a".to_string(),
+                        duration: 30,
+                    }],
+                },
+                DomainUsage {
+                    domain: "news.example.com".to_string(),
+                    duration: 90,
+                    semantic_category: Some("资料调研".to_string()),
+                    urls: vec![UrlDetail {
+                        url: "https://news.example.com/b".to_string(),
+                        duration: 90,
+                    }],
+                },
+            ],
+            browser_usage: vec![BrowserUsage {
+                browser_name: "Google Chrome".to_string(),
+                duration: 120,
+                executable_path: Some("/Applications/Google Chrome.app".to_string()),
+                domains: vec![
+                    DomainUsage {
+                        domain: "docs.example.com".to_string(),
+                        duration: 30,
+                        semantic_category: Some("资料阅读".to_string()),
+                        urls: vec![UrlDetail {
+                            url: "https://docs.example.com/a".to_string(),
+                            duration: 30,
+                        }],
+                    },
+                    DomainUsage {
+                        domain: "news.example.com".to_string(),
+                        duration: 90,
+                        semantic_category: Some("资料调研".to_string()),
+                        urls: vec![UrlDetail {
+                            url: "https://news.example.com/b".to_string(),
+                            duration: 90,
+                        }],
+                    },
+                ],
+            }],
+            work_time_duration: 160,
+            hourly_activity_distribution: vec![hourly(9, 30), hourly(10, 90), hourly(11, 60)],
+        };
+
+        let merged = sum_daily_stats(vec![day_one, day_two]);
+
+        assert_eq!(merged.total_duration, 300);
+        assert_eq!(merged.screenshot_count, 5);
+        assert_eq!(merged.work_time_duration, 260);
+        assert_eq!(merged.browser_duration, 180);
+        assert_eq!(merged.app_usage.len(), 2);
+        assert_eq!(merged.app_usage[0].app_name, "Cursor");
+        assert_eq!(merged.app_usage[0].duration, 240);
+        assert_eq!(merged.app_usage[0].count, 3);
+        assert_eq!(merged.hourly_activity_distribution[9].duration, 90);
+        assert_eq!(merged.hourly_activity_distribution[10].duration, 150);
+        assert_eq!(merged.hourly_activity_distribution[11].duration, 60);
+        assert_eq!(merged.browser_usage.len(), 1);
+        assert_eq!(merged.browser_usage[0].duration, 180);
+        assert_eq!(merged.browser_usage[0].domains.len(), 2);
+        assert_eq!(merged.domain_usage[0].domain, "docs.example.com");
+        assert_eq!(merged.domain_usage[0].duration, 90);
+        assert_eq!(merged.url_usage[0].url, "https://news.example.com/b");
+        assert_eq!(merged.url_usage[0].duration, 90);
     }
 
     fn sample_noisy_references() -> Vec<MemorySearchItem> {

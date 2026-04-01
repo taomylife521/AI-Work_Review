@@ -20,16 +20,47 @@
   import { resolveAppIconSrc } from '../lib/utils/appVisuals.js';
   import { formatBrowserUrlForDisplay } from '../lib/utils/browserUrl.js';
 
+  function getLocalDateString() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  function parseDateString(dateValue) {
+    return new Date(`${dateValue}T12:00:00`);
+  }
+
+  function getDateRangeLabel(dateFrom, dateTo) {
+    if (dateFrom === dateTo) {
+      return formatLocalizedDate(parseDateString(dateFrom), { month: 'long', day: 'numeric', weekday: 'short' });
+    }
+    return `${formatLocalizedDate(parseDateString(dateFrom), { month: 'short', day: 'numeric' })} - ${formatLocalizedDate(parseDateString(dateTo), { month: 'short', day: 'numeric' })}`;
+  }
+
+  function getWeekRangeLabel(dateValue) {
+    const anchor = parseDateString(dateValue);
+    const monday = new Date(anchor);
+    monday.setDate(anchor.getDate() - ((anchor.getDay() + 6) % 7));
+    return `${formatLocalizedDate(monday, { month: 'short', day: 'numeric' })} - ${formatLocalizedDate(anchor, { month: 'short', day: 'numeric' })}`;
+  }
+
   let stats = null;
   let loading = true;
   let error = null;
   let unlisten = null;
   let currentTime = new Date();
+  let overviewMode = 'today';
+  let selectedDateFrom = getLocalDateString();
+  let selectedDateTo = getLocalDateString();
   let clockInterval;
   let refreshInterval;
   let handleActivityAdded;
+  let handleVisibilityChange;
   let overviewRefreshPromise = null;
   let overviewRequestId = 0;
+  let lastCheckDate = currentTime.getDate();
   
   let expandedDomains = new Set();
   let editingDomainKey = null;
@@ -54,6 +85,30 @@
   // 浏览器统计弹窗
   let selectedBrowser = null;
   $: currentLocale = $locale;
+  $: isSingleSelectedDate = selectedDateFrom === selectedDateTo;
+  $: overviewSubtitle = overviewMode === 'date'
+    ? getDateRangeLabel(selectedDateFrom, selectedDateTo)
+    : overviewMode === 'week'
+      ? `${t('overview.modeWeek')} · ${getWeekRangeLabel(getLocalDateString())}`
+      : formatLocalizedDate(new Date(), { month: 'long', day: 'numeric', weekday: 'short' });
+  $: overviewStatusLabel = overviewMode === 'today' ? t('overview.live') : t(`overview.${overviewMode === 'date' ? 'modeDate' : 'modeWeek'}`);
+  $: overviewIsLive = overviewMode !== 'date';
+  $: overviewTotalActivityTitle = overviewMode === 'week'
+    ? t('overview.totalActivityWeek')
+    : overviewMode === 'date'
+      ? t(isSingleSelectedDate ? 'overview.totalActivityDate' : 'overview.totalActivityRange')
+      : t('overview.totalActivityToday');
+  $: overviewWorkDurationTitle = overviewMode === 'week'
+    ? t('overview.workDurationWeek')
+    : overviewMode === 'date'
+      ? t(isSingleSelectedDate ? 'overview.workDurationDate' : 'overview.workDurationRange')
+      : t('overview.workDurationToday');
+  $: hourlyChartDistributionTitle = overviewMode === 'week'
+    ? t('hourlyChart.distributionTitleWeek')
+    : overviewMode === 'date'
+      ? t(isSingleSelectedDate ? 'hourlyChart.distributionTitleDate' : 'hourlyChart.distributionTitleRange')
+      : t('hourlyChart.distributionTitleToday');
+  $: hourlyChartDistributionSubtitleKey = 'hourlyChart.distributionSubtitle';
   
   // 订阅全局图标缓存 store
   let appIcons = {};
@@ -125,6 +180,39 @@
     selectedBrowser = findBrowserUsage(browserName, executablePath);
   }
 
+  function shouldUseOverviewCache() {
+    return overviewMode === 'today';
+  }
+
+  function shouldAutoRefreshOverview() {
+    return overviewMode !== 'date';
+  }
+
+  function setOverviewMode(mode) {
+    if (overviewMode === mode) return;
+    overviewMode = mode;
+    if (mode === 'date') {
+      selectedDateFrom = getLocalDateString();
+      selectedDateTo = getLocalDateString();
+    }
+    selectedBrowser = null;
+    cancelDomainSemanticEdit();
+    loadStats(true);
+  }
+
+  function normalizeSelectedDateRange() {
+    if (selectedDateTo < selectedDateFrom) {
+      selectedDateTo = selectedDateFrom;
+    }
+  }
+
+  function handleOverviewDateChange() {
+    normalizeSelectedDateRange();
+    selectedBrowser = null;
+    cancelDomainSemanticEdit();
+    loadStats(true);
+  }
+
   async function saveDomainSemanticRule(domain) {
     const nextCategory = editingSemanticCategory.trim();
     if (!domain || !nextCategory || savingDomainKey === domain.domain) return;
@@ -185,13 +273,19 @@
     }
 
     const requestId = ++overviewRequestId;
-    overviewRefreshPromise = invoke('get_today_stats')
+    overviewRefreshPromise = invoke('get_overview_stats', {
+      mode: overviewMode,
+      dateFrom: overviewMode === 'date' ? selectedDateFrom : undefined,
+      dateTo: overviewMode === 'date' ? selectedDateTo : undefined,
+    })
       .then((newStats) => {
         if (requestId !== overviewRequestId) {
           return;
         }
         stats = newStats;
-        cache.setOverview(newStats);
+        if (shouldUseOverviewCache()) {
+          cache.setOverview(newStats);
+        }
         error = null;
       })
       .catch((e) => {
@@ -210,6 +304,14 @@
   }
 
   async function loadStats(forceRefresh = false) {
+    if (!shouldUseOverviewCache()) {
+      stats = null;
+      loading = true;
+      error = null;
+      await refreshOverviewStats();
+      return;
+    }
+
     // 乐观更新策略：先显示缓存数据，后台刷新后再更新
     let cacheData;
     const unsubscribe = cache.subscribe(c => { cacheData = c; });
@@ -236,26 +338,70 @@
 
   onMount(async () => {
     loadStats();
-    let lastCheckDate = currentTime.getDate();
-    clockInterval = setInterval(() => { 
-      currentTime = new Date();
-      // 跨天检测
-      const newDate = currentTime.getDate();
-      if (newDate !== lastCheckDate) {
-        lastCheckDate = newDate;
+    if (!document.hidden) {
+      clockInterval = setInterval(() => { 
+        currentTime = new Date();
+        if (!shouldAutoRefreshOverview()) {
+          return;
+        }
+        // 跨天检测
+        const newDate = currentTime.getDate();
+        if (newDate !== lastCheckDate) {
+          lastCheckDate = newDate;
+          loadStats(true);
+        }
+      }, 1000);
+      refreshInterval = setInterval(() => {
+        if (shouldAutoRefreshOverview()) {
+          loadStats();
+        }
+      }, 30000);
+    }
+
+    handleVisibilityChange = () => {
+      if (document.hidden) {
+        clearInterval(clockInterval);
+        clearInterval(refreshInterval);
+        clockInterval = null;
+        refreshInterval = null;
+      } else {
+        currentTime = new Date();
+        lastCheckDate = currentTime.getDate();
+        clockInterval = setInterval(() => {
+          currentTime = new Date();
+          if (!shouldAutoRefreshOverview()) {
+            return;
+          }
+          const newDate = currentTime.getDate();
+          if (newDate !== lastCheckDate) {
+            lastCheckDate = newDate;
+            loadStats(true);
+          }
+        }, 1000);
+        refreshInterval = setInterval(() => {
+          if (shouldAutoRefreshOverview()) {
+            loadStats();
+          }
+        }, 30000);
         loadStats(true);
       }
-    }, 1000);
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     
     // 监听 Tauri 截屏事件（后备）
-    unlisten = await listen('screenshot-taken', () => loadStats(true));
+    unlisten = await listen('screenshot-taken', () => {
+      if (!document.hidden && shouldAutoRefreshOverview()) {
+        loadStats(true);
+      }
+    });
     
     // 监听全局 activity-added 事件（实时同步）
-    handleActivityAdded = () => loadStats(true);
+    handleActivityAdded = () => {
+      if (!document.hidden && shouldAutoRefreshOverview()) {
+        loadStats(true);
+      }
+    };
     window.addEventListener('activity-added', handleActivityAdded);
-    
-    // 定时刷新（30秒）
-    refreshInterval = setInterval(loadStats, 30000);
   });
 
   onDestroy(() => {
@@ -263,6 +409,7 @@
     if (clockInterval) clearInterval(clockInterval);
     if (refreshInterval) clearInterval(refreshInterval);
     if (handleActivityAdded) window.removeEventListener('activity-added', handleActivityAdded);
+    if (handleVisibilityChange) document.removeEventListener('visibilitychange', handleVisibilityChange);
     unsubIcons();
   });
 </script>
@@ -279,15 +426,68 @@
       <div class="page-title-copy">
         <h2>{t('overview.title')}</h2>
         <p>
-        {formatLocalizedDate(new Date(), { month: 'long', day: 'numeric', weekday: 'short' })}
-        <span class="ml-1.5 font-mono text-xs">{formatLocalizedTime(currentTime, { hour: '2-digit', minute: '2-digit' })}</span>
+        {overviewSubtitle}
+        {#if overviewMode === 'today'}
+          <span class="ml-1.5 font-mono text-xs">{formatLocalizedTime(currentTime, { hour: '2-digit', minute: '2-digit' })}</span>
+        {/if}
         </p>
       </div>
     </div>
-    <div class="page-status-chip text-emerald-600 dark:text-emerald-400">
-      <span class="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
-      {t('overview.live')}
+    <div class="page-status-chip {overviewIsLive ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'}">
+      <span class="w-1.5 h-1.5 rounded-full {overviewIsLive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}"></span>
+      {overviewStatusLabel}
     </div>
+  </div>
+
+  <div class="mb-4 flex flex-wrap items-center gap-2">
+    <button
+      type="button"
+      class="page-control-btn {overviewMode === 'today' ? 'page-control-btn-active' : ''}"
+      on:click={() => setOverviewMode('today')}
+    >
+      {t('overview.modeToday')}
+    </button>
+    <button
+      type="button"
+      class="page-control-btn {overviewMode === 'week' ? 'page-control-btn-active' : ''}"
+      on:click={() => setOverviewMode('week')}
+    >
+      {t('overview.modeWeek')}
+    </button>
+    <button
+      type="button"
+      class="page-control-btn {overviewMode === 'date' ? 'page-control-btn-active' : ''}"
+      on:click={() => setOverviewMode('date')}
+    >
+      {t('overview.modeDate')}
+    </button>
+
+    {#if overviewMode === 'date'}
+      {#key `overview-date-${currentLocale}`}
+        <div class="flex flex-wrap items-center gap-2">
+          <input
+            type="date"
+            bind:value={selectedDateFrom}
+            max={getLocalDateString()}
+            lang={currentLocale}
+            aria-label={t('overview.rangeStart')}
+            class="page-control-input w-auto shrink-0"
+            on:change={handleOverviewDateChange}
+          />
+          <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
+          <input
+            type="date"
+            bind:value={selectedDateTo}
+            min={selectedDateFrom}
+            max={getLocalDateString()}
+            lang={currentLocale}
+            aria-label={t('overview.rangeEnd')}
+            class="page-control-input w-auto shrink-0"
+            on:change={handleOverviewDateChange}
+          />
+        </div>
+      {/key}
+    {/if}
   </div>
 
   <!-- 统计卡片：始终渲染，内部切换骨架/真实数据 -->
@@ -305,8 +505,8 @@
         </div>
       {/each}
     {:else}
-      <StatsCard title={t('overview.totalActivity')} value={formatDuration(stats.total_duration)} icon="duration" color="indigo" />
-      <StatsCard title={t('overview.workDuration')} value={formatDuration(stats.work_time_duration || 0)} icon="focus" color="emerald" />
+      <StatsCard title={overviewTotalActivityTitle} value={formatDuration(stats.total_duration)} icon="duration" color="indigo" />
+      <StatsCard title={overviewWorkDurationTitle} value={formatDuration(stats.work_time_duration || 0)} icon="focus" color="emerald" />
       <StatsCard title={t('overview.browser')} value={formatDuration(stats.browser_duration)} icon="browser" color="blue" />
       <StatsCard title={t('overview.apps')} value={stats.app_usage.length} icon="apps" color="amber" />
     {/if}
@@ -429,7 +629,11 @@
         </div>
       </div>
     {:else}
-      <ActivityHourlyChart data={stats.hourly_activity_distribution} />
+      <ActivityHourlyChart
+        data={stats.hourly_activity_distribution}
+        distributionTitle={hourlyChartDistributionTitle}
+        distributionSubtitleKey={hourlyChartDistributionSubtitleKey}
+      />
     {/if}
   </div>
 </div>

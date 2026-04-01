@@ -30,6 +30,7 @@ fn report_system_prompt(locale: AppLocale) -> &'static str {
 /// 云端视觉分析器
 pub struct CloudAnalyzer {
     api_key: String,
+    endpoint: String,
     model: String,
     custom_prompt: String,
     locale: AppLocale,
@@ -37,7 +38,13 @@ pub struct CloudAnalyzer {
 }
 
 impl CloudAnalyzer {
-    pub fn new(api_key: &str, model: &str, custom_prompt: &str, locale: AppLocale) -> Self {
+    pub fn new(
+        endpoint: &str,
+        api_key: &str,
+        model: &str,
+        custom_prompt: &str,
+        locale: AppLocale,
+    ) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(60))
             .connect_timeout(Duration::from_secs(10))
@@ -46,6 +53,7 @@ impl CloudAnalyzer {
 
         Self {
             api_key: api_key.to_string(),
+            endpoint: endpoint.to_string(),
             model: model.to_string(),
             custom_prompt: custom_prompt.to_string(),
             locale,
@@ -59,7 +67,7 @@ impl CloudAnalyzer {
 
         let response = self
             .client
-            .post("https://api.openai.com/v1/chat/completions")
+            .post(format!("{}/chat/completions", self.endpoint))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&json!({
                 "model": self.model,
@@ -129,7 +137,7 @@ impl CloudAnalyzer {
 
         let response = self
             .client
-            .post("https://api.openai.com/v1/chat/completions")
+            .post(format!("{}/chat/completions", self.endpoint))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&json!({
                 "model": self.model,

@@ -124,6 +124,7 @@ pub fn create_analyzer(
             locale,
         )),
         AiMode::Cloud => Box::new(cloud::CloudAnalyzer::new(
+            endpoint,
             api_key.unwrap_or(""),
             model,
             custom_prompt,
