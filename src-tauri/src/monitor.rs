@@ -9,14 +9,14 @@ use crate::linux_session::{
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde_json::Value;
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 use std::collections::HashMap;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use std::process::{Command, Output, Stdio};
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 use std::sync::Mutex;
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use std::thread;
@@ -35,11 +35,11 @@ static URL_LIKE_RE: Lazy<Regex> = Lazy::new(|| {
     .expect("URL regex should compile")
 });
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 static LAST_BROWSER_URL_LOGS: Lazy<Mutex<HashMap<String, String>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 fn remember_browser_url_log(cache: &mut HashMap<String, String>, key: &str, url: &str) -> bool {
     match cache.get(key) {
         Some(previous) if previous == url => false,
@@ -50,7 +50,7 @@ fn remember_browser_url_log(cache: &mut HashMap<String, String>, key: &str, url:
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 fn log_browser_url_once(log_key: &str, message: &str, url: &str) {
     let mut cache = LAST_BROWSER_URL_LOGS
         .lock()
@@ -766,7 +766,7 @@ fn extract_active_tab_url_from_session_store_value(
     best_match.map(|(_, _, url)| url)
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 fn firefox_family_session_store_base_dir(app_lower: &str) -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     {
@@ -797,9 +797,15 @@ fn firefox_family_session_store_base_dir(app_lower: &str) -> Option<PathBuf> {
             None
         }
     }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = app_lower;
+        None
+    }
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 fn firefox_family_session_store_url(app_name: &str, window_title: &str) -> Option<String> {
     let app_lower = app_name.to_lowercase();
     let base_dir = firefox_family_session_store_base_dir(&app_lower)?;
@@ -2861,7 +2867,7 @@ fn get_browser_url_linux(app_name: &str, window_title: &str) -> Option<String> {
     extract_url_from_title(window_title)
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 fn matches_firefox_family_browser(app_lower: &str) -> bool {
     app_lower.contains("firefox")
         || app_lower.contains("zen")
@@ -3472,7 +3478,7 @@ fn read_executable_path_from_pid(pid: u32) -> Option<String> {
         .map(|path| path.to_string_lossy().to_string())
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "linux")))]
 fn read_executable_path_from_pid(_pid: u32) -> Option<String> {
     None
 }
