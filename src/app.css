@@ -1296,7 +1296,7 @@
 }
 
 .sidebar-nav-rail {
-  left: 0.95rem;
+  left: 0.55rem;
   width: 3px;
   height: 1.75rem;
   border-radius: 999px;
@@ -1427,10 +1427,15 @@
   z-index: 1;
 }
 
+.report-sheet-content {
+  max-width: 52rem;
+  margin: 0 auto;
+}
+
 .report-sheet-body {
   position: relative;
   z-index: 1;
-  max-width: 52rem;
+  width: 100%;
 }
 
 .report-editorial-shell .markdown-body h1 {

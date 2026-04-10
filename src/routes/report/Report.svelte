@@ -455,15 +455,17 @@
       </div>
     {/if}
     <div class="page-card report-sheet report-article-card">
-      <div class="report-sheet-meta text-xs text-slate-400 mb-4 flex items-center gap-2">
-        <div class="w-1.5 h-1.5 rounded-full {isYesterdayReport ? 'bg-amber-500' : 'bg-emerald-500'}"></div>
-        {isYesterdayReport ? t('report.yesterdayPrefix') : ''}{t('report.generatedAt', { time: formatLocalizedDate(new Date(report.created_at * 1000), { year: 'numeric', month: '2-digit', day: '2-digit' }) + ' ' + formatLocalizedTime(new Date(report.created_at * 1000), { hour: '2-digit', minute: '2-digit', second: '2-digit' }) })}
-      </div>
-      <div
-        use:interceptReportLinks
-        class="markdown-body report-sheet-body prose prose-slate dark:prose-invert max-w-none"
-      >
-        {@html renderMarkdown(report.content)}
+      <div class="report-sheet-content">
+        <div class="report-sheet-meta text-xs text-slate-400 mb-4 flex items-center gap-2">
+          <div class="w-1.5 h-1.5 rounded-full {isYesterdayReport ? 'bg-amber-500' : 'bg-emerald-500'}"></div>
+          {isYesterdayReport ? t('report.yesterdayPrefix') : ''}{t('report.generatedAt', { time: formatLocalizedDate(new Date(report.created_at * 1000), { year: 'numeric', month: '2-digit', day: '2-digit' }) + ' ' + formatLocalizedTime(new Date(report.created_at * 1000), { hour: '2-digit', minute: '2-digit', second: '2-digit' }) })}
+        </div>
+        <div
+          use:interceptReportLinks
+          class="markdown-body report-sheet-body prose prose-slate dark:prose-invert max-w-none"
+        >
+          {@html renderMarkdown(report.content)}
+        </div>
       </div>
     </div>
     {:else}

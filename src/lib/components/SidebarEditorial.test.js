@@ -39,3 +39,10 @@ test('侧边栏品牌副标题在英文下应允许换行而不是被硬裁切',
   assert.match(appCssSource, /\.sidebar-brand-line\b[\s\S]*flex-wrap:/);
   assert.match(appCssSource, /\.sidebar-brand-segment\b/);
 });
+
+test('侧边栏激活态高亮条应位于图标区外侧，避免与导航图标重叠', async () => {
+  const appCssSource = await readFile(new URL('../../app.css', import.meta.url), 'utf8');
+
+  assert.match(appCssSource, /\.sidebar-nav-rail\s*\{[\s\S]*left:\s*0\.55rem/);
+  assert.doesNotMatch(appCssSource, /\.sidebar-nav-rail\s*\{[\s\S]*left:\s*0\.95rem/);
+});
