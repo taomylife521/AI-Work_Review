@@ -177,9 +177,21 @@
     }
   }
 
+  // 阻止文件拖拽到窗口时 WebView 导航到文件 URL
+  function preventFileDrop(e) {
+    e.preventDefault();
+  }
+
   onMount(() => {
+    // 全局阻止文件拖放导致页面导航（如拖入 PDF 会替换整个应用）
+    window.addEventListener('dragover', preventFileDrop);
+    window.addEventListener('drop', preventFileDrop);
+
     if (isAvatarWindow) {
-      return () => {};
+      return () => {
+        window.removeEventListener('dragover', preventFileDrop);
+        window.removeEventListener('drop', preventFileDrop);
+      };
     }
 
     initializeLocale();
@@ -337,6 +349,8 @@
         clearInterval(autoReportTimer);
         mediaQuery.removeEventListener('change', handleSystemThemeChange);
         window.removeEventListener('background-changed', handleBgChange);
+        window.removeEventListener('dragover', preventFileDrop);
+        window.removeEventListener('drop', preventFileDrop);
       };
 
       if (disposed) {
