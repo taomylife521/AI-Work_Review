@@ -276,7 +276,7 @@
       const models = await invoke('fetch_models', {
         provider: config.text_model.provider,
         endpoint: config.text_model.endpoint,
-        api_key: config.text_model.api_key || null,
+        apiKey: config.text_model.api_key || null,
       });
       fetchedModels = Array.isArray(models) ? models : [];
       modelsHint = fetchedModels.length > 0
