@@ -23,6 +23,18 @@
     isIdle: true,
     isGeneratingReport: false,
     avatarOpacity: 0.82,
+    avatarPreset: 'original-standard',
+  };
+  let inputActivity = {
+    keyboardActive: false,
+    mouseActive: false,
+    keyboardGroup: 'idle',
+    keyboardVisualKey: '',
+    mouseGroup: 'idle',
+    cursorRatioX: 0.5,
+    cursorRatioY: 0.5,
+    lastKeyboardInputAtMs: 0,
+    lastMouseInputAtMs: 0,
   };
   let bubbleSource = null;
   let bubble = null;
@@ -176,6 +188,7 @@
   onMount(() => {
     let unlistenState = () => {};
     let unlistenBubble = () => {};
+    let unlistenInput = () => {};
     let unlistenMoved = () => {};
     initializeLocale();
     unsubscribeLocale = locale.subscribe((nextLocale) => {
@@ -263,6 +276,26 @@
         showBubble(event.payload);
       });
 
+      unlistenInput = await appWindow.listen('avatar-input-changed', (event) => {
+        const payload = event.payload ?? {};
+        inputActivity = {
+          keyboardActive: !!payload.keyboardActive,
+          mouseActive: !!payload.mouseActive,
+          keyboardGroup: payload.keyboardGroup ?? 'idle',
+          keyboardVisualKey: payload.keyboardVisualKey ?? '',
+          mouseGroup: payload.mouseGroup ?? 'idle',
+          cursorRatioX: payload.cursorRatioX ?? 0.5,
+          cursorRatioY: payload.cursorRatioY ?? 0.5,
+          lastKeyboardInputAtMs: payload.lastKeyboardInputAtMs ?? 0,
+          lastMouseInputAtMs: payload.lastMouseInputAtMs ?? 0,
+        };
+
+        if (inputActivity.keyboardActive || inputActivity.mouseActive) {
+          motionBeat = (motionBeat + 1) % 96;
+          scheduleNextMotionStep();
+        }
+      });
+
       unlistenMoved = await nativeWindow.onMoved(({ payload: position }) => {
         scheduleAvatarPositionSave(position);
       });
@@ -279,22 +312,28 @@
       unsubscribeLocale();
       unlistenState();
       unlistenBubble();
+      unlistenInput();
       unlistenMoved();
     };
   });
 </script>
 
 <div class="relative h-screen w-screen overflow-visible bg-transparent select-none">
-  <AvatarPopover {bubble} onClose={dismissBubble} />
+  <div class="absolute inset-x-0 top-0 h-[86px] overflow-visible">
+    <AvatarPopover {bubble} onClose={dismissBubble} />
+  </div>
 
-  <div class="h-full w-[54%]">
-    <AvatarCanvas
-      {state}
-      {transitionClass}
-      {motionBeat}
-      on:avatarpointerdown={startAvatarDrag}
-      on:avataractivate={openMainWindow}
-    />
+  <div class="absolute inset-x-0 bottom-0 top-[78px] flex items-end justify-center overflow-visible">
+    <div class="h-full w-[82%]">
+      <AvatarCanvas
+        {state}
+        {inputActivity}
+        {transitionClass}
+        {motionBeat}
+        on:avatarpointerdown={startAvatarDrag}
+        on:avataractivate={openMainWindow}
+      />
+    </div>
   </div>
 </div>
 

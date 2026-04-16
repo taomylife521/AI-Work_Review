@@ -7,13 +7,15 @@ use tauri::{
 pub const AVATAR_WINDOW_LABEL: &str = "avatar";
 pub const AVATAR_STATE_EVENT: &str = "avatar-state-changed";
 pub const AVATAR_BUBBLE_EVENT: &str = "avatar-bubble";
+pub const AVATAR_INPUT_EVENT: &str = "avatar-input-changed";
+pub const AVATAR_PRESET_DEFAULT: &str = "original-standard";
 
 const AVATAR_SCALE_MIN: f64 = 0.7;
 const AVATAR_SCALE_MAX: f64 = 1.3;
 const AVATAR_SCALE_DEFAULT: f64 = 0.9;
 const AVATAR_OPACITY_DEFAULT: f64 = 0.82;
 const AVATAR_WINDOW_BASE_WIDTH: f64 = 276.0;
-const AVATAR_WINDOW_BASE_HEIGHT: f64 = 170.0;
+const AVATAR_WINDOW_BASE_HEIGHT: f64 = 248.0;
 const AVATAR_WINDOW_WIDTH: f64 = AVATAR_WINDOW_BASE_WIDTH * AVATAR_SCALE_DEFAULT;
 const AVATAR_WINDOW_HEIGHT: f64 = AVATAR_WINDOW_BASE_HEIGHT * AVATAR_SCALE_DEFAULT;
 const AVATAR_WINDOW_MARGIN: f64 = 8.0;
@@ -36,6 +38,21 @@ pub struct AvatarStatePayload {
     pub is_idle: bool,
     pub is_generating_report: bool,
     pub avatar_opacity: f64,
+    pub avatar_preset: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AvatarInputPayload {
+    pub keyboard_active: bool,
+    pub mouse_active: bool,
+    pub keyboard_group: String,
+    pub keyboard_visual_key: String,
+    pub mouse_group: String,
+    pub cursor_ratio_x: f64,
+    pub cursor_ratio_y: f64,
+    pub last_keyboard_input_at_ms: u64,
+    pub last_mouse_input_at_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -102,6 +119,7 @@ pub fn default_avatar_state() -> AvatarStatePayload {
         is_idle: true,
         is_generating_report: false,
         avatar_opacity: AVATAR_OPACITY_DEFAULT,
+        avatar_preset: AVATAR_PRESET_DEFAULT.to_string(),
     }
 }
 
@@ -152,6 +170,7 @@ pub fn derive_avatar_state_with_rules(
             is_idle,
             is_generating_report: true,
             avatar_opacity: AVATAR_OPACITY_DEFAULT,
+            avatar_preset: AVATAR_PRESET_DEFAULT.to_string(),
         };
     }
 
@@ -164,6 +183,7 @@ pub fn derive_avatar_state_with_rules(
             is_idle: true,
             is_generating_report: false,
             avatar_opacity: AVATAR_OPACITY_DEFAULT,
+            avatar_preset: AVATAR_PRESET_DEFAULT.to_string(),
         };
     }
 
@@ -339,8 +359,17 @@ pub fn derive_avatar_state_with_rules(
     }
 }
 
-pub fn apply_avatar_opacity(mut payload: AvatarStatePayload, opacity: f64) -> AvatarStatePayload {
+pub fn apply_avatar_visual_settings(
+    mut payload: AvatarStatePayload,
+    opacity: f64,
+    preset: &str,
+) -> AvatarStatePayload {
     payload.avatar_opacity = opacity;
+    payload.avatar_preset = if preset.trim().is_empty() {
+        AVATAR_PRESET_DEFAULT.to_string()
+    } else {
+        preset.trim().to_string()
+    };
     payload
 }
 
@@ -384,6 +413,12 @@ pub fn emit_avatar_state(app: &AppHandle, payload: &AvatarStatePayload) {
 pub fn emit_avatar_bubble(app: &AppHandle, payload: &AvatarBubblePayload) {
     if let Some(window) = app.get_webview_window(AVATAR_WINDOW_LABEL) {
         let _ = window.emit(AVATAR_BUBBLE_EVENT, payload);
+    }
+}
+
+pub fn emit_avatar_input(app: &AppHandle, payload: &AvatarInputPayload) {
+    if let Some(window) = app.get_webview_window(AVATAR_WINDOW_LABEL) {
+        let _ = window.emit(AVATAR_INPUT_EVENT, payload);
     }
 }
 
@@ -582,6 +617,7 @@ fn avatar_state(
         is_idle: false,
         is_generating_report: false,
         avatar_opacity: AVATAR_OPACITY_DEFAULT,
+        avatar_preset: AVATAR_PRESET_DEFAULT.to_string(),
     }
 }
 
@@ -766,7 +802,7 @@ mod tests {
         assert!(small_h < default_h);
         assert!(large_w > default_w);
         assert!(large_h > default_h);
-        assert_eq!((default_w, default_h), (248.4, 153.0));
+        assert_eq!((default_w, default_h), (248.4, 223.2));
     }
 
     #[test]

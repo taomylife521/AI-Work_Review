@@ -2858,7 +2858,7 @@ pub async fn generate_report(
     let avatar_start_state = {
         let mut state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
         state.avatar_generating_report = true;
-        let avatar_state = crate::avatar_engine::apply_avatar_opacity(
+        let avatar_state = crate::avatar_engine::apply_avatar_visual_settings(
             crate::avatar_engine::derive_avatar_state(
                 &state.avatar_state.app_name,
                 "",
@@ -2867,6 +2867,7 @@ pub async fn generate_report(
                 true,
             ),
             state.config.avatar_opacity,
+            &state.config.avatar_preset,
         );
         state.avatar_state = avatar_state.clone();
         if state.config.avatar_enabled {
@@ -2908,7 +2909,7 @@ pub async fn generate_report(
     let avatar_finish_state = {
         let mut state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
         state.avatar_generating_report = false;
-        let avatar_state = crate::avatar_engine::apply_avatar_opacity(
+        let avatar_state = crate::avatar_engine::apply_avatar_visual_settings(
             crate::avatar_engine::derive_avatar_state(
                 &state.avatar_state.app_name,
                 "",
@@ -2917,6 +2918,7 @@ pub async fn generate_report(
                 false,
             ),
             state.config.avatar_opacity,
+            &state.config.avatar_preset,
         );
         state.avatar_state = avatar_state.clone();
         if state.config.avatar_enabled {
@@ -3052,6 +3054,7 @@ pub(crate) fn persist_app_config(
         previous_avatar_enabled,
         previous_avatar_scale,
         previous_avatar_opacity,
+        previous_avatar_preset,
         previous_avatar_x,
         previous_avatar_y,
         previous_hide_dock_icon,
@@ -3072,14 +3075,16 @@ pub(crate) fn persist_app_config(
 
         // 更新隐私过滤器
         state.privacy_filter.update_config(&config.privacy);
-        state.avatar_state = crate::avatar_engine::apply_avatar_opacity(
+        state.avatar_state = crate::avatar_engine::apply_avatar_visual_settings(
             state.avatar_state.clone(),
             config.avatar_opacity,
+            &config.avatar_preset,
         );
         (
             previous_config.avatar_enabled,
             previous_config.avatar_scale,
             previous_config.avatar_opacity,
+            previous_config.avatar_preset,
             previous_config.avatar_x,
             previous_config.avatar_y,
             previous_config.hide_dock_icon,
@@ -3092,7 +3097,8 @@ pub(crate) fn persist_app_config(
         || previous_avatar_scale != config.avatar_scale
         || previous_avatar_x != config.avatar_x
         || previous_avatar_y != config.avatar_y;
-    let avatar_visual_changed = previous_avatar_opacity != config.avatar_opacity;
+    let avatar_visual_changed = previous_avatar_opacity != config.avatar_opacity
+        || previous_avatar_preset != config.avatar_preset;
     let dock_visibility_changed = previous_hide_dock_icon != config.hide_dock_icon
         || previous_lightweight_mode != config.lightweight_mode;
 
@@ -3151,7 +3157,7 @@ fn refresh_avatar_state_for_current_window(app: &AppHandle, state: &Arc<Mutex<Ap
             return false;
         }
 
-        let next_state = crate::avatar_engine::apply_avatar_opacity(
+        let next_state = crate::avatar_engine::apply_avatar_visual_settings(
             crate::avatar_engine::derive_avatar_state_with_rules(
                 &state_guard.config.app_category_rules,
                 &active_window.app_name,
@@ -3161,6 +3167,7 @@ fn refresh_avatar_state_for_current_window(app: &AppHandle, state: &Arc<Mutex<Ap
                 state_guard.avatar_generating_report,
             ),
             state_guard.config.avatar_opacity,
+            &state_guard.config.avatar_preset,
         );
         state_guard.avatar_state = next_state.clone();
         next_state

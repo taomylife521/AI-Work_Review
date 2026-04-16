@@ -501,6 +501,9 @@ pub struct AppConfig {
     /// 桌宠猫体透明度（0.45 - 1.0）
     #[serde(default = "default_avatar_opacity")]
     pub avatar_opacity: f64,
+    /// 桌宠官方预设
+    #[serde(default = "default_avatar_preset")]
+    pub avatar_preset: String,
     /// 桌宠窗口横向位置
     #[serde(default)]
     pub avatar_x: Option<i32>,
@@ -542,6 +545,9 @@ fn default_avatar_scale() -> f64 {
 fn default_avatar_opacity() -> f64 {
     0.82
 }
+fn default_avatar_preset() -> String {
+    "original-standard".to_string()
+}
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -580,6 +586,7 @@ impl Default for AppConfig {
             avatar_enabled: false,
             avatar_scale: default_avatar_scale(),
             avatar_opacity: default_avatar_opacity(),
+            avatar_preset: default_avatar_preset(),
             avatar_x: None,
             avatar_y: None,
             hide_decorations: false,
@@ -604,6 +611,7 @@ impl AppConfig {
         self.screenshot_interval = normalize_screenshot_interval(self.screenshot_interval);
         self.avatar_scale = normalize_avatar_scale(self.avatar_scale);
         self.avatar_opacity = normalize_avatar_opacity(self.avatar_opacity);
+        self.avatar_preset = normalize_avatar_preset(&self.avatar_preset);
         self.break_reminder_interval_minutes =
             normalize_break_reminder_interval_minutes(self.break_reminder_interval_minutes);
         self.daily_report_custom_prompt = self.daily_report_custom_prompt.trim().to_string();
@@ -885,6 +893,13 @@ fn normalize_avatar_opacity(value: f64) -> f64 {
     value.clamp(0.45, 1.0)
 }
 
+fn normalize_avatar_preset(value: &str) -> String {
+    match value.trim() {
+        "original-standard" | "keyboard-focus" | "minimal-office" => value.trim().to_string(),
+        _ => default_avatar_preset(),
+    }
+}
+
 fn normalize_break_reminder_interval_minutes(value: u64) -> u64 {
     match value {
         30 | 45 | 50 | 60 | 90 | 120 => value,
@@ -911,9 +926,10 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_avatar_opacity, default_avatar_scale, normalize_app_category_rules,
-        normalize_avatar_opacity, normalize_avatar_scale, AiProvider, AppCategoryRule, AppConfig,
-        ScreenshotDisplayMode, WebsiteSemanticRule,
+        default_avatar_opacity, default_avatar_preset, default_avatar_scale,
+        normalize_app_category_rules, normalize_avatar_opacity, normalize_avatar_preset,
+        normalize_avatar_scale, AiProvider, AppCategoryRule, AppConfig, ScreenshotDisplayMode,
+        WebsiteSemanticRule,
     };
 
     #[test]
@@ -930,6 +946,14 @@ mod tests {
 
         assert_eq!(config.avatar_opacity, default_avatar_opacity());
         assert_eq!(config.avatar_opacity, 0.82);
+    }
+
+    #[test]
+    fn 桌宠官方预设默认应为原版标准模式() {
+        let config = AppConfig::default();
+
+        assert_eq!(config.avatar_preset, default_avatar_preset());
+        assert_eq!(config.avatar_preset, "original-standard");
     }
 
     #[test]
@@ -1016,6 +1040,14 @@ mod tests {
         assert_eq!(normalize_avatar_opacity(0.1), 0.45);
         assert_eq!(normalize_avatar_opacity(1.5), 1.0);
         assert_eq!(normalize_avatar_opacity(f64::NAN), 0.82);
+    }
+
+    #[test]
+    fn 桌宠预设应被规范到官方预设集合内() {
+        assert_eq!(normalize_avatar_preset("keyboard-focus"), "keyboard-focus");
+        assert_eq!(normalize_avatar_preset(" minimal-office "), "minimal-office");
+        assert_eq!(normalize_avatar_preset("wild-theme"), "original-standard");
+        assert_eq!(normalize_avatar_preset(""), "original-standard");
     }
 
     #[test]

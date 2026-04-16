@@ -1,13 +1,221 @@
 <script>
   import { createEventDispatcher } from 'svelte';
-  import { AVATAR_OUTLINE_LAYOUT, getAvatarOutline } from './avatarOutline.js';
   import {
-    getAvatarActionLoopMeta,
-    getAvatarIdleMotionMeta,
-    getAvatarModeMeta,
-  } from './avatarStateMeta.js';
+    getAvatarPresetDefinition,
+    normalizeAvatarPresetId,
+  } from './avatarPresetRegistry.js';
+  import { getAvatarIdleMotionMeta, getAvatarModeMeta } from './avatarStateMeta.js';
 
   const dispatch = createEventDispatcher();
+  const SCENE_WIDTH = 612;
+  const SCENE_HEIGHT = 354;
+  const DEVICE_WIDTH = 104;
+  const DEVICE_HEIGHT = 103;
+  const STANDARD_DEVICE_OFFSET_X = 10;
+  const STANDARD_DEVICE_OFFSET_Y = -10;
+  const STANDARD_HAND_DX = -38;
+  const STANDARD_HAND_DY = -50;
+  const clipIdBase = `avatar-scene-${Math.random().toString(36).slice(2, 10)}`;
+  const STANDARD_SCENE_MODES = new Set([
+    'idle',
+    'working',
+    'reading',
+    'meeting',
+    'music',
+    'video',
+    'generating',
+    'slacking',
+  ]);
+  function clamp01(value) {
+    return Math.min(1, Math.max(0, value));
+  }
+
+  function bezierPoint(ratio, flatPoints) {
+    let points = [];
+    for (let index = 0; index < flatPoints.length; index += 2) {
+      points.push({ x: flatPoints[index], y: flatPoints[index + 1] });
+    }
+
+    while (points.length > 1) {
+      let nextPoints = [];
+      for (let index = 0; index < points.length - 1; index += 1) {
+        nextPoints.push({
+          x: points[index].x + (points[index + 1].x - points[index].x) * ratio,
+          y: points[index].y + (points[index + 1].y - points[index].y) * ratio,
+        });
+      }
+      points = nextPoints;
+    }
+
+    return [points[0].x, points[0].y];
+  }
+
+  function computeStandardMouseGeometry(cursorRatioX = 0.5, cursorRatioY = 0.5) {
+    const fx = clamp01(cursorRatioX);
+    const fy = clamp01(cursorRatioY);
+    const x = -97 * fx + 44 * fy + 184;
+    const y = -76 * fx - 40 * fy + 324;
+    const dx = STANDARD_HAND_DX;
+    const dy = STANDARD_HAND_DY;
+    const pss = [211, 159];
+    const oof = 6;
+
+    let dist = Math.hypot(211 - x, 159 - y);
+    const centreleft0 = 211 - (0.7237 * dist) / 2;
+    const centreleft1 = 159 + (0.69 * dist) / 2;
+
+    for (let index = 1; index < oof; index += 1) {
+      const [p0, p1] = bezierPoint(index / oof, [211, 159, centreleft0, centreleft1, x, y]);
+      pss.push(p0, p1);
+    }
+    pss.push(x, y);
+
+    let a = y - centreleft1;
+    let b = centreleft0 - x;
+    let length = Math.hypot(a, b) || 1;
+    a = x + (a / length) * 60;
+    b = y + (b / length) * 60;
+
+    const a1 = 258;
+    const a2 = 228;
+    dist = Math.hypot(a1 - a, a2 - b);
+    const centreright0 = a1 - (0.6 * dist) / 2;
+    const centreright1 = a2 + (0.8 * dist) / 2;
+    const push = 20;
+
+    let s = x - centreleft0;
+    let t = y - centreleft1;
+    length = Math.hypot(s, t) || 1;
+    s *= push / length;
+    t *= push / length;
+
+    let s2 = a - centreright0;
+    let t2 = b - centreright1;
+    length = Math.hypot(s2, t2) || 1;
+    s2 *= push / length;
+    t2 *= push / length;
+
+    for (let index = 1; index < oof; index += 1) {
+      const [p0, p1] = bezierPoint(index / oof, [x, y, x + s, y + t, a + s2, b + t2, a, b]);
+      pss.push(p0, p1);
+    }
+    pss.push(a, b);
+
+    for (let index = oof - 1; index > 0; index -= 1) {
+      const [p0, p1] = bezierPoint(index / oof, [a1, a2, centreright0, centreright1, a, b]);
+      pss.push(p0, p1);
+    }
+    pss.push(a1, a2);
+
+    const mouseX = (a + x) / 2 - 67 + dx + STANDARD_DEVICE_OFFSET_X;
+    const mouseY = (b + y) / 2 - 29 + dy + STANDARD_DEVICE_OFFSET_Y;
+    const armPoints = [{ x: pss[0] + dx, y: pss[1] + dy }];
+    const iter = 25;
+
+    for (let index = 1; index < iter; index += 1) {
+      const [p0, p1] = bezierPoint(index / iter, pss);
+      armPoints.push({ x: p0 + dx, y: p1 + dy });
+    }
+    armPoints.push({ x: pss[36] + dx, y: pss[37] + dy });
+
+    return { armPoints, mouseX, mouseY };
+  }
+
+  function getStaticCoverTransform(
+    presetId,
+    keyboardActive,
+    mouseActive,
+    keyboardGroup,
+    mouseGroup,
+    frameIndex
+  ) {
+    return '';
+  }
+
+  function deriveKeyboardGroupFromVisualKey(baseGroup, visualKey) {
+    if (baseGroup && baseGroup !== 'idle') {
+      return baseGroup;
+    }
+
+    switch (visualKey) {
+      case 'Num1':
+        return 'digit-1';
+      case 'Num2':
+        return 'digit-2';
+      case 'Num3':
+        return 'digit-3';
+      case 'Num4':
+        return 'digit-4';
+      case 'Num5':
+        return 'digit-5';
+      case 'Num6':
+        return 'digit-6';
+      case 'Num7':
+      case 'Num8':
+      case 'Num9':
+      case 'Num0':
+        return 'digit-7';
+      case 'KeyQ':
+        return 'key-q';
+      case 'KeyW':
+        return 'key-w';
+      case 'KeyE':
+        return 'key-e';
+      case 'KeyR':
+      case 'KeyT':
+      case 'KeyY':
+      case 'KeyU':
+      case 'KeyI':
+      case 'KeyO':
+      case 'KeyP':
+        return 'key-r';
+      case 'KeyA':
+        return 'key-a';
+      case 'KeyS':
+        return 'key-s';
+      case 'KeyD':
+      case 'KeyF':
+      case 'KeyG':
+      case 'KeyH':
+      case 'KeyJ':
+      case 'KeyK':
+      case 'KeyL':
+        return 'key-d';
+      case 'KeyZ':
+      case 'KeyX':
+      case 'KeyC':
+        return 'key-a';
+      case 'KeyV':
+      case 'KeyB':
+        return 'key-s';
+      case 'KeyN':
+      case 'KeyM':
+      case 'Slash':
+        return 'key-d';
+      case 'Space':
+      case 'Return':
+      case 'Tab':
+      case 'Backspace':
+      case 'Delete':
+        return 'space';
+      case 'BackQuote':
+      case 'Escape':
+      case 'CapsLock':
+      case 'Shift':
+      case 'ShiftLeft':
+      case 'ShiftRight':
+      case 'Control':
+      case 'ControlLeft':
+      case 'ControlRight':
+      case 'Alt':
+      case 'AltGr':
+      case 'Meta':
+      case 'Fn':
+        return 'key-q';
+      default:
+        return 'idle';
+    }
+  }
 
   export let state = {
     mode: 'idle',
@@ -17,25 +225,102 @@
     isIdle: true,
     isGeneratingReport: false,
     avatarOpacity: 0.82,
+    avatarPreset: 'original-standard',
+  };
+  export let inputActivity = {
+    keyboardActive: false,
+    mouseActive: false,
+    keyboardGroup: 'idle',
+    keyboardVisualKey: '',
+    mouseGroup: 'idle',
+    cursorRatioX: 0.5,
+    cursorRatioY: 0.5,
+    lastKeyboardInputAtMs: 0,
+    lastMouseInputAtMs: 0,
   };
   export let transitionClass = '';
   export let motionBeat = 0;
 
-  $: outline = getAvatarOutline();
   $: modeMeta = getAvatarModeMeta(state.mode, state.contextLabel);
-  $: actionLoopMeta = getAvatarActionLoopMeta(state.mode, state.contextLabel, motionBeat);
   $: idleMotionMeta = getAvatarIdleMotionMeta(state.mode, state.contextLabel, motionBeat);
-  $: resolvedMeta = { ...modeMeta, ...actionLoopMeta };
-  $: eyePath = resolvedMeta.eyePath;
-  $: mouthPath = resolvedMeta.mouthPath;
-  $: leftPawClass = resolvedMeta.leftPawClass;
-  $: rightPawClass = resolvedMeta.rightPawClass;
-  $: tailClass = resolvedMeta.tailClass;
-  $: shellClass = ['avatar-shell', resolvedMeta.shellClass, idleMotionMeta.shellClass, transitionClass]
+  $: shellClass = ['avatar-shell', modeMeta.shellClass, idleMotionMeta.shellClass, transitionClass]
     .filter(Boolean)
     .join(' ');
-  $: headClass = ['head', idleMotionMeta.headClass].filter(Boolean).join(' ');
-  $: shellStyle = `--ear-fill:${resolvedMeta.earTone}; --cheek-fill:${resolvedMeta.cheekTone}; --cheek-opacity:${resolvedMeta.cheekOpacity}; --avatar-shell-opacity:${state.avatarOpacity ?? 0.82};`;
+  $: showKeyboardLayers = STANDARD_SCENE_MODES.has(state.mode);
+  $: showMouseLayers = STANDARD_SCENE_MODES.has(state.mode);
+  $: keyboardActive = showKeyboardLayers && !!inputActivity.keyboardActive;
+  $: mouseActive = showMouseLayers && !!inputActivity.mouseActive;
+  $: keyboardVisualKey = inputActivity.keyboardVisualKey || '';
+  $: keyboardGroup = deriveKeyboardGroupFromVisualKey(
+    inputActivity.keyboardGroup || 'idle',
+    keyboardVisualKey
+  );
+  $: mouseGroup = inputActivity.mouseGroup || 'idle';
+  $: preset = getAvatarPresetDefinition(normalizeAvatarPresetId(state.avatarPreset));
+  $: renderMode = preset.renderMode ?? 'standard';
+  $: sceneInteractionLayout = preset.interactionLayout ?? null;
+  $: cursorRatioX = inputActivity.cursorRatioX ?? 0.5;
+  $: cursorRatioY = inputActivity.cursorRatioY ?? 0.5;
+  $: sceneSrc = preset.sceneSrc;
+  $: contentTransform = preset.contentTransform ?? '';
+  $: staticCoverSrc = preset.staticCoverSrc ?? null;
+  $: staticCoverTransform = getStaticCoverTransform(
+    preset.id,
+    keyboardActive,
+    mouseActive,
+    keyboardGroup,
+    mouseGroup,
+    frameIndex
+  );
+  $: sceneAlt = `${state.appName || 'Work Review'} 桌宠`;
+  $: frameIndex = Math.floor(motionBeat / 2);
+  $: useSourceKeyboardMode = renderMode === 'source-keyboard';
+  $: standardHandSrc = keyboardActive
+    ? preset.handFrames[keyboardGroup] ?? preset.idleHand
+    : preset.idleHand;
+  $: keyOverlaySrc = keyboardActive
+    ? preset.keyboardFrames[keyboardGroup] ?? null
+    : null;
+  $: keyboardVisualSrc = keyboardActive
+    ? preset.keyboardVisualLayers?.[keyboardVisualKey] ?? null
+    : null;
+  $: keyboardVisualClip = preset.keyboardVisualClip ?? null;
+  $: keyboardVisualClipId = keyboardVisualClip ? `${clipIdBase}-keyboard-visual` : '';
+  $: keyboardVisualClipUrl = keyboardVisualClipId ? `url(#${keyboardVisualClipId})` : '';
+  $: leftHandSrc = keyboardActive
+    ? preset.leftHandFrames?.[keyboardVisualKey] ?? preset.idleLeftHand ?? null
+    : preset.idleLeftHand ?? null;
+  $: rightHandSrc = keyboardActive
+    ? preset.rightHandFrames?.[keyboardVisualKey] ?? preset.idleRightHand ?? null
+    : preset.idleRightHand ?? null;
+  $: keyOverlayPose = keyboardActive ? frameIndex % 3 : 0;
+  $: mouseDeviceBaseSrc = preset.mouseDeviceBase;
+  $: mouseDeviceOverlaySrc = preset.mouseDeviceOverlays[mouseGroup] ?? null;
+  $: mouseVisualSrc = mouseActive
+    ? preset.mouseVisualLayers?.[mouseGroup] ?? null
+    : null;
+  $: mouseVisualClip = preset.mouseVisualClip ?? null;
+  $: mouseVisualClipId = mouseVisualClip ? `${clipIdBase}-mouse-visual` : '';
+  $: mouseVisualClipUrl = mouseVisualClipId ? `url(#${mouseVisualClipId})` : '';
+  $: mouseHotspotsAboveCover = !!preset.mouseHotspotsAboveCover;
+  $: mouseGeometry = computeStandardMouseGeometry(cursorRatioX, cursorRatioY);
+  $: mouseArmPoints = mouseGeometry.armPoints.map((point) => `${point.x},${point.y}`).join(' ');
+  $: mouseDeviceX = mouseGeometry.mouseX;
+  $: mouseDeviceY = mouseGeometry.mouseY;
+  $: keyboardHotspots = keyboardActive && sceneInteractionLayout && !keyboardVisualSrc
+    ? sceneInteractionLayout.keyboardHotspots?.[keyboardGroup] ?? []
+    : [];
+  $: mouseHotspots = mouseActive && sceneInteractionLayout && !mouseVisualSrc
+    ? sceneInteractionLayout.mouseHotspots?.[mouseGroup] ?? []
+    : [];
+  $: preCoverMouseHotspots = mouseHotspotsAboveCover ? [] : mouseHotspots;
+  $: postCoverMouseHotspots = mouseHotspotsAboveCover ? mouseHotspots : [];
+  $: keyboardOverlayStyle = `opacity:${preset.keyboardOverlayOpacity ?? 1};`;
+  $: handStyle = `opacity:${preset.handOpacity ?? 1};`;
+  $: mouseDeviceStyle = `opacity:${preset.mouseDeviceOpacity ?? 1};`;
+  $: mouseOverlayStyle = `opacity:${preset.mouseOverlayOpacity ?? 1};`;
+  $: mouseArmStyle = `opacity:${preset.mouseArmOpacity ?? 1};`;
+  $: shellStyle = `--avatar-shell-opacity:${state.avatarOpacity ?? 0.82};`;
 
   function handlePointerDown(event) {
     dispatch('avatarpointerdown', { originalEvent: event });
@@ -46,601 +331,631 @@
   }
 </script>
 
-<div class="relative h-full w-full overflow-visible select-none">
-  <div class={AVATAR_OUTLINE_LAYOUT.figureClass}>
-    <svg
-      viewBox={AVATAR_OUTLINE_LAYOUT.viewBox}
-      class="h-full w-full overflow-visible"
-      aria-hidden="true"
-    >
-      <!-- svelte-ignore a11y-no-static-element-interactions -->
-      <g
-        class={shellClass}
-        style={shellStyle}
-        on:mousedown={handlePointerDown}
-        on:dblclick={handleActivate}
+<div class="relative flex h-full w-full items-end overflow-visible select-none">
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <div
+    class={shellClass}
+    style={shellStyle}
+    on:mousedown={handlePointerDown}
+    on:dblclick={handleActivate}
+  >
+    <div class="scene-frame">
+      <svg
+        class="scene-svg scene-base"
+        viewBox={`0 0 ${SCENE_WIDTH} ${SCENE_HEIGHT}`}
+        preserveAspectRatio="xMidYMid meet"
+        role="img"
+        aria-label={sceneAlt}
       >
-        <g class={`tail ${tailClass}`}>
-          <path d={outline.tailPath} class="avatar-hit avatar-fill avatar-stroke tail-detail" />
-        </g>
+        <defs>
+          {#if keyboardVisualClip}
+            <clipPath id={keyboardVisualClipId}>
+              {#if keyboardVisualClip.kind === 'rect'}
+                <rect
+                  x={keyboardVisualClip.x}
+                  y={keyboardVisualClip.y}
+                  width={keyboardVisualClip.width}
+                  height={keyboardVisualClip.height}
+                  rx={keyboardVisualClip.rx ?? 5}
+                  transform={keyboardVisualClip.transform || undefined}
+                />
+              {:else if keyboardVisualClip.kind === 'ellipse'}
+                <ellipse
+                  cx={keyboardVisualClip.cx}
+                  cy={keyboardVisualClip.cy}
+                  rx={keyboardVisualClip.rx}
+                  ry={keyboardVisualClip.ry}
+                />
+              {:else if keyboardVisualClip.kind === 'polygon'}
+                <polygon
+                  points={keyboardVisualClip.points}
+                  stroke-linejoin="round"
+                />
+              {/if}
+            </clipPath>
+          {/if}
 
-        <g class="body">
-          <path d={outline.bodyPath} class="avatar-hit avatar-fill avatar-stroke" />
-        </g>
+          {#if mouseVisualClip}
+            <clipPath id={mouseVisualClipId}>
+              {#if mouseVisualClip.kind === 'rect'}
+                <rect
+                  x={mouseVisualClip.x}
+                  y={mouseVisualClip.y}
+                  width={mouseVisualClip.width}
+                  height={mouseVisualClip.height}
+                  rx={mouseVisualClip.rx ?? 5}
+                  transform={mouseVisualClip.transform || undefined}
+                />
+              {:else if mouseVisualClip.kind === 'ellipse'}
+                <ellipse
+                  cx={mouseVisualClip.cx}
+                  cy={mouseVisualClip.cy}
+                  rx={mouseVisualClip.rx}
+                  ry={mouseVisualClip.ry}
+                />
+              {:else if mouseVisualClip.kind === 'polygon'}
+                <polygon
+                  points={mouseVisualClip.points}
+                  stroke-linejoin="round"
+                />
+              {/if}
+            </clipPath>
+          {/if}
+        </defs>
 
-        <g class={headClass}>
-          <path d={outline.headPath} class="avatar-hit avatar-fill avatar-stroke" />
-          <path d={outline.leftEarInnerPath} class="ear-detail" />
-          <path d={outline.rightEarInnerPath} class="ear-detail" />
-          <ellipse cx="82" cy="116" rx="5.2" ry="3.1" class="cheek-detail" />
-          <ellipse cx="118" cy="116" rx="5.2" ry="3.1" class="cheek-detail" />
-          <path d={eyePath} class="face-line" />
-          <path d="M98 101 Q100 103 102 101" class="face-line" />
-          <path d={mouthPath} class="face-line" />
-          <path d="M67 110 H82 M118 110 H133" class="whisker" />
-          <path d="M68 117 H83 M117 117 H132" class="whisker soft" />
-        </g>
+        <g transform={contentTransform}>
+          <image href={sceneSrc} x="0" y="0" width={SCENE_WIDTH} height={SCENE_HEIGHT} />
 
-        <g class={`paw ${leftPawClass}`}>
-          <path d={outline.leftPawPath} class="avatar-hit avatar-fill avatar-stroke paw-line" />
+          {#if keyboardHotspots.length || preCoverMouseHotspots.length}
+            <g class="scene-interaction-layer">
+              {#each keyboardHotspots as hotspot}
+                {#if hotspot.kind === 'rect'}
+                  <rect
+                    class="scene-hotspot"
+                    x={hotspot.x}
+                    y={hotspot.y}
+                    width={hotspot.width}
+                    height={hotspot.height}
+                    rx={hotspot.rx ?? 5}
+                    fill={hotspot.fill}
+                    stroke={hotspot.stroke}
+                    stroke-width="1.8"
+                    transform={hotspot.transform || undefined}
+                  />
+                {:else if hotspot.kind === 'ellipse'}
+                  <ellipse
+                    class="scene-hotspot"
+                    cx={hotspot.cx}
+                    cy={hotspot.cy}
+                    rx={hotspot.rx}
+                    ry={hotspot.ry}
+                    fill={hotspot.fill}
+                    stroke={hotspot.stroke}
+                    stroke-width="1.8"
+                  />
+                {:else if hotspot.kind === 'polygon'}
+                  <polygon
+                    class="scene-hotspot"
+                    points={hotspot.points}
+                    fill={hotspot.fill}
+                    stroke={hotspot.stroke}
+                    stroke-width="1.8"
+                    stroke-linejoin="round"
+                  />
+                {/if}
+              {/each}
+
+              {#each preCoverMouseHotspots as hotspot}
+                {#if hotspot.kind === 'rect'}
+                  <rect
+                    class="scene-hotspot scene-hotspot-mouse"
+                    x={hotspot.x}
+                    y={hotspot.y}
+                    width={hotspot.width}
+                    height={hotspot.height}
+                    rx={hotspot.rx ?? 5}
+                    fill={hotspot.fill}
+                    stroke={hotspot.stroke}
+                    stroke-width="1.8"
+                    transform={hotspot.transform || undefined}
+                  />
+                {:else if hotspot.kind === 'ellipse'}
+                  <ellipse
+                    class="scene-hotspot scene-hotspot-mouse"
+                    cx={hotspot.cx}
+                    cy={hotspot.cy}
+                    rx={hotspot.rx}
+                    ry={hotspot.ry}
+                    fill={hotspot.fill}
+                    stroke={hotspot.stroke}
+                    stroke-width="1.8"
+                  />
+                {:else if hotspot.kind === 'polygon'}
+                  <polygon
+                    class="scene-hotspot scene-hotspot-mouse"
+                    points={hotspot.points}
+                    fill={hotspot.fill}
+                    stroke={hotspot.stroke}
+                    stroke-width="1.8"
+                    stroke-linejoin="round"
+                  />
+                {/if}
+              {/each}
+            </g>
+          {/if}
+
+          {#if staticCoverSrc}
+            <image
+              href={staticCoverSrc}
+              x="0"
+              y="0"
+              width={SCENE_WIDTH}
+              height={SCENE_HEIGHT}
+              class="static-cover-layer"
+              transform={staticCoverTransform || undefined}
+            />
+          {/if}
+
+          {#if postCoverMouseHotspots.length}
+            <g
+              class="scene-interaction-layer post-cover-mouse-hotspot-layer"
+              clip-path={mouseVisualClipUrl || undefined}
+            >
+              {#each postCoverMouseHotspots as hotspot}
+                {#if hotspot.kind === 'rect'}
+                  <rect
+                    class="scene-hotspot scene-hotspot-mouse"
+                    x={hotspot.x}
+                    y={hotspot.y}
+                    width={hotspot.width}
+                    height={hotspot.height}
+                    rx={hotspot.rx ?? 5}
+                    fill={hotspot.fill}
+                    stroke={hotspot.stroke}
+                    stroke-width="1.8"
+                    transform={hotspot.transform || undefined}
+                  />
+                {:else if hotspot.kind === 'ellipse'}
+                  <ellipse
+                    class="scene-hotspot scene-hotspot-mouse"
+                    cx={hotspot.cx}
+                    cy={hotspot.cy}
+                    rx={hotspot.rx}
+                    ry={hotspot.ry}
+                    fill={hotspot.fill}
+                    stroke={hotspot.stroke}
+                    stroke-width="1.8"
+                  />
+                {:else if hotspot.kind === 'polygon'}
+                  <polygon
+                    class="scene-hotspot scene-hotspot-mouse"
+                    points={hotspot.points}
+                    fill={hotspot.fill}
+                    stroke={hotspot.stroke}
+                    stroke-width="1.8"
+                    stroke-linejoin="round"
+                  />
+                {/if}
+              {/each}
+            </g>
+          {/if}
+
+          {#if showKeyboardLayers && keyboardVisualSrc}
+            <image
+              href={keyboardVisualSrc}
+              x="0"
+              y="0"
+              width={SCENE_WIDTH}
+              height={SCENE_HEIGHT}
+              class="scene-visual-layer keyboard-visual-layer"
+              clip-path={keyboardVisualClipUrl || undefined}
+            />
+          {/if}
+
+          {#if showMouseLayers && mouseVisualSrc}
+            <image
+              href={mouseVisualSrc}
+              x="0"
+              y="0"
+              width={SCENE_WIDTH}
+              height={SCENE_HEIGHT}
+              class="scene-visual-layer mouse-visual-layer"
+              clip-path={mouseVisualClipUrl || undefined}
+            />
+          {/if}
+
+          {#if useSourceKeyboardMode && leftHandSrc}
+            <image
+              href={leftHandSrc}
+              x="0"
+              y="0"
+              width={SCENE_WIDTH}
+              height={SCENE_HEIGHT}
+              class="keyboard-layer source-left-hand-layer active"
+            />
+          {/if}
+
+          {#if useSourceKeyboardMode && rightHandSrc}
+            <image
+              href={rightHandSrc}
+              x="0"
+              y="0"
+              width={SCENE_WIDTH}
+              height={SCENE_HEIGHT}
+              class="keyboard-layer source-right-hand-layer active"
+            />
+          {/if}
+
+          {#if showMouseLayers && preset.showMouseDevice}
+            <image
+              href={mouseDeviceBaseSrc}
+              x={mouseDeviceX}
+              y={mouseDeviceY}
+              width={DEVICE_WIDTH}
+              height={DEVICE_HEIGHT}
+              class="mouse-device-layer"
+              style={mouseDeviceStyle}
+            />
+
+            {#if mouseDeviceOverlaySrc}
+              <image
+                href={mouseDeviceOverlaySrc}
+                x={mouseDeviceX}
+                y={mouseDeviceY}
+                width={DEVICE_WIDTH}
+                height={DEVICE_HEIGHT}
+                class="mouse-device-layer mouse-device-overlay"
+                style={mouseOverlayStyle}
+              />
+            {/if}
+          {/if}
+
+          {#if showMouseLayers && preset.showMouseArm}
+            <polygon points={mouseArmPoints} class="mouse-arm-fill" style={mouseArmStyle} />
+            <polyline points={mouseArmPoints} class="mouse-arm-shadow" style={mouseArmStyle} />
+            <polyline points={mouseArmPoints} class="mouse-arm-stroke" style={mouseArmStyle} />
+          {/if}
+
+          {#if showKeyboardLayers && preset.showKeyboardOverlay && keyOverlaySrc}
+            <image
+              href={keyOverlaySrc}
+              x="0"
+              y="0"
+              width={SCENE_WIDTH}
+              height={SCENE_HEIGHT}
+              class="keyboard-layer keys-layer"
+              class:key-pose-1={keyOverlayPose === 1}
+              class:key-pose-2={keyOverlayPose === 2}
+              style={keyboardOverlayStyle}
+            />
+          {/if}
+
+          {#if showKeyboardLayers && !useSourceKeyboardMode}
+            <image
+              href={standardHandSrc}
+              x="0"
+              y="0"
+              width={SCENE_WIDTH}
+              height={SCENE_HEIGHT}
+              class="keyboard-layer standard-hand-layer active"
+              style={handStyle}
+            />
+          {/if}
         </g>
-        <g class={`paw ${rightPawClass}`}>
-          <path d={outline.rightPawPath} class="avatar-hit avatar-fill avatar-stroke paw-line" />
-        </g>
-      </g>
-    </svg>
+      </svg>
+    </div>
   </div>
 </div>
 
 <style>
-  svg {
-    overflow: visible;
-  }
-
   .avatar-shell {
-    pointer-events: none;
+    display: flex;
+    height: 100%;
+    width: 100%;
+    align-items: flex-end;
+    justify-content: center;
     opacity: var(--avatar-shell-opacity);
-  }
-
-  .idle-breathe {
-    animation: idle-breathe 3.6s ease-in-out infinite;
-  }
-
-  .idle-sway {
-    animation: idle-sway 4.2s ease-in-out infinite;
-  }
-
-  .idle-observe {
-    animation: idle-observe 4.8s ease-in-out infinite;
-  }
-
-  .idle-groove {
-    animation: idle-groove 2.8s ease-in-out infinite;
-  }
-
-  .idle-focus-pulse {
-    animation: idle-focus-pulse 3.1s ease-in-out infinite;
-  }
-
-  .idle-head-neutral {
-    transform-origin: 100px 104px;
-  }
-
-  .idle-head-tilt {
-    transform-origin: 100px 104px;
-    animation: idle-head-tilt 3.9s ease-in-out infinite;
-  }
-
-  .idle-head-peek {
-    transform-origin: 100px 104px;
-    animation: idle-head-peek 4.4s ease-in-out infinite;
-  }
-
-  .idle-head-dip {
-    transform-origin: 100px 104px;
-    animation: idle-head-dip 4s ease-in-out infinite;
-  }
-
-  .idle-head-bob {
-    transform-origin: 100px 104px;
-    animation: idle-head-bob 2.7s ease-in-out infinite;
-  }
-
-  .idle-head-focus {
-    transform-origin: 100px 104px;
-    animation: idle-head-focus 3.2s ease-in-out infinite;
-  }
-
-  .transition-alert {
-    animation: transition-alert 0.72s ease-out;
-  }
-
-  .transition-settle {
-    animation: transition-settle 0.68s ease-out;
-  }
-
-  .transition-snap-back {
-    animation: transition-snap-back 0.76s ease-out;
-  }
-
-  .transition-focus-shift {
-    animation: transition-focus-shift 0.64s ease-out;
-  }
-
-  .transition-glide {
-    animation: transition-glide 0.62s ease-out;
-  }
-
-  .transition-lift {
-    animation: transition-lift 0.66s ease-out;
-  }
-
-  .avatar-hit {
-    pointer-events: visiblePainted;
     cursor: grab;
-  }
-
-  .avatar-hit:active {
-    cursor: grabbing;
-  }
-
-  .tail-detail {
-    filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.78));
-  }
-
-  .ear-detail,
-  .cheek-detail {
-    stroke: none;
-    pointer-events: none;
-  }
-
-  .ear-detail {
-    fill: var(--ear-fill);
-  }
-
-  .cheek-detail {
-    fill: var(--cheek-fill);
-    opacity: var(--cheek-opacity);
-  }
-
-  .avatar-stroke,
-  .avatar-fill,
-  .face-line,
-  .whisker {
-    fill: none;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-
-  .avatar-fill {
-    fill: rgba(255, 255, 255, 0.96);
-  }
-
-  .avatar-stroke {
-    stroke: rgba(30, 41, 59, 0.92);
-    stroke-width: 5;
-  }
-
-  .face-line {
-    stroke: rgba(30, 41, 59, 0.9);
-    stroke-width: 4;
-  }
-
-  .whisker {
-    stroke: rgba(30, 41, 59, 0.45);
-    stroke-width: 2.5;
-  }
-
-  .whisker.soft {
-    opacity: 0.75;
-  }
-
-  .avatar-float {
+    transform-origin: center bottom;
     animation: avatar-float 3.1s ease-in-out infinite;
   }
 
-  .tail {
-    transform-origin: 150px 145px;
-    animation: tail-swing 2.4s ease-in-out infinite;
+  .avatar-shell:active {
+    cursor: grabbing;
   }
 
-  .paw {
-    transform-origin: center top;
+  .scene-frame {
+    position: relative;
+    height: 100%;
+    width: 100%;
   }
 
-  .paw-rest {
-    animation: paw-rest 2.7s ease-in-out infinite;
+  .scene-svg {
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    height: 100%;
+    width: 100%;
+    user-select: none;
+    filter: drop-shadow(0 10px 18px rgba(15, 23, 42, 0.06));
+    will-change: transform, opacity;
   }
 
-  .paw-work-left {
-    animation: paw-work-left 0.42s ease-in-out infinite;
+  .scene-base {
+    position: relative;
   }
 
-  .paw-work-right {
-    animation: paw-work-right 0.42s ease-in-out infinite;
+  .scene-svg image,
+  .scene-svg polygon,
+  .scene-svg polyline {
+    pointer-events: none;
   }
 
-  .paw-think-left {
-    animation: paw-think-left 0.9s ease-in-out infinite;
+  .static-cover-layer {
+    transition: transform 95ms ease-out;
+    transform-origin: center center;
   }
 
-  .paw-think-right {
-    animation: paw-think-right 0.9s ease-in-out infinite;
+  .scene-visual-layer {
+    transition: opacity 90ms linear;
+    pointer-events: none;
   }
 
-  .paw-music-left {
-    animation: paw-music-left 0.8s ease-in-out infinite;
+  .scene-interaction-layer {
+    mix-blend-mode: normal;
   }
 
-  .paw-music-right {
-    animation: paw-music-right 0.8s ease-in-out infinite;
+  .scene-hotspot {
+    filter: drop-shadow(0 2px 8px rgba(34, 211, 238, 0.18));
   }
 
-  .paw-write-left {
-    animation: paw-write-left 0.76s ease-in-out infinite;
+  .scene-hotspot-mouse {
+    filter: drop-shadow(0 2px 8px rgba(236, 72, 153, 0.16));
   }
 
-  .paw-write-right {
-    animation: paw-write-right 0.76s ease-in-out infinite;
+  .keyboard-layer {
+    transition: transform 90ms linear, opacity 90ms linear;
   }
 
-  .paw-chat-left {
-    animation: paw-chat-left 1.05s ease-in-out infinite;
+  .keyboard-layer.active {
+    opacity: 1;
   }
 
-  .paw-chat-right {
-    animation: paw-chat-right 1.05s ease-in-out infinite;
+  .keys-layer {
+    --key-y: 0px;
+    transform: translateY(var(--key-y));
   }
 
-  .paw-create-left {
-    animation: paw-create-left 1.2s ease-in-out infinite;
+  .mouse-device-layer {
+    transition: transform 80ms linear, opacity 80ms linear;
   }
 
-  .paw-create-right {
-    animation: paw-create-right 1.2s ease-in-out infinite;
+  .mouse-device-overlay {
+    opacity: 0.96;
   }
 
-  .paw-meeting-left {
-    animation: paw-meeting-left 1.4s ease-in-out infinite;
+  .mouse-arm-fill {
+    fill: #fff;
   }
 
-  .paw-meeting-right {
-    animation: paw-meeting-right 1.4s ease-in-out infinite;
+  .mouse-arm-shadow {
+    fill: none;
+    stroke: rgba(0, 0, 0, 0.3);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 7;
   }
 
-  .paw-video-left {
-    animation: paw-video-left 2.1s ease-in-out infinite;
+  .mouse-arm-stroke {
+    fill: none;
+    stroke: #000;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 6;
   }
 
-  .paw-video-right {
-    animation: paw-video-right 2.1s ease-in-out infinite;
+  .key-pose-1 {
+    opacity: 0.82;
+    --key-y: 1px;
   }
 
-  .paw-generate-left {
-    animation: paw-generate-left 1s ease-in-out infinite;
+  .key-pose-2 {
+    opacity: 0.96;
+    --key-y: 2px;
   }
 
-  .paw-generate-right {
-    animation: paw-generate-right 1s ease-in-out infinite;
+  .idle-breathe {
+    animation: avatar-float 3.1s ease-in-out infinite, idle-breathe 3.6s ease-in-out infinite;
   }
 
-  .mode-idle {
-    animation-duration: 4.2s;
+  .idle-sway {
+    animation: avatar-float 3.1s ease-in-out infinite, idle-sway 4.2s ease-in-out infinite;
   }
 
-  .mode-idle .tail {
-    animation-duration: 3.4s;
+  .idle-observe {
+    animation: avatar-float 3.1s ease-in-out infinite, idle-observe 4.8s ease-in-out infinite;
   }
 
-  .tail-reading,
-  .tail-meeting {
-    animation-duration: 3s;
+  .idle-groove {
+    animation: avatar-float 3.1s ease-in-out infinite, idle-groove 2.8s ease-in-out infinite;
   }
 
-  .tail-video {
-    animation-duration: 3.2s;
+  .idle-focus-pulse {
+    animation: avatar-float 3.1s ease-in-out infinite, idle-focus-pulse 3.1s ease-in-out infinite;
   }
 
-  .tail-music {
-    animation-duration: 1.6s;
+  .transition-alert {
+    animation: avatar-float 3.1s ease-in-out infinite, transition-alert 0.72s ease-out;
   }
 
-  .tail-generating,
-  .tail-working {
-    animation-duration: 2s;
+  .transition-settle {
+    animation: avatar-float 3.1s ease-in-out infinite, transition-settle 0.68s ease-out;
   }
 
-  .tail-writing {
-    animation-duration: 2.8s;
+  .transition-snap-back {
+    animation: avatar-float 3.1s ease-in-out infinite, transition-snap-back 0.76s ease-out;
   }
 
-  .tail-coding {
-    animation-duration: 1.7s;
+  .transition-focus-shift {
+    animation: avatar-float 3.1s ease-in-out infinite, transition-focus-shift 0.64s ease-out;
   }
 
-  .tail-planning {
-    animation-duration: 2.6s;
+  .transition-glide {
+    animation: avatar-float 3.1s ease-in-out infinite, transition-glide 0.62s ease-out;
   }
 
-  .tail-scheduling {
-    animation-duration: 2.9s;
-  }
-
-  .tail-chatting {
-    animation-duration: 1.8s;
-  }
-
-  .tail-creative {
-    animation-duration: 1.9s;
-  }
-
-  .tail-research {
-    animation-duration: 2.2s;
-  }
-
-  .tail-observing {
-    animation-duration: 3.5s;
-  }
-
-  .tail-slacking {
-    animation-duration: 3.8s;
-    opacity: 0.98;
-  }
-
-  .tail-music-groove {
-    animation-duration: 1.35s;
-  }
-
-  .tail-loop-wide {
-    animation: tail-swing-wide 1.8s ease-in-out infinite;
-  }
-
-  .tail-loop-tight {
-    animation: tail-swing-tight 2.4s ease-in-out infinite;
-  }
-
-  .tail-loop-flick {
-    animation: tail-flick 1.2s ease-in-out infinite;
-  }
-
-  .tail-podcast {
-    animation-duration: 2.4s;
-  }
-
-  .tail-video-watch {
-    animation-duration: 3.8s;
-  }
-
-  .tail-learning {
-    animation-duration: 2.6s;
-  }
-
-  .tail-generating-focus {
-    animation-duration: 1.75s;
-  }
-
-  .tail-presenting {
-    animation-duration: 2.2s;
+  .transition-lift {
+    animation: avatar-float 3.1s ease-in-out infinite, transition-lift 0.66s ease-out;
   }
 
   @keyframes avatar-float {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-2.4px); }
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+
+    50% {
+      transform: translateY(-2.4px);
+    }
   }
 
   @keyframes idle-breathe {
-    0%, 100% { transform: translateY(0) scale(1); }
-    50% { transform: translateY(-1.6px) scale(1.006); }
+    0%,
+    100% {
+      transform: translateY(0) scale(1);
+    }
+
+    50% {
+      transform: translateY(-1.6px) scale(1.006);
+    }
   }
 
   @keyframes idle-sway {
-    0%, 100% { transform: translateX(0) translateY(0); }
-    50% { transform: translateX(-1.8px) translateY(-1.2px); }
+    0%,
+    100% {
+      transform: translateX(0) translateY(0);
+    }
+
+    50% {
+      transform: translateX(-1.8px) translateY(-1.2px);
+    }
   }
 
   @keyframes idle-observe {
-    0%, 100% { transform: translateY(0); }
-    30% { transform: translate(-1px, -1.4px); }
-    65% { transform: translate(1.4px, -0.6px); }
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+
+    30% {
+      transform: translate(-1px, -1.4px);
+    }
+
+    65% {
+      transform: translate(1.4px, -0.6px);
+    }
   }
 
   @keyframes idle-groove {
-    0%, 100% { transform: translateX(0) translateY(0) rotate(0deg); }
-    25% { transform: translateX(-1.6px) translateY(-1.2px) rotate(-0.8deg); }
-    75% { transform: translateX(1.6px) translateY(-0.6px) rotate(0.8deg); }
+    0%,
+    100% {
+      transform: translateX(0) translateY(0) rotate(0deg);
+    }
+
+    25% {
+      transform: translateX(-1px) translateY(-1.6px) rotate(-0.6deg);
+    }
+
+    75% {
+      transform: translateX(1.2px) translateY(-1.1px) rotate(0.8deg);
+    }
   }
 
   @keyframes idle-focus-pulse {
-    0%, 100% { transform: scale(1) translateY(0); }
-    50% { transform: scale(1.01) translateY(-1px); }
-  }
+    0%,
+    100% {
+      transform: translateY(0) scale(1);
+    }
 
-  @keyframes idle-head-tilt {
-    0%, 100% { transform: rotate(0deg); }
-    50% { transform: rotate(-2.6deg); }
-  }
-
-  @keyframes idle-head-peek {
-    0%, 100% { transform: translateX(0); }
-    50% { transform: translateX(2px); }
-  }
-
-  @keyframes idle-head-dip {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(1.6px); }
-  }
-
-  @keyframes idle-head-bob {
-    0%, 100% { transform: rotate(0deg) translateY(0); }
-    50% { transform: rotate(-1.6deg) translateY(1px); }
-  }
-
-  @keyframes idle-head-focus {
-    0%, 100% { transform: translateX(0) scale(1); }
-    50% { transform: translateX(1.2px) scale(1.01); }
-  }
-
-  @keyframes tail-swing {
-    0%, 100% { transform: rotate(8deg); }
-    50% { transform: rotate(-10deg); }
-  }
-
-  @keyframes tail-swing-wide {
-    0%, 100% { transform: rotate(14deg); }
-    50% { transform: rotate(-16deg); }
-  }
-
-  @keyframes tail-swing-tight {
-    0%, 100% { transform: rotate(5deg); }
-    50% { transform: rotate(-7deg); }
-  }
-
-  @keyframes tail-flick {
-    0%, 100% { transform: rotate(8deg); }
-    35% { transform: rotate(-4deg); }
-    55% { transform: rotate(16deg); }
-    75% { transform: rotate(-10deg); }
+    50% {
+      transform: translateY(-1.8px) scale(1.01);
+    }
   }
 
   @keyframes transition-alert {
-    0% { transform: scale(0.98) translateY(4px); }
-    50% { transform: scale(1.02) translateY(-3px); }
-    100% { transform: scale(1) translateY(0); }
+    0% {
+      transform: translateY(8px) scale(0.98);
+      opacity: 0.76;
+    }
+
+    60% {
+      transform: translateY(-3px) scale(1.015);
+      opacity: 1;
+    }
+
+    100% {
+      transform: translateY(0) scale(1);
+      opacity: 1;
+    }
   }
 
   @keyframes transition-settle {
-    0% { transform: translateY(-3px) rotate(-1deg); }
-    100% { transform: translateY(0) rotate(0); }
+    0% {
+      transform: translateY(-4px) scale(1.015);
+    }
+
+    100% {
+      transform: translateY(0) scale(1);
+    }
   }
 
   @keyframes transition-snap-back {
-    0% { transform: translateX(-4px) translateY(2px); }
-    60% { transform: translateX(2px) translateY(-2px); }
-    100% { transform: translateX(0) translateY(0); }
+    0% {
+      transform: translateX(6px) scale(0.985);
+    }
+
+    45% {
+      transform: translateX(-4px) scale(1.01);
+    }
+
+    100% {
+      transform: translateX(0) scale(1);
+    }
   }
 
   @keyframes transition-focus-shift {
-    0% { transform: translateX(2px); }
-    50% { transform: translateX(-2px) translateY(-1px); }
-    100% { transform: translateX(0) translateY(0); }
+    0% {
+      transform: translateY(4px) scale(0.992);
+    }
+
+    55% {
+      transform: translateY(-3px) scale(1.012);
+    }
+
+    100% {
+      transform: translateY(0) scale(1);
+    }
   }
 
   @keyframes transition-glide {
-    0% { transform: translateY(2px); }
-    100% { transform: translateY(0); }
+    0% {
+      transform: translateX(-5px) translateY(2px);
+      opacity: 0.84;
+    }
+
+    100% {
+      transform: translateX(0) translateY(0);
+      opacity: 1;
+    }
   }
 
   @keyframes transition-lift {
-    0% { transform: translateY(4px) scale(0.985); }
-    55% { transform: translateY(-3px) scale(1.01); }
-    100% { transform: translateY(0) scale(1); }
-  }
+    0% {
+      transform: translateY(8px) scale(0.985);
+    }
 
-  @keyframes paw-rest {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-2px); }
-  }
-
-  @keyframes paw-work-left {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translate(-2px, -9px) rotate(-10deg); }
-  }
-
-  @keyframes paw-work-right {
-    0%, 100% { transform: translateY(-9px) rotate(10deg); }
-    50% { transform: translate(2px, 0); }
-  }
-
-  @keyframes paw-think-left {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-4px) rotate(-5deg); }
-  }
-
-  @keyframes paw-think-right {
-    0%, 100% { transform: translateY(-2px); }
-    50% { transform: translateY(1px) rotate(4deg); }
-  }
-
-  @keyframes paw-music-left {
-    0%, 100% { transform: translate(-1px, 0) rotate(-4deg); }
-    50% { transform: translate(-3px, -7px) rotate(-14deg); }
-  }
-
-  @keyframes paw-music-right {
-    0%, 100% { transform: translate(1px, -1px) rotate(5deg); }
-    50% { transform: translate(3px, -8px) rotate(15deg); }
-  }
-
-  @keyframes paw-write-left {
-    0%, 100% { transform: translate(-1px, -1px) rotate(-2deg); }
-    50% { transform: translate(-4px, -7px) rotate(-12deg); }
-  }
-
-  @keyframes paw-write-right {
-    0%, 100% { transform: translate(1px, -3px) rotate(5deg); }
-    50% { transform: translate(2px, 2px) rotate(10deg); }
-  }
-
-  @keyframes paw-chat-left {
-    0%, 100% { transform: translateY(0) rotate(-3deg); }
-    50% { transform: translate(-3px, -6px) rotate(-14deg); }
-  }
-
-  @keyframes paw-chat-right {
-    0%, 100% { transform: translateY(-1px) rotate(3deg); }
-    50% { transform: translate(4px, -4px) rotate(16deg); }
-  }
-
-  @keyframes paw-create-left {
-    0%, 100% { transform: translate(-1px, 0) rotate(-4deg); }
-    50% { transform: translate(-5px, -8px) rotate(-12deg); }
-  }
-
-  @keyframes paw-create-right {
-    0%, 100% { transform: translate(1px, -2px) rotate(6deg); }
-    50% { transform: translate(3px, 3px) rotate(14deg); }
-  }
-
-  @keyframes paw-meeting-left {
-    0%, 100% { transform: translateY(-1px) rotate(-2deg); }
-    50% { transform: translate(-2px, -5px) rotate(-9deg); }
-  }
-
-  @keyframes paw-meeting-right {
-    0%, 100% { transform: translateY(-2px) rotate(3deg); }
-    50% { transform: translate(2px, -4px) rotate(8deg); }
-  }
-
-  @keyframes paw-video-left {
-    0%, 100% { transform: translateY(0) rotate(-1deg); }
-    50% { transform: translate(-1px, -3px) rotate(-4deg); }
-  }
-
-  @keyframes paw-video-right {
-    0%, 100% { transform: translateY(-1px) rotate(2deg); }
-    50% { transform: translate(1px, -2px) rotate(5deg); }
-  }
-
-  @keyframes paw-generate-left {
-    0%, 100% { transform: translate(-1px, -1px) rotate(-3deg); }
-    50% { transform: translate(-3px, -5px) rotate(-9deg); }
-  }
-
-  @keyframes paw-generate-right {
-    0%, 100% { transform: translate(1px, -3px) rotate(4deg); }
-    50% { transform: translate(2px, 1px) rotate(8deg); }
-  }
-
-  :global(.dark) .avatar-stroke,
-  :global(.dark) .face-line {
-    stroke: rgba(241, 245, 249, 0.92);
-  }
-
-  :global(.dark) .avatar-fill {
-    fill: rgba(248, 250, 252, 0.96);
-  }
-
-  :global(.dark) .whisker {
-    stroke: rgba(241, 245, 249, 0.28);
+    100% {
+      transform: translateY(0) scale(1);
+    }
   }
 </style>

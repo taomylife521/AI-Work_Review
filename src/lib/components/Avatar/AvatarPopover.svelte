@@ -5,33 +5,45 @@
   export let onClose = () => {};
 
   $: bubbleMessage = formatBubbleMessage(bubble?.message);
-  $: toneClasses =
+  $: panelStyle =
     bubble?.tone === 'success'
-      ? 'border-emerald-400/28 bg-[linear-gradient(180deg,rgba(6,78,59,0.97),rgba(6,95,70,0.94))] text-emerald-50 ring-1 ring-emerald-200/8'
-      : 'border-slate-300/20 bg-[linear-gradient(180deg,rgba(15,23,42,0.97),rgba(30,41,59,0.93))] text-slate-100 ring-1 ring-white/8';
+      ? 'background: linear-gradient(180deg, rgba(236, 253, 245, 0.98), rgba(209, 250, 229, 0.95)); color: rgb(6, 78, 59); border-color: rgba(167, 243, 208, 0.96); backdrop-filter: blur(14px) saturate(1.06);'
+      : 'background: rgba(255, 255, 255, 0.96); color: rgb(15, 23, 42); border-color: rgba(226, 232, 240, 0.96); backdrop-filter: blur(14px) saturate(1.06);';
+  $: innerPanelStyle = 'border-color: rgba(255, 255, 255, 0.74);';
+  $: tailStyle =
+    bubble?.tone === 'success'
+      ? 'background: linear-gradient(180deg, rgba(236, 253, 245, 0.98), rgba(209, 250, 229, 0.95)); border-color: rgba(167, 243, 208, 0.96);'
+      : 'background: rgba(255, 255, 255, 0.96); border-color: rgba(226, 232, 240, 0.96);';
+  $: tailDotStyle =
+    bubble?.tone === 'success'
+      ? 'background: rgba(236, 253, 245, 0.98);'
+      : 'background: rgba(255, 255, 255, 0.94);';
 </script>
 
 {#if bubble}
   <div class="absolute inset-0 z-20 overflow-visible pointer-events-none">
-    <div class="absolute" style="right: 18%; top: 4%;">
+    <div class="absolute" style="right: 10%; top: 6%;">
       <div class="relative overflow-visible">
         <div
-          class="pointer-events-auto relative rounded-[22px] border backdrop-blur-xl shadow-[0_10px_18px_rgba(15,23,42,0.18),0_24px_44px_rgba(15,23,42,0.26)] {toneClasses}"
-          style="width: fit-content; max-width: min(58vw, 188px); min-width: 0; padding: 10px 12px;"
+          class="pointer-events-auto relative rounded-[20px] border shadow-[0_8px_22px_rgba(15,23,42,0.12),0_2px_8px_rgba(15,23,42,0.08)]"
+          style="width: fit-content; max-width: min(62vw, 228px); min-width: 118px; padding: 12px 14px 12px 14px; {panelStyle}"
         >
           {#if bubble?.persistent}
             <button
               type="button"
-              class="absolute inset-0 rounded-[22px]"
+              class="absolute inset-0 rounded-[20px]"
               aria-label="关闭提醒"
               on:click={onClose}
             ></button>
           {/if}
-          <div class="pointer-events-none absolute inset-[1px] rounded-[21px] border border-white/10"></div>
+          <div
+            class="pointer-events-none absolute inset-[1px] rounded-[19px] border"
+            style={innerPanelStyle}
+          ></div>
           {#if bubble?.persistent}
             <button
               type="button"
-              class="absolute right-2 top-2 z-10 inline-flex h-5 w-5 items-center justify-center rounded-full text-slate-300 transition hover:bg-white/10 hover:text-white"
+              class="absolute right-2 top-2 z-10 inline-flex h-5 w-5 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-900/6 hover:text-slate-700"
               aria-label="关闭提醒"
               on:click={onClose}
             >
@@ -39,14 +51,21 @@
             </button>
           {/if}
           <div
-            class="pointer-events-none relative text-sm font-semibold leading-[1.35] tracking-[0.01em] pr-6"
-            style="display: inline-block; word-break: break-word;"
+            class="pointer-events-none relative text-[13px] font-medium leading-[1.45] tracking-[0.01em]"
+            class:pr-6={bubble?.persistent}
+            style="display: inline-flex; word-break: break-word; overflow-wrap: anywhere; white-space: pre-wrap;"
           >
             {bubbleMessage}
           </div>
         </div>
-        <div class="absolute left-[18px] top-[calc(100%-4px)] h-[7px] w-[7px] rounded-full bg-slate-200/45 shadow-[0_2px_6px_rgba(15,23,42,0.14)]"></div>
-        <div class="absolute left-[6px] top-[calc(100%+8px)] h-[11px] w-[11px] rounded-full bg-slate-100/62 shadow-[0_4px_10px_rgba(15,23,42,0.18)]"></div>
+        <div
+          class="bubble-tail absolute left-[20px] top-[calc(100%-7px)] h-[16px] w-[16px] rotate-45 rounded-[4px] border shadow-[0_6px_16px_rgba(15,23,42,0.08)]"
+          style={tailStyle}
+        ></div>
+        <div
+          class="absolute left-[30px] top-[calc(100%-2px)] h-[10px] w-[10px] rounded-full shadow-[0_4px_12px_rgba(15,23,42,0.08)]"
+          style={tailDotStyle}
+        ></div>
       </div>
     </div>
   </div>

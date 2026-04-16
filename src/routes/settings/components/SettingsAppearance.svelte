@@ -16,6 +16,8 @@
     updateAvatarOpacitySetting,
     updateAvatarScaleSetting,
   } from '$lib/utils/avatarToggle.js';
+  import { AVATAR_PRESET_OPTIONS } from '$lib/components/Avatar/avatarPresetRegistry.js';
+  import AvatarPresetPreview from '$lib/components/Avatar/AvatarPresetPreview.svelte';
 
   export let config;
 
@@ -25,6 +27,7 @@
   let avatarSaving = false;
   let avatarScaleSaving = false;
   let avatarOpacitySaving = false;
+  let avatarPresetSaving = false;
   let avatarScaleTimer = null;
   let avatarOpacityTimer = null;
   const breakReminderIntervals = [30, 45, 50, 60, 90, 120];
@@ -144,6 +147,28 @@
     config.avatar_opacity = nextOpacity;
     dispatch('change', config);
     queueAvatarOpacitySave(nextOpacity);
+  }
+
+  async function selectAvatarPreset(presetId) {
+    if (avatarPresetSaving || config.avatar_preset === presetId) {
+      return;
+    }
+
+    avatarPresetSaving = true;
+    const previousPreset = config.avatar_preset;
+    config.avatar_preset = presetId;
+    dispatch('change', config);
+
+    try {
+      await invoke('save_config', { config });
+    } catch (e) {
+      config.avatar_preset = previousPreset;
+      dispatch('change', config);
+      console.error('保存桌宠预设失败:', e);
+      showToast(t('settingsAppearance.avatarPresetSaveFailed', { error: e }), 'error');
+    } finally {
+      avatarPresetSaving = false;
+    }
   }
 
   function toggleBreakReminder() {
@@ -320,6 +345,39 @@
         <span>{t('settingsAppearance.moreTransparent')}</span>
         <span>{t('settingsAppearance.default82')}</span>
         <span>{t('settingsAppearance.moreSolid')}</span>
+      </div>
+    </div>
+
+    <div class="settings-block pt-1">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <div class="settings-text">{t('settingsAppearance.avatarPreset')}</div>
+          <div class="settings-muted mt-0.5">{t('settingsAppearance.avatarPresetHint')}</div>
+        </div>
+        {#if avatarPresetSaving}
+          <div class="text-xs text-slate-400 dark:text-slate-500">{t('settingsAppearance.syncing')}</div>
+        {/if}
+      </div>
+
+      <div class="mt-3 grid gap-3 md:grid-cols-3">
+        {#each AVATAR_PRESET_OPTIONS as preset}
+          <button
+            type="button"
+            class="rounded-2xl border p-3 text-left transition {config.avatar_preset === preset.id ? 'border-primary-500 bg-primary-50/70 shadow-sm dark:border-primary-400 dark:bg-primary-500/10' : 'border-slate-200 bg-white hover:border-slate-300 dark:border-slate-700 dark:bg-slate-900/60 dark:hover:border-slate-600'}"
+            on:click={() => selectAvatarPreset(preset.id)}
+            aria-pressed={config.avatar_preset === preset.id}
+          >
+            <div class="h-24 w-full rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-950/70">
+              <AvatarPresetPreview presetId={preset.id} selected={config.avatar_preset === preset.id} />
+            </div>
+            <div class="mt-3 text-sm font-semibold text-slate-800 dark:text-slate-100">
+              {t(preset.titleKey)}
+            </div>
+            <div class="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+              {t(preset.descriptionKey)}
+            </div>
+          </button>
+        {/each}
       </div>
     </div>
 

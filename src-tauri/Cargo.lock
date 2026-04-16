@@ -7095,6 +7095,7 @@ dependencies = [
  "async-trait",
  "auto-launch 0.6.0",
  "base64 0.21.7",
+ "block",
  "chrono",
  "cocoa",
  "core-foundation 0.9.4",

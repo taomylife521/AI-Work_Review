@@ -9,6 +9,7 @@ extern crate objc;
 mod activity_classifier;
 mod analysis;
 mod autostart;
+mod avatar_input;
 mod avatar_engine;
 mod commands;
 mod config;
@@ -837,6 +838,10 @@ fn previous_app_backfill_duration(
     }
 }
 
+fn should_persist_merge_update(effective_duration: i64, keep_record_active: bool) -> bool {
+    effective_duration > 0 || keep_record_active
+}
+
 fn resolve_previous_activity_to_backfill(
     state: &Arc<Mutex<AppState>>,
     previous_app_name: Option<&str>,
@@ -1034,20 +1039,26 @@ fn avatar_activity_decision(
     is_recording: bool,
     is_paused: bool,
     avatar_opacity: f64,
+    avatar_preset: &str,
 ) -> AvatarActivityDecision {
     if !avatar_enabled {
         return AvatarActivityDecision {
             should_continue: false,
-            reset_state: Some(avatar_engine::default_avatar_state()),
+            reset_state: Some(avatar_engine::apply_avatar_visual_settings(
+                avatar_engine::default_avatar_state(),
+                avatar_opacity,
+                avatar_preset,
+            )),
         };
     }
 
     if !is_recording || is_paused {
         return AvatarActivityDecision {
             should_continue: false,
-            reset_state: Some(avatar_engine::apply_avatar_opacity(
+            reset_state: Some(avatar_engine::apply_avatar_visual_settings(
                 avatar_engine::default_avatar_state(),
                 avatar_opacity,
+                avatar_preset,
             )),
         };
     }
@@ -1159,6 +1170,7 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
             avatar_enabled,
             avatar_generating_report,
             avatar_opacity,
+            avatar_preset,
             is_recording,
             is_paused,
             break_reminder_enabled,
@@ -1169,6 +1181,7 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
                 state_guard.config.avatar_enabled,
                 state_guard.avatar_generating_report,
                 state_guard.config.avatar_opacity,
+                state_guard.config.avatar_preset.clone(),
                 state_guard.is_recording,
                 state_guard.is_paused,
                 state_guard.config.break_reminder_enabled,
@@ -1176,8 +1189,13 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
             )
         };
 
-        let activity_decision =
-            avatar_activity_decision(avatar_enabled, is_recording, is_paused, avatar_opacity);
+        let activity_decision = avatar_activity_decision(
+            avatar_enabled,
+            is_recording,
+            is_paused,
+            avatar_opacity,
+            &avatar_preset,
+        );
         let poll_interval_ms = avatar_monitor_poll_interval_ms_for_platform(
             cfg!(target_os = "macos"),
             activity_decision.should_continue,
@@ -1265,7 +1283,7 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
             avatar_engine::emit_avatar_bubble(&app, payload);
         }
 
-        let avatar_state = avatar_engine::apply_avatar_opacity(
+        let avatar_state = avatar_engine::apply_avatar_visual_settings(
             avatar_engine::derive_avatar_state_with_rules(
                 &app_category_rules,
                 &active_window.app_name,
@@ -1275,6 +1293,7 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
                 avatar_generating_report,
             ),
             avatar_opacity,
+            &avatar_preset,
         );
 
         let window_signature = format!("{}|{}", active_window.app_name, active_window.window_title);
@@ -1937,7 +1956,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                     let mut persisted_duration = latest.duration;
                     let mut merge_succeeded = false;
 
-                    if effective_duration > 0 {
+                    if should_persist_merge_update(effective_duration, true) {
                         let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
                         match state_guard.database.merge_activity(
                             latest_id,
@@ -2651,6 +2670,7 @@ async fn main() {
     // 初始化存储管理器
     let storage_manager = StorageManager::new(&data_dir, config.storage.clone());
     let initial_avatar_opacity = config.avatar_opacity;
+    let initial_avatar_preset = config.avatar_preset.clone();
 
     // 启动时执行一次清理
     if let Err(e) = storage_manager.cleanup() {
@@ -2668,9 +2688,10 @@ async fn main() {
         config_path,
         is_recording: true,
         is_paused: false,
-        avatar_state: avatar_engine::apply_avatar_opacity(
+        avatar_state: avatar_engine::apply_avatar_visual_settings(
             avatar_engine::default_avatar_state(),
             initial_avatar_opacity,
+            &initial_avatar_preset,
         ),
         avatar_generating_report: false,
         cached_active_window: None,
@@ -2788,6 +2809,9 @@ async fn main() {
             } else if avatar_enabled {
                 avatar_engine::emit_avatar_state(&app.handle(), &avatar_state);
             }
+
+            avatar_input::start_avatar_input_monitor(&app.handle());
+            avatar_input::spawn_avatar_input_bridge(app.handle().clone());
 
             // 创建 Tauri v2 系统托盘
             let show = MenuItemBuilder::with_id(TRAY_MENU_SHOW_ID, "显示窗口").build(app)?;
@@ -3093,12 +3117,15 @@ mod tests {
         monitoring_poll_interval_ms_for_platform, previous_app_backfill_duration,
         recording_loop_decision, resolve_activity_classification, reusable_cached_active_window,
         screen_lock_check_interval_ms_for_platform, should_confirm_idle,
+        should_persist_merge_update,
         should_hide_main_window_on_setup, should_prevent_exit,
         should_probe_browser_url_before_change_detection, should_request_screen_capture_permission,
         should_skip_system_window, tray_recording_toggle_action, tray_recording_toggle_label,
         BreakReminderRuntime, BreakReminderSignal, MainWindowCloseBehavior, RecordingToggleAction,
     };
-    use crate::avatar_engine::{apply_avatar_opacity, default_avatar_state, derive_avatar_state};
+    use crate::avatar_engine::{
+        apply_avatar_visual_settings, default_avatar_state, derive_avatar_state,
+    };
     use crate::config::{AppConfig, WebsiteSemanticRule};
     use crate::monitor::ActiveWindow;
     use std::time::{Duration, Instant};
@@ -3155,6 +3182,13 @@ mod tests {
             3600
         );
         assert_eq!(previous_app_backfill_duration(false, 3600, false, false), 0);
+    }
+
+    #[test]
+    fn 合并活动即使本轮不累计时长也应刷新记录() {
+        assert!(should_persist_merge_update(120, true));
+        assert!(should_persist_merge_update(0, true));
+        assert!(!should_persist_merge_update(0, false));
     }
 
     #[test]
@@ -3314,23 +3348,31 @@ mod tests {
 
     #[test]
     fn 暂停录制时桌宠应回到待命状态() {
-        let decision = avatar_activity_decision(true, true, true, 0.82);
+        let decision = avatar_activity_decision(true, true, true, 0.82, "keyboard-focus");
 
         assert!(!decision.should_continue);
         assert_eq!(
             decision.reset_state,
-            Some(apply_avatar_opacity(default_avatar_state(), 0.82))
+            Some(apply_avatar_visual_settings(
+                default_avatar_state(),
+                0.82,
+                "keyboard-focus",
+            ))
         );
     }
 
     #[test]
     fn 停止录制时桌宠应回到待命状态() {
-        let decision = avatar_activity_decision(true, false, false, 0.82);
+        let decision = avatar_activity_decision(true, false, false, 0.82, "minimal-office");
 
         assert!(!decision.should_continue);
         assert_eq!(
             decision.reset_state,
-            Some(apply_avatar_opacity(default_avatar_state(), 0.82))
+            Some(apply_avatar_visual_settings(
+                default_avatar_state(),
+                0.82,
+                "minimal-office",
+            ))
         );
     }
 
