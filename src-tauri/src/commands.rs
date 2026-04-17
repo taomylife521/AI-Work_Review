@@ -1,6 +1,7 @@
 use crate::analysis::AppLocale;
 use crate::config::{
-    AiProvider, AiProviderConfig, AppCategoryRule, AppConfig, CustomSemanticCategory, ModelConfig, WebsiteSemanticRule,
+    AiProvider, AiProviderConfig, AppCategoryRule, AppConfig, CustomSemanticCategory, ModelConfig,
+    WebsiteSemanticRule,
 };
 use crate::database::Database;
 use crate::database::{
@@ -139,6 +140,10 @@ pub struct LinuxSessionSupportInfo {
     pub active_window_supported: bool,
     pub screenshot_supported: bool,
     pub browser_url_support_level: String,
+    pub avatar_input_provider: String,
+    pub avatar_input_support_level: String,
+    pub avatar_keyboard_supported: bool,
+    pub avatar_mouse_supported: bool,
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -4142,6 +4147,7 @@ pub async fn get_linux_session_support() -> Result<LinuxSessionSupportInfo, AppE
         let desktop_environment = current_linux_desktop_environment();
         let active_window_provider =
             crate::monitor::current_linux_active_window_provider(session, desktop_environment);
+        let avatar_input_support = crate::avatar_input::current_linux_avatar_input_support();
         let active_window_supported = active_window_provider.is_some();
         let browser_url_support_level = if active_window_supported {
             "mixed"
@@ -4157,6 +4163,10 @@ pub async fn get_linux_session_support() -> Result<LinuxSessionSupportInfo, AppE
             active_window_supported,
             screenshot_supported: session.supports_screenshot_capture(),
             browser_url_support_level: browser_url_support_level.to_string(),
+            avatar_input_provider: avatar_input_support.provider.to_string(),
+            avatar_input_support_level: avatar_input_support.support_level.to_string(),
+            avatar_keyboard_supported: avatar_input_support.keyboard_supported,
+            avatar_mouse_supported: avatar_input_support.mouse_supported,
         });
     }
 
@@ -4170,6 +4180,10 @@ pub async fn get_linux_session_support() -> Result<LinuxSessionSupportInfo, AppE
             active_window_supported: false,
             screenshot_supported: false,
             browser_url_support_level: "not_applicable".to_string(),
+            avatar_input_provider: "not_applicable".to_string(),
+            avatar_input_support_level: "not_applicable".to_string(),
+            avatar_keyboard_supported: false,
+            avatar_mouse_supported: false,
         })
     }
 }
@@ -4975,8 +4989,11 @@ pub async fn get_app_category_overview(
         .into_iter()
         .map(|item| {
             let app_name = item.app_name;
-            let override_category =
-                crate::monitor::find_category_override(&state.config.app_category_rules, &app_name, &state.config.custom_categories);
+            let override_category = crate::monitor::find_category_override(
+                &state.config.app_category_rules,
+                &app_name,
+                &state.config.custom_categories,
+            );
             AppCategoryOverviewItem {
                 app_name: app_name.clone(),
                 category: override_category.unwrap_or(item.category),
@@ -4994,7 +5011,11 @@ pub async fn get_app_category_overview(
 
 fn upsert_app_category_rule(config: &mut AppConfig, app_name: &str, category: &str) {
     let normalized_app_name = crate::monitor::normalize_display_app_name(app_name);
-    let custom_keys: Vec<String> = config.custom_categories.iter().map(|c| c.key.clone()).collect();
+    let custom_keys: Vec<String> = config
+        .custom_categories
+        .iter()
+        .map(|c| c.key.clone())
+        .collect();
     let normalized_category = crate::config::normalize_category_key_private(category, &custom_keys);
     let match_key = normalized_app_name.to_lowercase();
 
@@ -5017,7 +5038,12 @@ fn reclassify_app_history_in_state(
     app_name: &str,
     category: &str,
 ) -> Result<usize, AppError> {
-    let custom_keys: Vec<String> = state.config.custom_categories.iter().map(|c| c.key.clone()).collect();
+    let custom_keys: Vec<String> = state
+        .config
+        .custom_categories
+        .iter()
+        .map(|c| c.key.clone())
+        .collect();
     let target_category = crate::config::normalize_category_key_private(category, &custom_keys);
     let activities = state
         .database
@@ -5187,8 +5213,14 @@ pub async fn save_custom_category(
     let color = color.trim().to_string();
     let icon = icon.trim().to_string();
 
-    if key.is_empty() || !key.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
-        return Err(AppError::Unknown("分类标识只能包含小写字母、数字和连字符".to_string()));
+    if key.is_empty()
+        || !key
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        return Err(AppError::Unknown(
+            "分类标识只能包含小写字母、数字和连字符".to_string(),
+        ));
     }
     if name.is_empty() {
         return Err(AppError::Unknown("分类名称不能为空".to_string()));
@@ -5197,9 +5229,15 @@ pub async fn save_custom_category(
         return Err(AppError::Unknown("颜色格式无效，需为 #RRGGBB".to_string()));
     }
     // 不允许覆盖预设分类
-    if matches!(key.as_str(),
-        "development" | "browser" | "communication" | "office"
-        | "design" | "entertainment" | "other"
+    if matches!(
+        key.as_str(),
+        "development"
+            | "browser"
+            | "communication"
+            | "office"
+            | "design"
+            | "entertainment"
+            | "other"
     ) {
         return Err(AppError::Unknown("不能覆盖预设分类".to_string()));
     }
@@ -5215,7 +5253,11 @@ pub async fn save_custom_category(
             icon: icon.clone(),
         };
 
-        if let Some(existing) = next_config.custom_categories.iter_mut().find(|c| c.key == key) {
+        if let Some(existing) = next_config
+            .custom_categories
+            .iter_mut()
+            .find(|c| c.key == key)
+        {
             *existing = custom;
         } else {
             next_config.custom_categories.push(custom);
@@ -5241,7 +5283,10 @@ pub async fn delete_custom_category(
     let affected = {
         let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
         // 统计引用该分类的规则数
-        state.config.app_category_rules.iter()
+        state
+            .config
+            .app_category_rules
+            .iter()
             .filter(|r| r.category == key)
             .count()
     };
@@ -5328,15 +5373,23 @@ pub async fn save_custom_semantic_category(
     let key = key.trim().to_lowercase();
     let name = name.trim().to_string();
 
-    if key.is_empty() || !key.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
-        return Err(AppError::Unknown("分类标识只能包含小写字母、数字和连字符".to_string()));
+    if key.is_empty()
+        || !key
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        return Err(AppError::Unknown(
+            "分类标识只能包含小写字母、数字和连字符".to_string(),
+        ));
     }
     if name.is_empty() {
         return Err(AppError::Unknown("分类名称不能为空".to_string()));
     }
     // 不允许覆盖预设语义分类
     if crate::config::is_valid_builtin_semantic_category(&name) {
-        return Err(AppError::Unknown("不能使用与预设分类相同的名称".to_string()));
+        return Err(AppError::Unknown(
+            "不能使用与预设分类相同的名称".to_string(),
+        ));
     }
 
     let next_config = {
@@ -5348,7 +5401,11 @@ pub async fn save_custom_semantic_category(
             name: name.clone(),
         };
 
-        if let Some(existing) = next_config.custom_semantic_categories.iter_mut().find(|c| c.key == key) {
+        if let Some(existing) = next_config
+            .custom_semantic_categories
+            .iter_mut()
+            .find(|c| c.key == key)
+        {
             *existing = custom;
         } else {
             next_config.custom_semantic_categories.push(custom);
@@ -5372,7 +5429,10 @@ pub async fn delete_custom_semantic_category(
     let affected = {
         let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
         // 统计引用该分类的规则数
-        state.config.website_semantic_rules.iter()
+        state
+            .config
+            .website_semantic_rules
+            .iter()
             .filter(|r| r.semantic_category == key)
             .count()
     };
@@ -5382,7 +5442,9 @@ pub async fn delete_custom_semantic_category(
         let mut next_config = state.config.clone();
 
         // 删除自定义语义分类
-        next_config.custom_semantic_categories.retain(|c| c.key != key);
+        next_config
+            .custom_semantic_categories
+            .retain(|c| c.key != key);
 
         // 重定向引用该分类的规则到"未知活动"
         for rule in &mut next_config.website_semantic_rules {

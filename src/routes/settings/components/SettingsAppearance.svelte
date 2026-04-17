@@ -33,6 +33,8 @@
   const breakReminderIntervals = [30, 45, 50, 60, 90, 120];
   let blurLabels = [];
   let avatarToggleUi;
+  let runtimePlatform = '';
+  let linuxSessionSupport = null;
 
   // === 背景图片 ===
   let bgPreview = null;
@@ -55,12 +57,32 @@
   $: avatarScaleLabel = formatAvatarScaleLabel(avatarScale);
   $: avatarOpacity = clampAvatarOpacity(config.avatar_opacity ?? AVATAR_OPACITY_DEFAULT);
   $: avatarOpacityLabel = formatAvatarOpacityLabel(avatarOpacity);
+  $: avatarInputSupportLabelKey = linuxSessionSupport?.avatarInputSupportLevel === 'full'
+    ? 'settingsAppearance.avatarInputFull'
+    : linuxSessionSupport?.avatarInputSupportLevel === 'mouse-only'
+      ? 'settingsAppearance.avatarInputMouseOnly'
+      : 'settingsAppearance.avatarInputUnavailable';
+  $: avatarInputSupportHintKey = linuxSessionSupport?.avatarInputSupportLevel === 'full'
+    ? 'settingsAppearance.avatarInputFullHint'
+    : linuxSessionSupport?.avatarInputSupportLevel === 'mouse-only'
+      ? 'settingsAppearance.avatarInputMouseOnlyHint'
+      : 'settingsAppearance.avatarInputUnavailableHint';
 
   onMount(async () => {
     try {
       const b64 = await invoke('get_background_image');
       if (b64) bgPreview = `data:image/jpeg;base64,${b64}`;
     } catch (e) { /* ignore */ }
+
+    try {
+      runtimePlatform = await invoke('get_runtime_platform');
+      if (runtimePlatform === 'linux') {
+        linuxSessionSupport = await invoke('get_linux_session_support');
+      }
+    } catch (e) {
+      console.error('读取 Linux 桌宠联动能力失败:', e);
+      linuxSessionSupport = null;
+    }
   });
 
   onDestroy(() => {
@@ -283,6 +305,38 @@
         <span class="switch-thumb {avatarToggleUi.thumbClass}"></span>
       </button>
     </div>
+
+    {#if runtimePlatform === 'linux' && linuxSessionSupport}
+      <div class="settings-block rounded-xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <div class="settings-text">{t('settingsAppearance.avatarLinuxSupportTitle')}</div>
+            <div class="settings-muted mt-0.5">{t('settingsAppearance.avatarLinuxSupportHint')}</div>
+          </div>
+          <div class="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">
+            {linuxSessionSupport.sessionType} / {linuxSessionSupport.desktopEnvironment}
+          </div>
+        </div>
+
+        <div class="mt-3 flex items-center justify-between gap-3 text-sm">
+          <div class="settings-subtle">{t('settingsAppearance.avatarInputSupportTitle')}</div>
+          <div class="font-semibold text-slate-700 dark:text-slate-200">
+            {t(avatarInputSupportLabelKey)}
+          </div>
+        </div>
+
+        <div class="mt-2 flex items-center justify-between gap-3 text-sm">
+          <div class="settings-subtle">{t('settingsAppearance.avatarInputProviderLabel')}</div>
+          <div class="font-mono text-xs text-slate-500 dark:text-slate-400">
+            {linuxSessionSupport.avatarInputProvider}
+          </div>
+        </div>
+
+        <div class="mt-2 text-[12px] text-slate-500 dark:text-slate-400">
+          {t(avatarInputSupportHintKey)}
+        </div>
+      </div>
+    {/if}
 
     <hr class="border-slate-200 dark:border-slate-700" />
 

@@ -36,6 +36,8 @@ const MOUSE_GROUP_MOVE: u8 = 1;
 const MOUSE_GROUP_LEFT: u8 = 2;
 const MOUSE_GROUP_RIGHT: u8 = 3;
 const MOUSE_GROUP_SIDE: u8 = 4;
+#[cfg(target_os = "linux")]
+const WAYLAND_MOUSE_POLL_INTERVAL: Duration = Duration::from_millis(120);
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -169,6 +171,79 @@ fn linux_session_supports_avatar_input(session: crate::linux_session::LinuxDeskt
     matches!(session, crate::linux_session::LinuxDesktopSession::X11)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LinuxAvatarInputSupport {
+    pub provider: &'static str,
+    pub support_level: &'static str,
+    pub keyboard_supported: bool,
+    pub mouse_supported: bool,
+}
+
+impl LinuxAvatarInputSupport {
+    const fn full(provider: &'static str) -> Self {
+        Self {
+            provider,
+            support_level: "full",
+            keyboard_supported: true,
+            mouse_supported: true,
+        }
+    }
+
+    const fn mouse_only(provider: &'static str) -> Self {
+        Self {
+            provider,
+            support_level: "mouse-only",
+            keyboard_supported: false,
+            mouse_supported: true,
+        }
+    }
+
+    const fn none() -> Self {
+        Self {
+            provider: "none",
+            support_level: "none",
+            keyboard_supported: false,
+            mouse_supported: false,
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LinuxWaylandMouseProvider {
+    KdeKdotool,
+    HyprlandHyprctl,
+}
+
+fn linux_avatar_input_support_for_session(
+    session: crate::linux_session::LinuxDesktopSession,
+    desktop_environment: crate::linux_session::LinuxDesktopEnvironment,
+    kde_mouse_provider_available: bool,
+    hyprland_mouse_provider_available: bool,
+) -> LinuxAvatarInputSupport {
+    use crate::linux_session::{LinuxDesktopEnvironment, LinuxDesktopSession};
+
+    match session {
+        LinuxDesktopSession::X11 => LinuxAvatarInputSupport::full("xinput2"),
+        LinuxDesktopSession::Wayland => match desktop_environment {
+            LinuxDesktopEnvironment::Kde if kde_mouse_provider_available => {
+                LinuxAvatarInputSupport::mouse_only("kdotool-mouselocation")
+            }
+            LinuxDesktopEnvironment::Hyprland if hyprland_mouse_provider_available => {
+                LinuxAvatarInputSupport::mouse_only("hyprctl-cursorpos")
+            }
+            LinuxDesktopEnvironment::Unknown if hyprland_mouse_provider_available => {
+                LinuxAvatarInputSupport::mouse_only("hyprctl-cursorpos")
+            }
+            LinuxDesktopEnvironment::Unknown if kde_mouse_provider_available => {
+                LinuxAvatarInputSupport::mouse_only("kdotool-mouselocation")
+            }
+            _ => LinuxAvatarInputSupport::none(),
+        },
+        LinuxDesktopSession::Unknown => LinuxAvatarInputSupport::none(),
+    }
+}
+
 fn linux_keysym_to_avatar_key_code(keysym: u64) -> Option<u16> {
     match keysym {
         0x0030 => Some(29),
@@ -240,6 +315,192 @@ fn linux_mouse_group_from_button_detail(detail: i32) -> u8 {
         2 | 8 | 9 => MOUSE_GROUP_SIDE,
         _ => MOUSE_GROUP_MOVE,
     }
+}
+
+fn parse_kdotool_mouse_location_output(output: &str) -> Option<(i32, i32)> {
+    let mut x = None;
+    let mut y = None;
+
+    for segment in output.split_whitespace() {
+        if let Some(value) = segment.strip_prefix("x:") {
+            x = value.parse::<i32>().ok();
+        } else if let Some(value) = segment.strip_prefix("y:") {
+            y = value.parse::<i32>().ok();
+        }
+    }
+
+    Some((x?, y?))
+}
+
+fn parse_hyprctl_cursorpos_output(output: &str) -> Option<(i32, i32)> {
+    let normalized = output.trim().replace(',', " ");
+    let mut parts = normalized.split_whitespace();
+    let x = parts.next()?.parse::<i32>().ok()?;
+    let y = parts.next()?.parse::<i32>().ok()?;
+    Some((x, y))
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn cursor_ratio_from_virtual_desktop_bounds(
+    point_x: i32,
+    point_y: i32,
+    min_x: i32,
+    min_y: i32,
+    width: u32,
+    height: u32,
+) -> (f64, f64) {
+    let width = width.max(1) as f64;
+    let height = height.max(1) as f64;
+    (
+        ((point_x - min_x) as f64 / width).clamp(0.0, 1.0),
+        ((point_y - min_y) as f64 / height).clamp(0.0, 1.0),
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn run_linux_avatar_command_with_timeout(
+    command: &mut std::process::Command,
+    context: &str,
+) -> Option<std::process::Output> {
+    use std::process::Stdio;
+    use std::thread;
+    use std::time::Instant;
+
+    let timeout = Duration::from_millis(1000);
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+    let mut child = command.spawn().ok()?;
+    let started_at = Instant::now();
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return child.wait_with_output().ok(),
+            Ok(None) if started_at.elapsed() < timeout => {
+                thread::sleep(Duration::from_millis(50));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                log::debug!("桌宠输入联动命令超时：{context}");
+                return None;
+            }
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                log::debug!("桌宠输入联动命令执行失败（{context}）：{error}");
+                return None;
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn is_kde_wayland_mouse_provider_available() -> bool {
+    run_linux_avatar_command_with_timeout(
+        std::process::Command::new("kdotool").arg("getmouselocation"),
+        "kdotool getmouselocation",
+    )
+    .and_then(|output| {
+        parse_kdotool_mouse_location_output(&String::from_utf8_lossy(&output.stdout))
+    })
+    .is_some()
+}
+
+#[cfg(target_os = "linux")]
+fn is_hyprland_wayland_mouse_provider_available() -> bool {
+    run_linux_avatar_command_with_timeout(
+        std::process::Command::new("hyprctl").arg("cursorpos"),
+        "hyprctl cursorpos",
+    )
+    .and_then(|output| parse_hyprctl_cursorpos_output(&String::from_utf8_lossy(&output.stdout)))
+    .is_some()
+}
+
+#[cfg(target_os = "linux")]
+fn linux_wayland_mouse_provider_for_environment(
+    desktop_environment: crate::linux_session::LinuxDesktopEnvironment,
+    kde_mouse_provider_available: bool,
+    hyprland_mouse_provider_available: bool,
+) -> Option<LinuxWaylandMouseProvider> {
+    use crate::linux_session::LinuxDesktopEnvironment;
+
+    match desktop_environment {
+        LinuxDesktopEnvironment::Kde if kde_mouse_provider_available => {
+            Some(LinuxWaylandMouseProvider::KdeKdotool)
+        }
+        LinuxDesktopEnvironment::Hyprland if hyprland_mouse_provider_available => {
+            Some(LinuxWaylandMouseProvider::HyprlandHyprctl)
+        }
+        LinuxDesktopEnvironment::Unknown if hyprland_mouse_provider_available => {
+            Some(LinuxWaylandMouseProvider::HyprlandHyprctl)
+        }
+        LinuxDesktopEnvironment::Unknown if kde_mouse_provider_available => {
+            Some(LinuxWaylandMouseProvider::KdeKdotool)
+        }
+        _ => None,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn query_wayland_mouse_cursor_point(provider: LinuxWaylandMouseProvider) -> Option<(i32, i32)> {
+    match provider {
+        LinuxWaylandMouseProvider::KdeKdotool => run_linux_avatar_command_with_timeout(
+            std::process::Command::new("kdotool").arg("getmouselocation"),
+            "kdotool getmouselocation",
+        )
+        .and_then(|output| {
+            parse_kdotool_mouse_location_output(&String::from_utf8_lossy(&output.stdout))
+        }),
+        LinuxWaylandMouseProvider::HyprlandHyprctl => run_linux_avatar_command_with_timeout(
+            std::process::Command::new("hyprctl").arg("cursorpos"),
+            "hyprctl cursorpos",
+        )
+        .and_then(|output| {
+            parse_hyprctl_cursorpos_output(&String::from_utf8_lossy(&output.stdout))
+        }),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn virtual_desktop_bounds_from_monitors(app: &AppHandle) -> Option<(i32, i32, u32, u32)> {
+    let monitors = app.available_monitors().ok()?;
+    let first = monitors.first()?;
+    let mut min_x = first.position().x;
+    let mut min_y = first.position().y;
+    let mut max_x = first.position().x + first.size().width as i32;
+    let mut max_y = first.position().y + first.size().height as i32;
+
+    for monitor in monitors.iter().skip(1) {
+        let position = monitor.position();
+        let size = monitor.size();
+        min_x = min_x.min(position.x);
+        min_y = min_y.min(position.y);
+        max_x = max_x.max(position.x + size.width as i32);
+        max_y = max_y.max(position.y + size.height as i32);
+    }
+
+    let width = max_x.checked_sub(min_x)? as u32;
+    let height = max_y.checked_sub(min_y)? as u32;
+    Some((min_x, min_y, width, height))
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[cfg(target_os = "linux")]
+pub fn current_linux_avatar_input_support() -> LinuxAvatarInputSupport {
+    let session = crate::linux_session::current_linux_desktop_session();
+    let desktop_environment = crate::linux_session::current_linux_desktop_environment();
+    linux_avatar_input_support_for_session(
+        session,
+        desktop_environment,
+        is_kde_wayland_mouse_provider_available(),
+        is_hyprland_wayland_mouse_provider_available(),
+    )
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[cfg(not(target_os = "linux"))]
+pub fn current_linux_avatar_input_support() -> LinuxAvatarInputSupport {
+    LinuxAvatarInputSupport::none()
 }
 
 #[cfg(target_os = "macos")]
@@ -712,16 +973,29 @@ pub fn start_avatar_input_monitor(_app: &AppHandle) {
 }
 
 #[cfg(target_os = "linux")]
-pub fn start_avatar_input_monitor(_app: &AppHandle) {
-    use crate::linux_session::current_linux_desktop_session;
+pub fn start_avatar_input_monitor(app: &AppHandle) {
+    use crate::linux_session::{
+        current_linux_desktop_environment, current_linux_desktop_session, LinuxDesktopSession,
+    };
     use std::{ffi::CString, mem, ptr, thread};
     use x11::{xinput2, xlib};
 
     let session = current_linux_desktop_session();
-    if !linux_session_supports_avatar_input(session) {
+    let desktop_environment = current_linux_desktop_environment();
+    let kde_mouse_provider_available = is_kde_wayland_mouse_provider_available();
+    let hyprland_mouse_provider_available = is_hyprland_wayland_mouse_provider_available();
+    let support = linux_avatar_input_support_for_session(
+        session,
+        desktop_environment,
+        kde_mouse_provider_available,
+        hyprland_mouse_provider_available,
+    );
+
+    if support.support_level == "none" {
         log::warn!(
-            "桌宠输入联动未启动：Linux {} 会话暂不支持全局键鼠监听",
-            session.as_str()
+            "桌宠输入联动未启动：Linux {} / {} 会话暂不支持可用的桌宠输入 provider",
+            session.as_str(),
+            desktop_environment.as_str()
         );
         return;
     }
@@ -730,114 +1004,166 @@ pub fn start_avatar_input_monitor(_app: &AppHandle) {
         return;
     }
 
-    thread::spawn(|| unsafe {
-        xlib::XInitThreads();
+    match session {
+        LinuxDesktopSession::X11 => {
+            thread::spawn(|| unsafe {
+                xlib::XInitThreads();
 
-        let display = xlib::XOpenDisplay(ptr::null());
-        if display.is_null() {
-            INPUT_MONITOR_STARTED.store(false, Ordering::SeqCst);
-            log::warn!("桌宠输入联动注册失败：无法连接到 X11 Display");
-            return;
-        }
-
-        let screen = xlib::XDefaultScreen(display);
-        let root_window = xlib::XRootWindow(display, screen);
-
-        let mut opcode = 0;
-        let mut first_event = 0;
-        let mut first_error = 0;
-        let xinput_extension = CString::new("XInputExtension").expect("固定字符串不应失败");
-        if xlib::XQueryExtension(
-            display,
-            xinput_extension.as_ptr(),
-            &mut opcode,
-            &mut first_event,
-            &mut first_error,
-        ) == xlib::False
-        {
-            xlib::XCloseDisplay(display);
-            INPUT_MONITOR_STARTED.store(false, Ordering::SeqCst);
-            log::warn!("桌宠输入联动注册失败：XInputExtension 不可用");
-            return;
-        }
-
-        let mut major = xinput2::XI_2_Major;
-        let mut minor = xinput2::XI_2_Minor;
-        if xinput2::XIQueryVersion(display, &mut major, &mut minor) != xlib::Success as i32 {
-            xlib::XCloseDisplay(display);
-            INPUT_MONITOR_STARTED.store(false, Ordering::SeqCst);
-            log::warn!("桌宠输入联动注册失败：XInput2 不可用");
-            return;
-        }
-
-        let mut mask = [0_u8; 4];
-        xinput2::XISetMask(&mut mask, xinput2::XI_RawKeyPress);
-        xinput2::XISetMask(&mut mask, xinput2::XI_RawButtonPress);
-        xinput2::XISetMask(&mut mask, xinput2::XI_RawMotion);
-
-        let mut event_mask = xinput2::XIEventMask {
-            deviceid: xinput2::XIAllMasterDevices,
-            mask_len: mask.len() as i32,
-            mask: mask.as_mut_ptr(),
-        };
-
-        if xinput2::XISelectEvents(display, root_window, &mut event_mask, 1) != xlib::Success as i32
-        {
-            xlib::XCloseDisplay(display);
-            INPUT_MONITOR_STARTED.store(false, Ordering::SeqCst);
-            log::warn!("桌宠输入联动注册失败：XInput2 事件订阅失败");
-            return;
-        }
-
-        xlib::XFlush(display);
-
-        loop {
-            let mut event: xlib::XEvent = mem::zeroed();
-            xlib::XNextEvent(display, &mut event);
-
-            if event.get_type() != xlib::GenericEvent {
-                continue;
-            }
-
-            let cookie = &mut event.generic_event_cookie;
-            if cookie.extension != opcode || xlib::XGetEventData(display, cookie) != xlib::True {
-                continue;
-            }
-
-            match cookie.evtype {
-                xinput2::XI_RawKeyPress => {
-                    let raw_event = &*(cookie.data as *const xinput2::XIRawEvent);
-                    let keysym = xlib::XkbKeycodeToKeysym(display, raw_event.detail as u8, 0, 0);
-                    if let Some(key_code) = linux_keysym_to_avatar_key_code(keysym as u64) {
-                        record_keyboard_input(
-                            standard_keyboard_group_from_key_code(key_code),
-                            key_code,
-                        );
-                    }
+                let display = xlib::XOpenDisplay(ptr::null());
+                if display.is_null() {
+                    INPUT_MONITOR_STARTED.store(false, Ordering::SeqCst);
+                    log::warn!("桌宠输入联动注册失败：无法连接到 X11 Display");
+                    return;
                 }
-                xinput2::XI_RawButtonPress => {
-                    let raw_event = &*(cookie.data as *const xinput2::XIRawEvent);
-                    record_mouse_input(linux_mouse_group_from_button_detail(raw_event.detail));
-                    if let Some((cursor_ratio_x, cursor_ratio_y)) =
-                        linux_query_cursor_ratio(display, root_window, screen)
+
+                let screen = xlib::XDefaultScreen(display);
+                let root_window = xlib::XRootWindow(display, screen);
+
+                let mut opcode = 0;
+                let mut first_event = 0;
+                let mut first_error = 0;
+                let xinput_extension = CString::new("XInputExtension").expect("固定字符串不应失败");
+                if xlib::XQueryExtension(
+                    display,
+                    xinput_extension.as_ptr(),
+                    &mut opcode,
+                    &mut first_event,
+                    &mut first_error,
+                ) == xlib::False
+                {
+                    xlib::XCloseDisplay(display);
+                    INPUT_MONITOR_STARTED.store(false, Ordering::SeqCst);
+                    log::warn!("桌宠输入联动注册失败：XInputExtension 不可用");
+                    return;
+                }
+
+                let mut major = xinput2::XI_2_Major;
+                let mut minor = xinput2::XI_2_Minor;
+                if xinput2::XIQueryVersion(display, &mut major, &mut minor) != xlib::Success as i32
+                {
+                    xlib::XCloseDisplay(display);
+                    INPUT_MONITOR_STARTED.store(false, Ordering::SeqCst);
+                    log::warn!("桌宠输入联动注册失败：XInput2 不可用");
+                    return;
+                }
+
+                let mut mask = [0_u8; 4];
+                xinput2::XISetMask(&mut mask, xinput2::XI_RawKeyPress);
+                xinput2::XISetMask(&mut mask, xinput2::XI_RawButtonPress);
+                xinput2::XISetMask(&mut mask, xinput2::XI_RawMotion);
+
+                let mut event_mask = xinput2::XIEventMask {
+                    deviceid: xinput2::XIAllMasterDevices,
+                    mask_len: mask.len() as i32,
+                    mask: mask.as_mut_ptr(),
+                };
+
+                if xinput2::XISelectEvents(display, root_window, &mut event_mask, 1)
+                    != xlib::Success as i32
+                {
+                    xlib::XCloseDisplay(display);
+                    INPUT_MONITOR_STARTED.store(false, Ordering::SeqCst);
+                    log::warn!("桌宠输入联动注册失败：XInput2 事件订阅失败");
+                    return;
+                }
+
+                xlib::XFlush(display);
+
+                loop {
+                    let mut event: xlib::XEvent = mem::zeroed();
+                    xlib::XNextEvent(display, &mut event);
+
+                    if event.get_type() != xlib::GenericEvent {
+                        continue;
+                    }
+
+                    let cookie = &mut event.generic_event_cookie;
+                    if cookie.extension != opcode
+                        || xlib::XGetEventData(display, cookie) != xlib::True
                     {
-                        record_cursor_ratio(cursor_ratio_x, cursor_ratio_y);
+                        continue;
                     }
-                }
-                xinput2::XI_RawMotion => {
-                    record_mouse_input(MOUSE_GROUP_MOVE);
-                    if let Some((cursor_ratio_x, cursor_ratio_y)) =
-                        linux_query_cursor_ratio(display, root_window, screen)
-                    {
-                        record_cursor_ratio(cursor_ratio_x, cursor_ratio_y);
-                    }
-                }
-                _ => {}
-            }
 
-            xlib::XFreeEventData(display, cookie);
+                    match cookie.evtype {
+                        xinput2::XI_RawKeyPress => {
+                            let raw_event = &*(cookie.data as *const xinput2::XIRawEvent);
+                            let keysym =
+                                xlib::XkbKeycodeToKeysym(display, raw_event.detail as u8, 0, 0);
+                            if let Some(key_code) = linux_keysym_to_avatar_key_code(keysym as u64) {
+                                record_keyboard_input(
+                                    standard_keyboard_group_from_key_code(key_code),
+                                    key_code,
+                                );
+                            }
+                        }
+                        xinput2::XI_RawButtonPress => {
+                            let raw_event = &*(cookie.data as *const xinput2::XIRawEvent);
+                            record_mouse_input(linux_mouse_group_from_button_detail(
+                                raw_event.detail,
+                            ));
+                            if let Some((cursor_ratio_x, cursor_ratio_y)) =
+                                linux_query_cursor_ratio(display, root_window, screen)
+                            {
+                                record_cursor_ratio(cursor_ratio_x, cursor_ratio_y);
+                            }
+                        }
+                        xinput2::XI_RawMotion => {
+                            record_mouse_input(MOUSE_GROUP_MOVE);
+                            if let Some((cursor_ratio_x, cursor_ratio_y)) =
+                                linux_query_cursor_ratio(display, root_window, screen)
+                            {
+                                record_cursor_ratio(cursor_ratio_x, cursor_ratio_y);
+                            }
+                        }
+                        _ => {}
+                    }
+
+                    xlib::XFreeEventData(display, cookie);
+                }
+            });
         }
-    });
+        LinuxDesktopSession::Wayland => {
+            let Some(provider) = linux_wayland_mouse_provider_for_environment(
+                desktop_environment,
+                kde_mouse_provider_available,
+                hyprland_mouse_provider_available,
+            ) else {
+                INPUT_MONITOR_STARTED.store(false, Ordering::SeqCst);
+                log::warn!("桌宠输入联动注册失败：未找到可用的 Wayland 鼠标 provider");
+                return;
+            };
+
+            let app = app.clone();
+            thread::spawn(move || {
+                let mut last_point = None;
+
+                loop {
+                    if let Some((point_x, point_y)) = query_wayland_mouse_cursor_point(provider) {
+                        if last_point != Some((point_x, point_y)) {
+                            record_mouse_input(MOUSE_GROUP_MOVE);
+                            last_point = Some((point_x, point_y));
+                        }
+
+                        if let Some((min_x, min_y, width, height)) =
+                            virtual_desktop_bounds_from_monitors(&app)
+                        {
+                            let (cursor_ratio_x, cursor_ratio_y) =
+                                cursor_ratio_from_virtual_desktop_bounds(
+                                    point_x, point_y, min_x, min_y, width, height,
+                                );
+                            record_cursor_ratio(cursor_ratio_x, cursor_ratio_y);
+                        }
+                    }
+
+                    thread::sleep(WAYLAND_MOUSE_POLL_INTERVAL);
+                }
+            });
+        }
+        LinuxDesktopSession::Unknown => {
+            INPUT_MONITOR_STARTED.store(false, Ordering::SeqCst);
+            log::warn!("桌宠输入联动注册失败：Linux 会话类型未知");
+        }
+    }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
@@ -846,6 +1172,7 @@ pub fn start_avatar_input_monitor(_app: &AppHandle) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::linux_session::{LinuxDesktopEnvironment, LinuxDesktopSession};
 
     #[test]
     fn 输入活跃窗口应只在短时间内保持有效() {
@@ -983,6 +1310,73 @@ mod tests {
         assert_eq!(linux_mouse_group_from_button_detail(3), MOUSE_GROUP_RIGHT);
         assert_eq!(linux_mouse_group_from_button_detail(8), MOUSE_GROUP_SIDE);
         assert_eq!(linux_mouse_group_from_button_detail(99), MOUSE_GROUP_MOVE);
+    }
+
+    #[test]
+    fn kde_wayland应识别为仅鼠标联动() {
+        let support = linux_avatar_input_support_for_session(
+            LinuxDesktopSession::Wayland,
+            LinuxDesktopEnvironment::Kde,
+            true,
+            false,
+        );
+
+        assert_eq!(support.support_level, "mouse-only");
+        assert_eq!(support.provider, "kdotool-mouselocation");
+        assert!(!support.keyboard_supported);
+        assert!(support.mouse_supported);
+    }
+
+    #[test]
+    fn hyprland_wayland应识别为仅鼠标联动() {
+        let support = linux_avatar_input_support_for_session(
+            LinuxDesktopSession::Wayland,
+            LinuxDesktopEnvironment::Hyprland,
+            false,
+            true,
+        );
+
+        assert_eq!(support.support_level, "mouse-only");
+        assert_eq!(support.provider, "hyprctl-cursorpos");
+        assert!(!support.keyboard_supported);
+        assert!(support.mouse_supported);
+    }
+
+    #[test]
+    fn gnome_wayland在缺少provider时应视为不可用() {
+        let support = linux_avatar_input_support_for_session(
+            LinuxDesktopSession::Wayland,
+            LinuxDesktopEnvironment::Gnome,
+            false,
+            false,
+        );
+
+        assert_eq!(support.support_level, "none");
+        assert_eq!(support.provider, "none");
+        assert!(!support.keyboard_supported);
+        assert!(!support.mouse_supported);
+    }
+
+    #[test]
+    fn kdotool鼠标位置输出应解析为坐标() {
+        assert_eq!(
+            parse_kdotool_mouse_location_output("x:1489 y:812 screen:0 window:50331653"),
+            Some((1489, 812))
+        );
+        assert_eq!(parse_kdotool_mouse_location_output("x:abc y:812"), None);
+    }
+
+    #[test]
+    fn hyprctl_cursorpos输出应解析为坐标() {
+        assert_eq!(
+            parse_hyprctl_cursorpos_output("1489, 812"),
+            Some((1489, 812))
+        );
+        assert_eq!(
+            parse_hyprctl_cursorpos_output("1489 812"),
+            Some((1489, 812))
+        );
+        assert_eq!(parse_hyprctl_cursorpos_output("oops"), None);
     }
 
     #[cfg(target_os = "windows")]
