@@ -1380,7 +1380,7 @@ mod tests {
         extract_active_tab_url_from_session_store_value, extract_url_from_title,
         find_focused_sway_node, firefox_family_profile_dir_from_ini, is_browser_app,
         is_probable_domain, normalize_display_app_name, normalize_macos_frontmost_app_name,
-        normalize_possible_url,
+        normalize_possible_url, parse_macos_window_bounds_fields,
         parse_gnome_focused_window_dbus_output, parse_hyprland_window_bounds,
         parse_kdotool_geometry_output, parse_xdotool_geometry_shell_output,
         remember_browser_url_log, resolve_browser_url_for_window_linux, WindowBounds,
@@ -1412,6 +1412,24 @@ mod tests {
         assert_eq!(categorize_app("QQ Browser", "example.com"), "browser");
         assert_eq!(categorize_app("360 Browser", "example.com"), "browser");
         assert_eq!(categorize_app("Sogou Browser", "example.com"), "browser");
+    }
+
+    #[test]
+    fn macos前台窗口坐标字段应解析为窗口边界() {
+        assert_eq!(
+            parse_macos_window_bounds_fields(
+                Some("1512"),
+                Some("64"),
+                Some("1512"),
+                Some("982"),
+            ),
+            Some(WindowBounds {
+                x: 1512,
+                y: 64,
+                width: 1512,
+                height: 982,
+            })
+        );
     }
 
     #[test]
@@ -1920,6 +1938,30 @@ pub fn get_active_window_fast() -> Result<ActiveWindow> {
     get_active_window_with_options(false)
 }
 
+#[cfg(any(target_os = "macos", test))]
+fn parse_macos_window_bounds_fields(
+    x: Option<&str>,
+    y: Option<&str>,
+    width: Option<&str>,
+    height: Option<&str>,
+) -> Option<WindowBounds> {
+    let x = x?.trim().parse::<i32>().ok()?;
+    let y = y?.trim().parse::<i32>().ok()?;
+    let width = width?.trim().parse::<u32>().ok()?;
+    let height = height?.trim().parse::<u32>().ok()?;
+
+    if width == 0 || height == 0 {
+        return None;
+    }
+
+    Some(WindowBounds {
+        x,
+        y,
+        width,
+        height,
+    })
+}
+
 #[cfg(target_os = "macos")]
 fn get_active_window_with_options(include_browser_url: bool) -> Result<ActiveWindow> {
     // 使用 AppleScript 获取活动应用信息
@@ -1930,6 +1972,10 @@ fn get_active_window_with_options(include_browser_url: bool) -> Result<ActiveWin
             set bundleId to ""
             set appPath to ""
             set windowTitle to ""
+            set windowX to ""
+            set windowY to ""
+            set windowWidth to ""
+            set windowHeight to ""
             set sep to character id 31
             try
                 set bundleId to bundle identifier of frontApp
@@ -1940,7 +1986,11 @@ fn get_active_window_with_options(include_browser_url: bool) -> Result<ActiveWin
             try
                 set windowTitle to name of front window of frontApp
             end try
-            return appName & sep & bundleId & sep & appPath & sep & windowTitle
+            try
+                set {windowX, windowY} to position of front window of frontApp
+                set {windowWidth, windowHeight} to size of front window of frontApp
+            end try
+            return appName & sep & bundleId & sep & appPath & sep & windowTitle & sep & windowX & sep & windowY & sep & windowWidth & sep & windowHeight
         end tell
     "#;
 
@@ -1964,7 +2014,13 @@ fn get_active_window_with_options(include_browser_url: bool) -> Result<ActiveWin
             .map(|value| value.trim())
             .filter(|value| !value.is_empty());
         let window_title = parts.get(3).copied().unwrap_or("").to_string();
-        let window_bounds = find_frontmost_window_bounds(&raw_app_name, &window_title);
+        let window_bounds = parse_macos_window_bounds_fields(
+            parts.get(4).copied(),
+            parts.get(5).copied(),
+            parts.get(6).copied(),
+            parts.get(7).copied(),
+        )
+        .or_else(|| find_frontmost_window_bounds(&raw_app_name, &window_title));
 
         // 对 Electron / Helper 类通用进程做名称还原，优先使用 app path / bundle id。
         let app_name = normalize_macos_frontmost_app_name(

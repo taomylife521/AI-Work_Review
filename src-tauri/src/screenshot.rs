@@ -1034,6 +1034,11 @@ impl ScreenshotService {
         Ok(BASE64_STANDARD.encode(&buffer))
     }
 
+    pub fn generate_full_image_base64(&self, path: &Path) -> Result<String> {
+        let bytes = std::fs::read(path)?;
+        Ok(BASE64_STANDARD.encode(bytes))
+    }
+
     pub fn calculate_image_hash(path: &Path) -> Result<u64> {
         let img = image::open(path)?;
         let small = img.resize_exact(8, 8, FilterType::Nearest).to_luma8();
@@ -1471,6 +1476,7 @@ mod tests {
     };
     use crate::config::{ScreenshotDisplayMode, StorageConfig};
     use crate::monitor::{ActiveWindow, WindowBounds};
+    use base64::Engine as _;
     use image::{DynamicImage, Rgba, RgbaImage};
     use std::fs;
     use std::path::Path;
@@ -1603,6 +1609,39 @@ Monitors: 2
         let ocr_temp_path = result.ocr_source_path.unwrap();
         assert!(ocr_temp_path.ends_with("101530_123_ocr.png"));
         assert!(!ocr_temp_path.starts_with(&screenshots_dir));
+
+        let _ = fs::remove_dir_all(&data_dir);
+        let _ = fs::remove_dir_all(super::ocr_temp_root(&data_dir));
+    }
+
+    #[test]
+    fn 详情图base64应返回归档jpg原始内容() {
+        let unique_suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let data_dir = std::env::temp_dir().join(format!("work-review-full-shot-test-{unique_suffix}"));
+        let screenshots_dir = data_dir.join("screenshots").join("2026-04-17");
+        fs::create_dir_all(&screenshots_dir).unwrap();
+
+        let storage = StorageConfig {
+            jpeg_quality: 85,
+            max_image_width: 1440,
+            ..StorageConfig::default()
+        };
+        let service = ScreenshotService::new(&data_dir, &storage);
+        let image =
+            DynamicImage::ImageRgba8(RgbaImage::from_pixel(1920, 1080, Rgba([12, 34, 56, 255])));
+
+        let result = service
+            .persist_dynamic_image_capture(image, &screenshots_dir, "153859_896", 0)
+            .unwrap();
+
+        let expected = fs::read(&result.path).unwrap();
+        let encoded = service.generate_full_image_base64(&result.path).unwrap();
+        let actual = super::BASE64_STANDARD.decode(encoded).unwrap();
+
+        assert_eq!(actual, expected);
 
         let _ = fs::remove_dir_all(&data_dir);
         let _ = fs::remove_dir_all(super::ocr_temp_root(&data_dir));

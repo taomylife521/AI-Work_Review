@@ -775,7 +775,7 @@ impl Database {
         id: i64,
         duration_delta: i64,
         new_ocr: Option<&str>,
-        new_screenshot_path: &str,
+        _new_screenshot_path: &str,
         new_timestamp: i64,
     ) -> Result<()> {
         let conn = self.conn.lock().map_err(|e| {
@@ -806,13 +806,11 @@ impl Database {
             "UPDATE activities 
              SET duration = duration + ?1, 
                  ocr_text = ?2, 
-                 screenshot_path = ?3,
-                 timestamp = ?4
-             WHERE id = ?5",
+                 timestamp = ?3
+             WHERE id = ?4",
             params![
                 duration_delta,
                 merged_ocr,
-                new_screenshot_path,
                 new_timestamp,
                 id
             ],
@@ -2299,6 +2297,44 @@ mod tests {
         assert_eq!(file_a.screenshot_path, "shot-b.jpg");
         assert_eq!(file_a.ocr_text.as_deref(), Some("new"));
         assert_eq!(file_b.duration, 15);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 合并活动应保留原始截图路径() {
+        let db_path = temp_db_path("merge-keep-original-screenshot");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let now = chrono::Local::now().timestamp();
+
+        let activity = Activity {
+            id: None,
+            timestamp: now - 30,
+            app_name: "Google Chrome".to_string(),
+            window_title: "GitHub".to_string(),
+            screenshot_path: "shot-a.jpg".to_string(),
+            ocr_text: Some("old".to_string()),
+            category: "browser".to_string(),
+            duration: 10,
+            browser_url: Some("https://github.com".to_string()),
+            executable_path: None,
+            semantic_category: None,
+            semantic_confidence: None,
+        };
+
+        let inserted_id = db.insert_activity(&activity).expect("插入测试数据失败");
+        db.merge_activity(inserted_id, 20, Some("new"), "shot-b.jpg", now)
+            .expect("合并活动失败");
+
+        let merged = db
+            .get_activity_by_id(inserted_id)
+            .expect("读取活动失败")
+            .expect("未读取到活动");
+
+        assert_eq!(merged.screenshot_path, "shot-a.jpg");
+        assert_eq!(merged.duration, 30);
+        assert_eq!(merged.timestamp, now);
+        assert_eq!(merged.ocr_text.as_deref(), Some("old\n---\nnew"));
 
         let _ = std::fs::remove_file(db_path);
     }

@@ -4819,7 +4819,7 @@ pub async fn get_screenshot_full(
     let full_path = state.data_dir.join(&path);
     state
         .screenshot_service
-        .generate_thumbnail_base64(&full_path, 1200)
+        .generate_full_image_base64(&full_path)
 }
 
 /// 手动执行一次截屏

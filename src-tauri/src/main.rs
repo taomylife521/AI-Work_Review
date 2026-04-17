@@ -1163,7 +1163,10 @@ fn should_skip_system_window(active_window: &monitor::ActiveWindow) -> bool {
     // 需要结合标题与可执行路径一起兜底过滤。
     let is_windows_system_dialog = is_windows_system_dialog(active_window);
 
-    is_sys || is_minimized_window || is_explorer_shell || is_windows_system_dialog
+    is_sys
+        || is_minimized_window
+        || is_explorer_shell
+        || is_windows_system_dialog
 }
 
 async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
@@ -1939,17 +1942,11 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                     // 合并记录（不更新 screenshot_path，保留活动创建时的原始截图）
                     // 即使 effective_duration 为 0，也需要更新时间戳以保持记录活跃
                     let (
-                        latest_archive_relative_path,
                         latest_archive_path,
                         ocr_input_path,
                         temporary_ocr_source_path,
-                        previous_screenshot_full_path,
                     ) = if let Some(ref screenshot) = screenshot_result {
-                        let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
                         (
-                            state_guard
-                                .screenshot_service
-                                .get_relative_path(&screenshot.path),
                             Some(screenshot.path.clone()),
                             screenshot
                                 .ocr_source_path
@@ -1959,21 +1956,13 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                                 .ocr_source_path
                                 .clone()
                                 .filter(|path| path != &screenshot.path),
-                            Some(state_guard.data_dir.join(&previous_screenshot_path)),
                         )
                     } else {
-                        (
-                            previous_screenshot_path.clone(),
-                            None,
-                            PathBuf::new(),
-                            None,
-                            None,
-                        )
+                        (None, PathBuf::new(), None)
                     };
 
-                    let mut persisted_screenshot_path = previous_screenshot_path.clone();
+                    let persisted_screenshot_path = previous_screenshot_path.clone();
                     let mut persisted_duration = latest.duration;
-                    let mut merge_succeeded = false;
 
                     if should_persist_merge_update(effective_duration, true) {
                         let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
@@ -1981,12 +1970,10 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                             latest_id,
                             effective_duration,
                             None,
-                            &latest_archive_relative_path,
+                            &previous_screenshot_path,
                             current_timestamp,
                         ) {
                             Ok(_) => {
-                                merge_succeeded = true;
-                                persisted_screenshot_path = latest_archive_relative_path.clone();
                                 persisted_duration += effective_duration;
                                 log::info!(
                                     "✅ 合并成功: {} (id={}, 新时长={}s)",
@@ -2010,9 +1997,6 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                             let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
                             state_guard.data_dir.clone()
                         };
-                        let should_keep_latest_capture = merge_succeeded;
-                        let should_delete_previous_capture = should_keep_latest_capture
-                            && persisted_screenshot_path != previous_screenshot_path;
 
                         let ocr_sem = ocr_semaphore.clone();
                         let merge_hash = merge_screenshot_hash.clone();
@@ -2028,9 +2012,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                                     if let Some(temp_path) = temporary_ocr_source_path.clone() {
                                         let _ = std::fs::remove_file(&temp_path);
                                     }
-                                    if !should_keep_latest_capture {
-                                        let _ = std::fs::remove_file(&latest_capture_path);
-                                    }
+                                    let _ = std::fs::remove_file(&latest_capture_path);
                                     return;
                                 }
                             };
@@ -2088,17 +2070,8 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                                 let _ = std::fs::remove_file(&temp_path);
                             }
 
-                            if should_delete_previous_capture {
-                                if let Some(path) = previous_screenshot_full_path {
-                                    let _ = std::fs::remove_file(&path);
-                                    log::debug!("已删除被新截图替换的旧截图: {path:?}");
-                                }
-                            }
-
-                            if !should_keep_latest_capture {
-                                let _ = std::fs::remove_file(&latest_capture_path);
-                                log::debug!("已删除未保留的合并截图: {latest_capture_path:?}");
-                            }
+                            let _ = std::fs::remove_file(&latest_capture_path);
+                            log::debug!("已删除仅用于合并 OCR 的临时截图: {latest_capture_path:?}");
                         });
                     }
 
@@ -3570,6 +3543,22 @@ mod tests {
         };
 
         assert!(should_skip_system_window(&active_window));
+    }
+
+    #[test]
+    fn work_review自身窗口不应被当成系统窗口跳过() {
+        let active_window = ActiveWindow {
+            app_name: "Work Review".to_string(),
+            window_title: "时间线".to_string(),
+            browser_url: None,
+            executable_path: Some(
+                "/Applications/Work Review.app/Contents/MacOS/work-review".to_string(),
+            ),
+            window_bounds: None,
+            is_minimized: false,
+        };
+
+        assert!(!should_skip_system_window(&active_window));
     }
 
     #[test]
