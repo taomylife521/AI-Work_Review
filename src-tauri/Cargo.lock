@@ -7128,6 +7128,7 @@ dependencies = [
  "uuid",
  "winapi",
  "windows-capture",
+ "x11",
 ]
 
 [[package]]

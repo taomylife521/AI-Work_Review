@@ -165,6 +165,83 @@ fn mouse_group_label(code: u8) -> &'static str {
     }
 }
 
+fn linux_session_supports_avatar_input(session: crate::linux_session::LinuxDesktopSession) -> bool {
+    matches!(session, crate::linux_session::LinuxDesktopSession::X11)
+}
+
+fn linux_keysym_to_avatar_key_code(keysym: u64) -> Option<u16> {
+    match keysym {
+        0x0030 => Some(29),
+        0x0031 => Some(18),
+        0x0032 => Some(19),
+        0x0033 => Some(20),
+        0x0034 => Some(21),
+        0x0035 => Some(23),
+        0x0036 => Some(22),
+        0x0037 => Some(26),
+        0x0038 => Some(28),
+        0x0039 => Some(25),
+        0x0041 | 0x0061 => Some(0),
+        0x0042 | 0x0062 => Some(11),
+        0x0043 | 0x0063 => Some(8),
+        0x0044 | 0x0064 => Some(2),
+        0x0045 | 0x0065 => Some(14),
+        0x0046 | 0x0066 => Some(3),
+        0x0047 | 0x0067 => Some(5),
+        0x0048 | 0x0068 => Some(4),
+        0x0049 | 0x0069 => Some(34),
+        0x004A | 0x006A => Some(38),
+        0x004B | 0x006B => Some(40),
+        0x004C | 0x006C => Some(37),
+        0x004D | 0x006D => Some(46),
+        0x004E | 0x006E => Some(45),
+        0x004F | 0x006F => Some(31),
+        0x0050 | 0x0070 => Some(35),
+        0x0051 | 0x0071 => Some(12),
+        0x0052 | 0x0072 => Some(15),
+        0x0053 | 0x0073 => Some(1),
+        0x0054 | 0x0074 => Some(17),
+        0x0055 | 0x0075 => Some(32),
+        0x0056 | 0x0076 => Some(9),
+        0x0057 | 0x0077 => Some(13),
+        0x0058 | 0x0078 => Some(7),
+        0x0059 | 0x0079 => Some(16),
+        0x005A | 0x007A => Some(6),
+        0x0020 => Some(49),
+        0x002C => Some(43),
+        0x002E => Some(47),
+        0x002F => Some(44),
+        0x0060 => Some(50),
+        0xFF08 => Some(51),
+        0xFF09 => Some(48),
+        0xFF0D => Some(36),
+        0xFF1B => Some(53),
+        0xFF51 => Some(123),
+        0xFF52 => Some(126),
+        0xFF53 => Some(124),
+        0xFF54 => Some(125),
+        0xFFFF => Some(117),
+        0xFFE1 => Some(56),
+        0xFFE2 => Some(60),
+        0xFFE3 => Some(59),
+        0xFFE4 => Some(62),
+        0xFFE5 => Some(57),
+        0xFFE7 | 0xFFE8 | 0xFFEB | 0xFFEC => Some(55),
+        0xFFE9 => Some(58),
+        0xFFEA => Some(61),
+        _ => None,
+    }
+}
+
+fn linux_mouse_group_from_button_detail(detail: i32) -> u8 {
+    match detail {
+        1 => MOUSE_GROUP_LEFT,
+        3 => MOUSE_GROUP_RIGHT,
+        2 | 8 | 9 => MOUSE_GROUP_SIDE,
+        _ => MOUSE_GROUP_MOVE,
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn mouse_group_from_event_type(event_type: cocoa::appkit::NSEventType) -> u8 {
     use cocoa::appkit::NSEventType;
@@ -334,6 +411,47 @@ unsafe extern "system" fn windows_mouse_hook_proc(
     }
 
     CallNextHookEx(ptr::null_mut(), code, w_param, l_param)
+}
+
+#[cfg(target_os = "linux")]
+unsafe fn linux_query_cursor_ratio(
+    display: *mut x11::xlib::Display,
+    root_window: x11::xlib::Window,
+    screen: i32,
+) -> Option<(f64, f64)> {
+    use std::mem;
+    use x11::xlib;
+
+    let mut root_return: x11::xlib::Window = 0;
+    let mut child_return: x11::xlib::Window = 0;
+    let mut root_x = 0;
+    let mut root_y = 0;
+    let mut win_x = 0;
+    let mut win_y = 0;
+    let mut mask_return: u32 = mem::zeroed();
+
+    if xlib::XQueryPointer(
+        display,
+        root_window,
+        &mut root_return,
+        &mut child_return,
+        &mut root_x,
+        &mut root_y,
+        &mut win_x,
+        &mut win_y,
+        &mut mask_return,
+    ) == xlib::False
+    {
+        return None;
+    }
+
+    let width = xlib::XDisplayWidth(display, screen).max(1) as f64;
+    let height = xlib::XDisplayHeight(display, screen).max(1) as f64;
+
+    Some((
+        (root_x as f64 / width).clamp(0.0, 1.0),
+        (root_y as f64 / height).clamp(0.0, 1.0),
+    ))
 }
 
 pub(crate) fn build_avatar_input_payload(now_ms: u64) -> AvatarInputPayload {
@@ -557,12 +675,8 @@ pub fn start_avatar_input_monitor(_app: &AppHandle) {
             module_handle,
             0,
         );
-        let mouse_hook = SetWindowsHookExW(
-            WH_MOUSE_LL,
-            Some(windows_mouse_hook_proc),
-            module_handle,
-            0,
-        );
+        let mouse_hook =
+            SetWindowsHookExW(WH_MOUSE_LL, Some(windows_mouse_hook_proc), module_handle, 0);
 
         if keyboard_hook.is_null() || mouse_hook.is_null() {
             if !keyboard_hook.is_null() {
@@ -597,7 +711,136 @@ pub fn start_avatar_input_monitor(_app: &AppHandle) {
     });
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(target_os = "linux")]
+pub fn start_avatar_input_monitor(_app: &AppHandle) {
+    use crate::linux_session::current_linux_desktop_session;
+    use std::{ffi::CString, mem, ptr, thread};
+    use x11::{xinput2, xlib};
+
+    let session = current_linux_desktop_session();
+    if !linux_session_supports_avatar_input(session) {
+        log::warn!(
+            "桌宠输入联动未启动：Linux {} 会话暂不支持全局键鼠监听",
+            session.as_str()
+        );
+        return;
+    }
+
+    if INPUT_MONITOR_STARTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    thread::spawn(|| unsafe {
+        xlib::XInitThreads();
+
+        let display = xlib::XOpenDisplay(ptr::null());
+        if display.is_null() {
+            INPUT_MONITOR_STARTED.store(false, Ordering::SeqCst);
+            log::warn!("桌宠输入联动注册失败：无法连接到 X11 Display");
+            return;
+        }
+
+        let screen = xlib::XDefaultScreen(display);
+        let root_window = xlib::XRootWindow(display, screen);
+
+        let mut opcode = 0;
+        let mut first_event = 0;
+        let mut first_error = 0;
+        let xinput_extension = CString::new("XInputExtension").expect("固定字符串不应失败");
+        if xlib::XQueryExtension(
+            display,
+            xinput_extension.as_ptr(),
+            &mut opcode,
+            &mut first_event,
+            &mut first_error,
+        ) == xlib::False
+        {
+            xlib::XCloseDisplay(display);
+            INPUT_MONITOR_STARTED.store(false, Ordering::SeqCst);
+            log::warn!("桌宠输入联动注册失败：XInputExtension 不可用");
+            return;
+        }
+
+        let mut major = xinput2::XI_2_Major;
+        let mut minor = xinput2::XI_2_Minor;
+        if xinput2::XIQueryVersion(display, &mut major, &mut minor) != xlib::Success as i32 {
+            xlib::XCloseDisplay(display);
+            INPUT_MONITOR_STARTED.store(false, Ordering::SeqCst);
+            log::warn!("桌宠输入联动注册失败：XInput2 不可用");
+            return;
+        }
+
+        let mut mask = [0_u8; 4];
+        xinput2::XISetMask(&mut mask, xinput2::XI_RawKeyPress);
+        xinput2::XISetMask(&mut mask, xinput2::XI_RawButtonPress);
+        xinput2::XISetMask(&mut mask, xinput2::XI_RawMotion);
+
+        let mut event_mask = xinput2::XIEventMask {
+            deviceid: xinput2::XIAllMasterDevices,
+            mask_len: mask.len() as i32,
+            mask: mask.as_mut_ptr(),
+        };
+
+        if xinput2::XISelectEvents(display, root_window, &mut event_mask, 1) != xlib::Success as i32
+        {
+            xlib::XCloseDisplay(display);
+            INPUT_MONITOR_STARTED.store(false, Ordering::SeqCst);
+            log::warn!("桌宠输入联动注册失败：XInput2 事件订阅失败");
+            return;
+        }
+
+        xlib::XFlush(display);
+
+        loop {
+            let mut event: xlib::XEvent = mem::zeroed();
+            xlib::XNextEvent(display, &mut event);
+
+            if event.get_type() != xlib::GenericEvent {
+                continue;
+            }
+
+            let cookie = &mut event.generic_event_cookie;
+            if cookie.extension != opcode || xlib::XGetEventData(display, cookie) != xlib::True {
+                continue;
+            }
+
+            match cookie.evtype {
+                xinput2::XI_RawKeyPress => {
+                    let raw_event = &*(cookie.data as *const xinput2::XIRawEvent);
+                    let keysym = xlib::XkbKeycodeToKeysym(display, raw_event.detail as u8, 0, 0);
+                    if let Some(key_code) = linux_keysym_to_avatar_key_code(keysym as u64) {
+                        record_keyboard_input(
+                            standard_keyboard_group_from_key_code(key_code),
+                            key_code,
+                        );
+                    }
+                }
+                xinput2::XI_RawButtonPress => {
+                    let raw_event = &*(cookie.data as *const xinput2::XIRawEvent);
+                    record_mouse_input(linux_mouse_group_from_button_detail(raw_event.detail));
+                    if let Some((cursor_ratio_x, cursor_ratio_y)) =
+                        linux_query_cursor_ratio(display, root_window, screen)
+                    {
+                        record_cursor_ratio(cursor_ratio_x, cursor_ratio_y);
+                    }
+                }
+                xinput2::XI_RawMotion => {
+                    record_mouse_input(MOUSE_GROUP_MOVE);
+                    if let Some((cursor_ratio_x, cursor_ratio_y)) =
+                        linux_query_cursor_ratio(display, root_window, screen)
+                    {
+                        record_cursor_ratio(cursor_ratio_x, cursor_ratio_y);
+                    }
+                }
+                _ => {}
+            }
+
+            xlib::XFreeEventData(display, cookie);
+        }
+    });
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 pub fn start_avatar_input_monitor(_app: &AppHandle) {}
 
 #[cfg(test)]
@@ -637,16 +880,46 @@ mod tests {
 
     #[test]
     fn 键盘键码应映射到原版键区分组() {
-        assert_eq!(standard_keyboard_group_from_key_code(18), KEYBOARD_GROUP_DIGIT_1);
-        assert_eq!(standard_keyboard_group_from_key_code(26), KEYBOARD_GROUP_DIGIT_7);
-        assert_eq!(standard_keyboard_group_from_key_code(12), KEYBOARD_GROUP_KEY_Q);
-        assert_eq!(standard_keyboard_group_from_key_code(14), KEYBOARD_GROUP_KEY_E);
-        assert_eq!(standard_keyboard_group_from_key_code(15), KEYBOARD_GROUP_KEY_R);
-        assert_eq!(standard_keyboard_group_from_key_code(49), KEYBOARD_GROUP_SPACE);
-        assert_eq!(standard_keyboard_group_from_key_code(0), KEYBOARD_GROUP_KEY_A);
-        assert_eq!(standard_keyboard_group_from_key_code(2), KEYBOARD_GROUP_KEY_D);
-        assert_eq!(standard_keyboard_group_from_key_code(1), KEYBOARD_GROUP_KEY_S);
-        assert_eq!(standard_keyboard_group_from_key_code(13), KEYBOARD_GROUP_KEY_W);
+        assert_eq!(
+            standard_keyboard_group_from_key_code(18),
+            KEYBOARD_GROUP_DIGIT_1
+        );
+        assert_eq!(
+            standard_keyboard_group_from_key_code(26),
+            KEYBOARD_GROUP_DIGIT_7
+        );
+        assert_eq!(
+            standard_keyboard_group_from_key_code(12),
+            KEYBOARD_GROUP_KEY_Q
+        );
+        assert_eq!(
+            standard_keyboard_group_from_key_code(14),
+            KEYBOARD_GROUP_KEY_E
+        );
+        assert_eq!(
+            standard_keyboard_group_from_key_code(15),
+            KEYBOARD_GROUP_KEY_R
+        );
+        assert_eq!(
+            standard_keyboard_group_from_key_code(49),
+            KEYBOARD_GROUP_SPACE
+        );
+        assert_eq!(
+            standard_keyboard_group_from_key_code(0),
+            KEYBOARD_GROUP_KEY_A
+        );
+        assert_eq!(
+            standard_keyboard_group_from_key_code(2),
+            KEYBOARD_GROUP_KEY_D
+        );
+        assert_eq!(
+            standard_keyboard_group_from_key_code(1),
+            KEYBOARD_GROUP_KEY_S
+        );
+        assert_eq!(
+            standard_keyboard_group_from_key_code(13),
+            KEYBOARD_GROUP_KEY_W
+        );
         assert_eq!(standard_keyboard_group_from_key_code(123), 0);
     }
 
@@ -678,6 +951,40 @@ mod tests {
         assert_eq!(mouse_group_label(MOUSE_GROUP_SIDE), "mouse-side");
     }
 
+    #[test]
+    fn linux_x11会话应支持桌宠输入联动() {
+        use crate::linux_session::LinuxDesktopSession;
+
+        assert!(linux_session_supports_avatar_input(
+            LinuxDesktopSession::X11
+        ));
+        assert!(!linux_session_supports_avatar_input(
+            LinuxDesktopSession::Wayland
+        ));
+        assert!(!linux_session_supports_avatar_input(
+            LinuxDesktopSession::Unknown
+        ));
+    }
+
+    #[test]
+    fn linux_keysym应映射到桌宠可消费的统一键码() {
+        assert_eq!(linux_keysym_to_avatar_key_code(0x0061), Some(0));
+        assert_eq!(linux_keysym_to_avatar_key_code(0x0077), Some(13));
+        assert_eq!(linux_keysym_to_avatar_key_code(0x0031), Some(18));
+        assert_eq!(linux_keysym_to_avatar_key_code(0xFF08), Some(51));
+        assert_eq!(linux_keysym_to_avatar_key_code(0xFF53), Some(124));
+        assert_eq!(linux_keysym_to_avatar_key_code(0xFFEB), Some(55));
+        assert_eq!(linux_keysym_to_avatar_key_code(0xFFBE), None);
+    }
+
+    #[test]
+    fn linux鼠标按钮应映射到桌宠鼠标分组() {
+        assert_eq!(linux_mouse_group_from_button_detail(1), MOUSE_GROUP_LEFT);
+        assert_eq!(linux_mouse_group_from_button_detail(3), MOUSE_GROUP_RIGHT);
+        assert_eq!(linux_mouse_group_from_button_detail(8), MOUSE_GROUP_SIDE);
+        assert_eq!(linux_mouse_group_from_button_detail(99), MOUSE_GROUP_MOVE);
+    }
+
     #[cfg(target_os = "windows")]
     #[test]
     fn windows虚拟键应映射到桌宠可消费的统一键码() {
@@ -697,10 +1004,25 @@ mod tests {
             WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_MOUSEMOVE, WM_RBUTTONDOWN, WM_XBUTTONDOWN,
         };
 
-        assert_eq!(windows_mouse_group_from_message(WM_MOUSEMOVE), MOUSE_GROUP_MOVE);
-        assert_eq!(windows_mouse_group_from_message(WM_LBUTTONDOWN), MOUSE_GROUP_LEFT);
-        assert_eq!(windows_mouse_group_from_message(WM_RBUTTONDOWN), MOUSE_GROUP_RIGHT);
-        assert_eq!(windows_mouse_group_from_message(WM_MBUTTONDOWN), MOUSE_GROUP_SIDE);
-        assert_eq!(windows_mouse_group_from_message(WM_XBUTTONDOWN), MOUSE_GROUP_SIDE);
+        assert_eq!(
+            windows_mouse_group_from_message(WM_MOUSEMOVE),
+            MOUSE_GROUP_MOVE
+        );
+        assert_eq!(
+            windows_mouse_group_from_message(WM_LBUTTONDOWN),
+            MOUSE_GROUP_LEFT
+        );
+        assert_eq!(
+            windows_mouse_group_from_message(WM_RBUTTONDOWN),
+            MOUSE_GROUP_RIGHT
+        );
+        assert_eq!(
+            windows_mouse_group_from_message(WM_MBUTTONDOWN),
+            MOUSE_GROUP_SIDE
+        );
+        assert_eq!(
+            windows_mouse_group_from_message(WM_XBUTTONDOWN),
+            MOUSE_GROUP_SIDE
+        );
     }
 }
