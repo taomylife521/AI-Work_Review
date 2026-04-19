@@ -59,7 +59,10 @@ test('桌宠窗口应初始化 locale 并监听语言切换事件', async () => 
   assert.match(source, /initializeLocale\(\)/);
   assert.match(source, /applyLocaleToDocument/);
   assert.match(source, /listen\('locale-changed'/);
-  assert.match(source, /getAvatarStateBubble\(nextState\.mode, currentLocale, nextState\.contextLabel\)/);
+  assert.match(
+    source,
+    /getAvatarStateBubble\(\s*nextState\.mode,\s*currentLocale,\s*nextState\.contextLabel,\s*nextState\.avatarPersona,?\s*\)/s
+  );
   assert.match(
     source,
     /nextState\.mode !== state\.mode\s*\|\|\s*nextState\.contextLabel !== state\.contextLabel/
