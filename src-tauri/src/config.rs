@@ -442,11 +442,14 @@ fn normalize_localhost_api_port(port: u16) -> u16 {
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct NodeGatewayConfig {
     #[serde(default)]
-    pub control_plane_enabled: bool,
-    #[serde(default)]
-    pub control_plane_endpoint: Option<String>,
-    #[serde(default)]
     pub device_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeDevice {
+    pub name: String,
+    pub url: String,
+    pub token: String,
 }
 
 /// 应用配置
@@ -491,9 +494,39 @@ pub struct AppConfig {
     /// 是否启用本地 localhost API
     #[serde(default)]
     pub localhost_api_enabled: bool,
+    /// 本地 localhost API 监听地址
+    #[serde(default)]
+    pub localhost_api_host: Option<String>,
     /// 本地 localhost API 端口
     #[serde(default = "default_localhost_api_port")]
     pub localhost_api_port: u16,
+    /// 是否启用 Telegram Bot
+    #[serde(default)]
+    pub telegram_bot_enabled: bool,
+    /// Telegram Bot Token
+    #[serde(default)]
+    pub telegram_bot_token: Option<String>,
+    /// Telegram Bot 代理地址 (e.g. http://127.0.0.1:7890, socks5://127.0.0.1:1080)
+    #[serde(default)]
+    pub telegram_bot_proxy: Option<String>,
+    /// 是否启用飞书 Bot
+    #[serde(default)]
+    pub feishu_bot_enabled: bool,
+    /// 飞书 App ID
+    #[serde(default)]
+    pub feishu_app_id: Option<String>,
+    /// 飞书 App Secret
+    #[serde(default)]
+    pub feishu_app_secret: Option<String>,
+    /// 飞书 Verification Token
+    #[serde(default)]
+    pub feishu_verification_token: Option<String>,
+    /// 飞书 Encrypt Key
+    #[serde(default)]
+    pub feishu_encrypt_key: Option<String>,
+    /// 已注册的远程设备列表
+    #[serde(default)]
+    pub node_devices: Vec<NodeDevice>,
     /// 设备节点 / 控制面配置
     #[serde(default)]
     pub node_gateway: NodeGatewayConfig,
@@ -626,7 +659,17 @@ impl Default for AppConfig {
             daily_report_custom_prompt: String::new(),
             daily_report_export_dir: None,
             localhost_api_enabled: false,
+            localhost_api_host: None,
             localhost_api_port: DEFAULT_LOCALHOST_API_PORT,
+            telegram_bot_enabled: false,
+            telegram_bot_token: None,
+            telegram_bot_proxy: None,
+            feishu_bot_enabled: false,
+            feishu_app_id: None,
+            feishu_app_secret: None,
+            feishu_verification_token: None,
+            feishu_encrypt_key: None,
+            node_devices: Vec::new(),
             node_gateway: NodeGatewayConfig::default(),
             auto_start: false,
             auto_start_silent: false,
@@ -685,8 +728,8 @@ impl AppConfig {
         self.daily_report_export_dir =
             normalize_optional_string(self.daily_report_export_dir.take());
         self.localhost_api_port = normalize_localhost_api_port(self.localhost_api_port);
-        self.node_gateway.control_plane_endpoint =
-            normalize_optional_string(self.node_gateway.control_plane_endpoint.take());
+        self.localhost_api_host =
+            normalize_optional_string(self.localhost_api_host.take());
         self.node_gateway.device_name =
             normalize_optional_string(self.node_gateway.device_name.take());
         self.sync_text_model_profiles();
@@ -1337,11 +1380,10 @@ mod tests {
     }
 
     #[test]
-    fn 节点网关默认应关闭控制面并且不预填远端地址() {
+    fn 节点网关默认不应预填设备名() {
         let config = AppConfig::default();
 
-        assert!(!config.node_gateway.control_plane_enabled);
-        assert_eq!(config.node_gateway.control_plane_endpoint, None);
+        assert_eq!(config.node_gateway.device_name, None);
         assert_eq!(config.node_gateway.device_name, None);
     }
 }

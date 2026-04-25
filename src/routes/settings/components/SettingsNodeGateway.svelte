@@ -1,5 +1,5 @@
 <script>
-  import { createEventDispatcher, onMount } from 'svelte';
+  import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { locale, t } from '$lib/i18n/index.js';
   import { showToast } from '$lib/stores/toast.js';
@@ -7,62 +7,93 @@
   export let config;
 
   const dispatch = createEventDispatcher();
-  const EMPTY_NODE_GATEWAY_CONFIG = {
-    control_plane_enabled: false,
-    control_plane_endpoint: null,
-    device_name: null,
-  };
 
   let nodeStatus = null;
   let localStatus = null;
+  let tgBotStatus = null;
   let loading = true;
   let saving = false;
-  let actionPending = false;
   let tokenVisible = false;
   let tokenValue = '';
+  let tgTokenVisible = false;
+  let feishuSecretVisible = false;
+  let examplesExpanded = false;
+  let tgStatusPollId = null;
   $: currentLocale = $locale;
-  $: settingsCardBeta = t('settings.tabs.beta');
 
   function normalizeConfig() {
     if (!config.node_gateway || typeof config.node_gateway !== 'object') {
-      config.node_gateway = { ...EMPTY_NODE_GATEWAY_CONFIG };
-    }
-    if (typeof config.node_gateway.control_plane_enabled !== 'boolean') {
-      config.node_gateway.control_plane_enabled = false;
+      config.node_gateway = { device_name: null };
     }
     if (
-      typeof config.node_gateway.control_plane_endpoint !== 'string' &&
-      config.node_gateway.control_plane_endpoint !== null
-    ) {
-      config.node_gateway.control_plane_endpoint = null;
-    }
-    if (
-      typeof config.node_gateway.device_name !== 'string' &&
-      config.node_gateway.device_name !== null
+      typeof config.node_gateway.device_name !== 'string' ||
+      !config.node_gateway.device_name.trim()
     ) {
       config.node_gateway.device_name = null;
     }
+    if (
+      typeof config.localhost_api_host !== 'string' ||
+      !config.localhost_api_host.trim()
+    ) {
+      config.localhost_api_host = null;
+    }
+  }
+
+  function stopTelegramStatusPolling() {
+    if (tgStatusPollId) {
+      clearInterval(tgStatusPollId);
+      tgStatusPollId = null;
+    }
+  }
+
+  async function refreshTelegramBotStatus() {
+    try {
+      tgBotStatus = await invoke('get_telegram_bot_status');
+    } catch (error) {
+      console.warn('刷新 Telegram Bot 状态失败:', error);
+    }
+  }
+
+  function startTelegramStatusPolling() {
+    stopTelegramStatusPolling();
+    if (!config.telegram_bot_enabled) {
+      return;
+    }
+
+    let polls = 0;
+    tgStatusPollId = setInterval(async () => {
+      polls += 1;
+      await refreshTelegramBotStatus();
+      if (polls >= 6 || (tgBotStatus && !tgBotStatus.starting)) {
+        stopTelegramStatusPolling();
+      }
+    }, 3000);
   }
 
   async function loadStatus() {
-    loading = true;
+    if (!nodeStatus || !localStatus) {
+      loading = true;
+    }
     try {
-      const [nextNodeStatus, nextLocalStatus] = await Promise.all([
+      const [nextNodeStatus, nextLocalStatus, nextTgBotStatus] = await Promise.all([
         invoke('get_node_gateway_status'),
         invoke('get_localhost_api_status'),
+        invoke('get_telegram_bot_status'),
       ]);
       nodeStatus = nextNodeStatus;
       localStatus = nextLocalStatus;
+      tgBotStatus = nextTgBotStatus;
+      if (config.telegram_bot_enabled) {
+        startTelegramStatusPolling();
+      } else {
+        stopTelegramStatusPolling();
+      }
     } catch (error) {
       console.error('读取设备节点页面数据失败:', error);
       showToast(t('nodeGatewayPage.loadFailed', { error }), 'error');
     } finally {
       loading = false;
     }
-  }
-
-  async function refreshStatus() {
-    await loadStatus();
   }
 
   async function persistConfig(successMessage = null) {
@@ -82,44 +113,6 @@
       return false;
     } finally {
       saving = false;
-    }
-  }
-
-  async function toggleControlPlane() {
-    config.node_gateway.control_plane_enabled = !config.node_gateway.control_plane_enabled;
-    const saved = await persistConfig(t('nodeGatewayPage.saved'));
-    if (!saved) {
-      config.node_gateway.control_plane_enabled = !config.node_gateway.control_plane_enabled;
-    }
-  }
-
-  async function registerDevice() {
-    actionPending = true;
-    try {
-      nodeStatus = await invoke('register_node_gateway');
-      await loadStatus();
-      showToast(t('nodeGatewayPage.saved'), 'success');
-    } catch (error) {
-      console.error('注册设备失败:', error);
-      showToast(t('nodeGatewayPage.saveFailed', { error }), 'error');
-      await loadStatus();
-    } finally {
-      actionPending = false;
-    }
-  }
-
-  async function sendHeartbeat() {
-    actionPending = true;
-    try {
-      nodeStatus = await invoke('send_node_gateway_heartbeat');
-      await loadStatus();
-      showToast(t('nodeGatewayPage.saved'), 'success');
-    } catch (error) {
-      console.error('发送节点心跳失败:', error);
-      showToast(t('nodeGatewayPage.saveFailed', { error }), 'error');
-      await loadStatus();
-    } finally {
-      actionPending = false;
     }
   }
 
@@ -160,22 +153,23 @@
     }
   }
 
-  function registrationLabel(state) {
-    if (state === 'registered') return t('nodeGatewayPage.statusRegistered');
-    if (state === 'error') return t('nodeGatewayPage.statusError');
-    if (state === 'configured') return t('nodeGatewayPage.statusConfigured');
-    if (state === 'unconfigured') return t('nodeGatewayPage.statusUnconfigured');
-    return t('nodeGatewayPage.statusDisabled');
+  $: curlToken = tokenVisible && tokenValue ? tokenValue : '<your-token>';
+  $: curlBase = localStatus ? localStatus.baseUrl : 'http://127.0.0.1:47831';
+
+  function curlCommand(method, path, body = null) {
+    const sep = path.includes('?') ? '&' : '?';
+    const auth = path === '/health' ? '' : `${sep}token=${curlToken}`;
+    const methodFlag = method === 'GET' ? '' : ` -X ${method}`;
+    const contentType = body ? ` -H "Content-Type: application/json" -d '${JSON.stringify(body)}'` : '';
+    return `curl${methodFlag}${contentType} ${curlBase}${path}${auth}`;
   }
 
-  function formatTimestamp(timestamp) {
-    if (!timestamp) {
-      return t('nodeGatewayPage.empty');
-    }
+  async function copyCurl(cmd) {
     try {
-      return new Date(timestamp * 1000).toLocaleString(currentLocale);
-    } catch {
-      return String(timestamp);
+      await navigator.clipboard.writeText(cmd);
+      showToast(t('nodeGatewayPage.curlCopied'), 'success');
+    } catch (error) {
+      showToast(t('nodeGatewayPage.tokenCopyFailed', { error }), 'error');
     }
   }
 
@@ -183,146 +177,469 @@
     normalizeConfig();
     await loadStatus();
   });
+
+  onDestroy(() => {
+    stopTelegramStatusPolling();
+  });
 </script>
 
 <div class="settings-card node-gateway-settings-shell" data-locale={currentLocale}>
-  <div class="flex items-center gap-3">
-    <h3 class="settings-card-title mb-0">{t('nodeGatewayPage.title')}</h3>
-    <span class="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-      {settingsCardBeta}
-    </span>
+  <div class="flex items-center justify-between">
+    <div>
+      <h3 class="settings-card-title mb-0">{t('nodeGatewayPage.title')}</h3>
+      <p class="settings-card-desc mb-0">{t('nodeGatewayPage.subtitle')}</p>
+    </div>
+    {#if !loading}
+    <button
+      type="button"
+      class="settings-action-secondary"
+      on:click={loadStatus}
+      disabled={saving}
+    >
+      {t('nodeGatewayPage.refresh')}
+    </button>
+    {/if}
   </div>
-  <p class="settings-card-desc">{t('nodeGatewayPage.subtitle')}</p>
 
   {#if loading}
     <div class="flex justify-center py-10">
       <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
     </div>
   {:else if nodeStatus && localStatus}
-    <div class="node-gateway-grid grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-      <div class="space-y-6">
-        <div class="settings-block">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <div class="settings-text">{t('nodeGatewayPage.deviceIdentity')}</div>
-              <div class="settings-muted mt-0.5">{t('nodeGatewayPage.protocolVersion')} · {nodeStatus.protocol_version}</div>
+    <div class="settings-section space-y-3">
+
+      <!-- Row 1: Device Identity + Local API -->
+      <div class="grid gap-3 lg:grid-cols-2">
+
+        <!-- Device Identity -->
+        <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 dark:border-slate-700/80 dark:bg-slate-800/40">
+          <div class="flex items-center gap-2 mb-3">
+            <div class="flex h-6 w-6 items-center justify-center rounded-md bg-primary-100 dark:bg-primary-900/30">
+              <svg class="w-3.5 h-3.5 text-primary-600 dark:text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <span class="text-sm font-medium text-slate-700 dark:text-slate-200">{t('nodeGatewayPage.deviceIdentity')}</span>
+            <span class="settings-chip-neutral">{nodeStatus.protocolVersion}</span>
+          </div>
+          <div class="space-y-2">
+            <div class="flex items-center justify-between gap-2 rounded-lg bg-white/70 px-3 py-1.5 ring-1 ring-slate-200/70 dark:bg-slate-900/20 dark:ring-slate-700/70">
+              <span class="text-xs text-slate-500 dark:text-slate-400">{t('nodeGatewayPage.deviceId')}</span>
+              <span class="font-mono text-xs text-slate-700 dark:text-slate-300" title={nodeStatus.deviceId}>{nodeStatus.deviceId}</span>
+            </div>
+            <label class="block">
+              <span class="text-xs text-slate-500 dark:text-slate-400">{t('nodeGatewayPage.deviceName')}</span>
+              <input
+                type="text"
+                bind:value={config.node_gateway.device_name}
+                class="mt-0.5 w-full rounded-lg bg-white/70 px-3 py-1.5 text-sm text-slate-800 ring-1 ring-slate-200/70 focus:ring-primary-300 dark:bg-slate-900/20 dark:text-white dark:ring-slate-700/70 dark:focus:ring-primary-600 focus:outline-none"
+                placeholder={nodeStatus.deviceName}
+              />
+            </label>
+            <p class="text-[11px] text-slate-400 dark:text-slate-500">{t('nodeGatewayPage.deviceNameHint')}</p>
+          </div>
+        </div>
+
+        <!-- Local API -->
+        <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 dark:border-slate-700/80 dark:bg-slate-800/40">
+          <div class="flex items-center justify-between gap-3 mb-3">
+            <div class="flex items-center gap-2">
+              <div class="flex h-6 w-6 items-center justify-center rounded-md bg-primary-100 dark:bg-primary-900/30">
+                <svg class="w-3.5 h-3.5 text-primary-600 dark:text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
+                </svg>
+              </div>
+              <span class="text-sm font-medium text-slate-700 dark:text-slate-200">{t('nodeGatewayPage.localApi')}</span>
+              {#if localStatus.enabled}
+                <span class="settings-chip-success">{t('nodeGatewayPage.localhostEnabled')}</span>
+              {:else}
+                <span class="settings-chip-neutral">{t('nodeGatewayPage.localhostDisabled')}</span>
+              {/if}
             </div>
             <button
               type="button"
-              class="segment-btn settings-segment-base"
-              on:click={refreshStatus}
-              disabled={saving || actionPending}
+              on:click={() => {
+                config.localhost_api_enabled = !config.localhost_api_enabled;
+                persistConfig();
+              }}
+              disabled={saving}
+              class="switch-track {config.localhost_api_enabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'} {saving ? 'opacity-60 cursor-not-allowed' : ''}"
             >
-              {t('nodeGatewayPage.refresh')}
+              <span class="switch-thumb {config.localhost_api_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
             </button>
           </div>
-        </div>
 
-        <div class="settings-block border border-slate-200 dark:border-slate-700">
-          <div class="settings-text">{t('nodeGatewayPage.deviceId')}</div>
-          <div class="settings-muted mt-1 font-mono break-all">{nodeStatus.device_id}</div>
-        </div>
-
-        <label class="settings-block border border-slate-200 dark:border-slate-700">
-          <div class="settings-text">{t('nodeGatewayPage.deviceName')}</div>
-          <input
-            type="text"
-            bind:value={config.node_gateway.device_name}
-            on:blur={() => persistConfig(t('nodeGatewayPage.saved'))}
-            class="mt-2 w-full bg-transparent text-sm text-slate-800 dark:text-white focus:outline-none"
-            placeholder={nodeStatus.device_name}
-          />
-          <p class="settings-note mt-2">{t('nodeGatewayPage.deviceNameHint')}</p>
-        </label>
-
-        <div class="settings-block border border-slate-200 dark:border-slate-700">
-          <div class="flex items-center justify-between gap-4">
-            <div>
-              <div class="settings-text">{t('nodeGatewayPage.controlPlaneEnabled')}</div>
-              <div class="settings-muted mt-0.5">{registrationLabel(nodeStatus.registration_state)}</div>
+          {#if config.localhost_api_enabled}
+          <div class="space-y-2">
+            <div class="grid gap-2 grid-cols-2">
+              <div class="rounded-lg bg-white/70 px-3 py-1.5 ring-1 ring-slate-200/70 dark:bg-slate-900/20 dark:ring-slate-700/70">
+                <div class="text-[11px] text-slate-400 dark:text-slate-500">{t('nodeGatewayPage.apiHostLabel')}</div>
+                <input
+                  type="text"
+                  bind:value={config.localhost_api_host}
+                  class="w-full bg-transparent text-sm font-mono text-slate-800 dark:text-white focus:outline-none"
+                  placeholder="127.0.0.1"
+                />
+              </div>
+              <div class="rounded-lg bg-white/70 px-3 py-1.5 ring-1 ring-slate-200/70 dark:bg-slate-900/20 dark:ring-slate-700/70">
+                <div class="text-[11px] text-slate-400 dark:text-slate-500">{t('nodeGatewayPage.apiPortLabel')}</div>
+                <input
+                  type="number"
+                  bind:value={config.localhost_api_port}
+                  on:blur={() => {
+                    if (!Number.isInteger(config.localhost_api_port) || config.localhost_api_port <= 0 || config.localhost_api_port > 65535) {
+                      config.localhost_api_port = 47831;
+                    }
+                  }}
+                  class="w-full bg-transparent text-sm font-mono text-slate-800 dark:text-white focus:outline-none"
+                  min="1"
+                  max="65535"
+                  placeholder="47831"
+                />
+              </div>
             </div>
-            <button
-              type="button"
-              on:click={toggleControlPlane}
-              disabled={saving || actionPending}
-              class="switch-track {config.node_gateway.control_plane_enabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'} {saving ? 'opacity-60 cursor-not-allowed' : ''}"
-            >
-              <span class="switch-thumb {config.node_gateway.control_plane_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
-            </button>
-          </div>
-        </div>
+            <div class="flex items-center justify-between rounded-lg bg-white/70 px-3 py-1.5 ring-1 ring-slate-200/70 dark:bg-slate-900/20 dark:ring-slate-700/70">
+              <span class="text-[11px] text-slate-400 dark:text-slate-500">{t('nodeGatewayPage.localhostAddress')}</span>
+              <span class="text-sm font-mono text-slate-700 dark:text-slate-300">{localStatus.baseUrl}</span>
+            </div>
 
-        <label class="settings-block border border-slate-200 dark:border-slate-700">
-          <div class="settings-text">{t('nodeGatewayPage.controlPlaneEndpoint')}</div>
-          <input
-            type="url"
-            bind:value={config.node_gateway.control_plane_endpoint}
-            on:blur={() => persistConfig(t('nodeGatewayPage.saved'))}
-            class="mt-2 w-full bg-transparent text-sm font-mono text-slate-800 dark:text-white focus:outline-none"
-            placeholder="https://control-plane.example.com"
-          />
-          <p class="settings-note mt-2">{t('nodeGatewayPage.controlPlaneEndpointHint')}</p>
-        </label>
-
-        <div class="settings-block border border-slate-200 dark:border-slate-700">
-          <div class="settings-text">{t('nodeGatewayPage.registrationState')}</div>
-          <div class="settings-muted mt-1">{registrationLabel(nodeStatus.registration_state)}</div>
-          <div class="settings-note mt-2">{t('nodeGatewayPage.registeredAt')}：{formatTimestamp(nodeStatus.registered_at)}</div>
-          <div class="settings-note mt-1">{t('nodeGatewayPage.lastHeartbeatAt')}：{formatTimestamp(nodeStatus.last_heartbeat_at)}</div>
-          <div class="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              class="segment-btn settings-segment-active"
-              on:click={registerDevice}
-              disabled={saving || actionPending}
-            >
-              {t('nodeGatewayPage.registerDevice')}
-            </button>
-            <button
-              type="button"
-              class="segment-btn settings-segment-base"
-              on:click={sendHeartbeat}
-              disabled={saving || actionPending}
-            >
-              {t('nodeGatewayPage.sendHeartbeat')}
-            </button>
+            <!-- Token -->
+            <div class="rounded-lg bg-white/70 px-3 py-2 ring-1 ring-slate-200/70 dark:bg-slate-900/20 dark:ring-slate-700/70">
+              <div class="flex items-center justify-between gap-2 mb-1">
+                <span class="text-[11px] text-slate-400 dark:text-slate-500">{t('nodeGatewayPage.localhostToken')}</span>
+                <div class="flex gap-1">
+                  <button type="button" class="settings-chip-button" on:click={revealToken}>{t('nodeGatewayPage.revealToken')}</button>
+                  <button type="button" class="settings-chip-button" on:click={copyToken}>{t('nodeGatewayPage.copyToken')}</button>
+                  <button type="button" class="settings-chip-button settings-chip-button-active" on:click={rotateToken}>{t('nodeGatewayPage.rotateToken')}</button>
+                </div>
+              </div>
+              <div class="font-mono text-[11px] text-slate-500 dark:text-slate-400 break-all">
+                {tokenVisible ? tokenValue || t('nodeGatewayPage.empty') : localStatus.tokenPreview || t('nodeGatewayPage.empty')}
+              </div>
+            </div>
+            <p class="text-[11px] text-slate-400 dark:text-slate-500">{t('nodeGatewayPage.apiHostHint')}</p>
           </div>
+          {/if}
         </div>
       </div>
 
-      <div class="space-y-6">
-        <div class="settings-block border border-slate-200 dark:border-slate-700">
-          <div class="settings-text">{t('nodeGatewayPage.localApi')}</div>
-          <div class="settings-muted mt-1">
-            {localStatus.enabled ? t('nodeGatewayPage.localhostEnabled') : t('nodeGatewayPage.localhostDisabled')}
+      <!-- Row 2: Bot Integrations (if local API enabled) -->
+      {#if config.localhost_api_enabled}
+      <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 dark:border-slate-700/80 dark:bg-slate-800/40">
+        <div class="flex items-center gap-2 mb-3">
+          <div class="flex h-6 w-6 items-center justify-center rounded-md bg-primary-100 dark:bg-primary-900/30">
+            <svg class="w-3.5 h-3.5 text-primary-600 dark:text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0" />
+            </svg>
           </div>
-          <div class="settings-note mt-3">{t('nodeGatewayPage.localhostAddress')}：{localStatus.base_url}</div>
+          <span class="text-sm font-medium text-slate-700 dark:text-slate-200">{t('nodeGatewayPage.botIntegration')}</span>
         </div>
 
-        <div class="settings-block border border-slate-200 dark:border-slate-700">
-          <div class="settings-text">{t('nodeGatewayPage.localhostToken')}</div>
-          <div class="settings-muted mt-1 font-mono break-all">
-            {tokenVisible ? tokenValue || t('nodeGatewayPage.empty') : localStatus.token_preview || t('nodeGatewayPage.empty')}
+        <div class="space-y-3">
+          <!-- Telegram Bot -->
+          <div class="rounded-xl bg-white/70 px-3 py-2.5 ring-1 ring-slate-200/70 dark:bg-slate-900/20 dark:ring-slate-700/70">
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-2">
+                <svg class="w-4 h-4 text-[#229ED9]" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.479.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+                </svg>
+                <span class="text-sm text-slate-700 dark:text-slate-200">Telegram</span>
+                {#if config.telegram_bot_enabled}
+                  <span class="settings-chip-success">{t('nodeGatewayPage.telegramEnabled')}</span>
+                {/if}
+              </div>
+              <button
+                type="button"
+                on:click={() => {
+                  config.telegram_bot_enabled = !config.telegram_bot_enabled;
+                  persistConfig();
+                }}
+                disabled={saving}
+                class="switch-track {config.telegram_bot_enabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'} {saving ? 'opacity-60 cursor-not-allowed' : ''}"
+              >
+                <span class="switch-thumb {config.telegram_bot_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
+              </button>
+            </div>
+            {#if config.telegram_bot_enabled}
+            <div class="mt-2 space-y-2">
+              <label class="block">
+                <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('nodeGatewayPage.telegramBotToken')}</span>
+                <div class="mt-0.5 relative">
+                  {#if tgTokenVisible}
+                    <input
+                      type="text"
+                      bind:value={config.telegram_bot_token}
+                      on:blur={() => persistConfig()}
+                      class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                      placeholder="123456:ABC-DEF..."
+                    />
+                  {:else}
+                    <input
+                      type="password"
+                      bind:value={config.telegram_bot_token}
+                      on:blur={() => persistConfig()}
+                      class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                      placeholder="123456:ABC-DEF..."
+                    />
+                  {/if}
+                  <button
+                    type="button"
+                    class="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                    on:click={() => (tgTokenVisible = !tgTokenVisible)}
+                  >
+                    {#if tgTokenVisible}
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L6.59 6.59m7.532 7.532l3.29 3.29M3 3l18 18" /></svg>
+                    {:else}
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                    {/if}
+                  </button>
+                </div>
+              </label>
+              {#if tgBotStatus}
+                {#if tgBotStatus.starting}
+                  <div class="flex items-center gap-1.5 text-[11px] text-blue-500 dark:text-blue-400">
+                    <div class="animate-spin h-3 w-3 border-[1.5px] border-blue-400 border-t-transparent rounded-full"></div>
+                    连接中...
+                  </div>
+                {:else if tgBotStatus.running}
+                  <div class="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400">
+                    <span class="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+                    Bot 运行中
+                  </div>
+                {:else if tgBotStatus.lastError}
+                  <div class="flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+                    <span class="inline-block h-1.5 w-1.5 rounded-full bg-amber-500"></span>
+                    {tgBotStatus.lastError}
+                  </div>
+                {/if}
+              {/if}
+              <label class="block">
+                <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('nodeGatewayPage.telegramBotProxy')}</span>
+                <input
+                  type="text"
+                  bind:value={config.telegram_bot_proxy}
+                  on:blur={() => persistConfig()}
+                  class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                  placeholder="http://127.0.0.1:7890"
+                />
+              </label>
+              <p class="text-[11px] text-slate-400 dark:text-slate-500">{t('nodeGatewayPage.telegramBotProxyHint')}</p>
+              <p class="text-[11px] text-slate-400 dark:text-slate-500">{t('nodeGatewayPage.telegramBotHint')}</p>
+            </div>
+            {/if}
           </div>
-          <p class="settings-note mt-2">{t('nodeGatewayPage.localhostTokenHint')}</p>
-          <div class="mt-3 flex flex-wrap gap-2">
-            <button type="button" class="segment-btn settings-segment-base" on:click={revealToken}>
-              {t('nodeGatewayPage.revealToken')}
-            </button>
-            <button type="button" class="segment-btn settings-segment-base" on:click={copyToken}>
-              {t('nodeGatewayPage.copyToken')}
-            </button>
-            <button type="button" class="segment-btn settings-segment-active" on:click={rotateToken}>
-              {t('nodeGatewayPage.rotateToken')}
-            </button>
-          </div>
-        </div>
 
-        <div class="settings-block border border-slate-200 dark:border-slate-700">
-          <div class="settings-text">{t('nodeGatewayPage.lastError')}</div>
-          <div class="settings-muted mt-1 break-all">{localStatus.last_error || t('nodeGatewayPage.empty')}</div>
+          <!-- Feishu Bot -->
+          <div class="rounded-xl bg-white/70 px-3 py-2.5 ring-1 ring-slate-200/70 dark:bg-slate-900/20 dark:ring-slate-700/70">
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-2">
+                <svg class="w-4 h-4 text-[#3370FF]" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M20.487 17.14c.88-1.668 1.388-3.566 1.388-5.576C21.875 5.197 17.263.583 11.896.583 6.53.583 1.917 5.197 1.917 10.564c0 5.367 4.613 9.98 9.98 9.98 1.99 0 3.846-.583 5.417-1.585l3.428 1.485a.77.77 0 00.97-1.034l-1.225-2.27z"/>
+                </svg>
+                <span class="text-sm text-slate-700 dark:text-slate-200">飞书</span>
+                {#if config.feishu_bot_enabled}
+                  <span class="settings-chip-success">{t('nodeGatewayPage.feishuEnabled')}</span>
+                {/if}
+              </div>
+              <button
+                type="button"
+                on:click={() => {
+                  config.feishu_bot_enabled = !config.feishu_bot_enabled;
+                  persistConfig();
+                }}
+                disabled={saving}
+                class="switch-track {config.feishu_bot_enabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'} {saving ? 'opacity-60 cursor-not-allowed' : ''}"
+              >
+                <span class="switch-thumb {config.feishu_bot_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
+              </button>
+            </div>
+            {#if config.feishu_bot_enabled}
+            <div class="mt-2 space-y-2">
+              <div class="grid gap-2 grid-cols-2">
+                <label class="block">
+                  <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('nodeGatewayPage.feishuAppId')}</span>
+                  <input
+                    type="text"
+                    bind:value={config.feishu_app_id}
+                    on:blur={() => persistConfig()}
+                    class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                    placeholder="cli_xxx"
+                  />
+                </label>
+                <label class="block">
+                  <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('nodeGatewayPage.feishuAppSecret')}</span>
+                  <div class="mt-0.5 relative">
+                    {#if feishuSecretVisible}
+                      <input
+                        type="text"
+                        bind:value={config.feishu_app_secret}
+                        on:blur={() => persistConfig()}
+                        class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                        placeholder="Secret"
+                      />
+                    {:else}
+                      <input
+                        type="password"
+                        bind:value={config.feishu_app_secret}
+                        on:blur={() => persistConfig()}
+                        class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                        placeholder="Secret"
+                      />
+                    {/if}
+                    <button
+                      type="button"
+                      class="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                      on:click={() => (feishuSecretVisible = !feishuSecretVisible)}
+                    >
+                      {#if feishuSecretVisible}
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L6.59 6.59m7.532 7.532l3.29 3.29M3 3l18 18" /></svg>
+                      {:else}
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                      {/if}
+                    </button>
+                  </div>
+                </label>
+              </div>
+              <label class="block">
+                <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('nodeGatewayPage.feishuVerificationToken')}</span>
+                <input
+                  type="text"
+                  bind:value={config.feishu_verification_token}
+                  on:blur={() => persistConfig()}
+                  class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                  placeholder="Verification Token"
+                />
+              </label>
+              <p class="text-[11px] text-slate-400 dark:text-slate-500">{t('nodeGatewayPage.feishuBotHint')}</p>
+            </div>
+            {/if}
+          </div>
+
+          <!-- Device Registry (shared by both bots) -->
+          {#if config.telegram_bot_enabled || config.feishu_bot_enabled}
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-medium text-slate-600 dark:text-slate-300">{t('nodeGatewayPage.deviceRegistry')}</span>
+              <button
+                type="button"
+                class="settings-chip-button settings-chip-button-active text-[11px]"
+                on:click={() => {
+                  if (!config.node_devices) config.node_devices = [];
+                  config.node_devices = [...config.node_devices, { name: '', url: '', token: '' }];
+                }}
+              >
+                {t('nodeGatewayPage.addDevice')}
+              </button>
+            </div>
+            <p class="text-[11px] text-slate-400 dark:text-slate-500">{t('nodeGatewayPage.deviceRegistryHint')}</p>
+            <div class="flex items-center gap-2 rounded-lg bg-primary-50/60 px-3 py-1.5 ring-1 ring-primary-200/60 dark:bg-primary-900/20 dark:ring-primary-800/40">
+              <span class="text-xs font-medium text-primary-700 dark:text-primary-300">{t('nodeGatewayPage.localDevice')}</span>
+              <span class="text-xs font-mono text-slate-500 dark:text-slate-400">{localStatus?.baseUrl || '-'}</span>
+            </div>
+            {#each config.node_devices || [] as device, i}
+            <div class="flex items-start gap-2 rounded-lg bg-white/70 px-3 py-2 ring-1 ring-slate-200/70 dark:bg-slate-900/20 dark:ring-slate-700/70">
+              <div class="flex-1 grid gap-x-2 gap-y-1 grid-cols-[1fr_2fr]">
+                <label class="block">
+                  <span class="text-[10px] text-slate-500 dark:text-slate-400">{t('nodeGatewayPage.deviceNameCol')}</span>
+                  <input
+                    type="text"
+                    bind:value={device.name}
+                    class="mt-0.5 w-full rounded-md bg-white/80 px-2 py-1 text-sm text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                    placeholder="办公电脑"
+                  />
+                </label>
+                <label class="block">
+                  <span class="text-[10px] text-slate-500 dark:text-slate-400">{t('nodeGatewayPage.deviceUrlCol')}</span>
+                  <input
+                    type="text"
+                    bind:value={device.url}
+                    class="mt-0.5 w-full rounded-md bg-white/80 px-2 py-1 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                    placeholder="http://192.168.1.100:47831"
+                  />
+                </label>
+                <label class="col-span-2 block">
+                  <span class="text-[10px] text-slate-500 dark:text-slate-400">{t('nodeGatewayPage.deviceTokenCol')}</span>
+                  <input
+                    type="password"
+                    bind:value={device.token}
+                    class="mt-0.5 w-full rounded-md bg-white/80 px-2 py-1 text-xs font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                    placeholder="wr-local-..."
+                  />
+                </label>
+              </div>
+              <button
+                type="button"
+                class="text-xs text-red-400 hover:text-red-500 mt-3 shrink-0"
+                on:click={() => {
+                  config.node_devices = config.node_devices.filter((_, j) => j !== i);
+                  persistConfig();
+                }}
+              >
+                {t('nodeGatewayPage.removeDevice')}
+              </button>
+            </div>
+            {/each}
+          </div>
+          {/if}
         </div>
       </div>
+
+      <!-- API Examples (collapsible) -->
+      <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 dark:border-slate-700/80 dark:bg-slate-800/40">
+        <button
+          type="button"
+          class="flex w-full items-center justify-between gap-2"
+          on:click={() => (examplesExpanded = !examplesExpanded)}
+        >
+          <div class="flex items-center gap-2">
+            <div class="flex h-6 w-6 items-center justify-center rounded-md bg-primary-100 dark:bg-primary-900/30">
+              <svg class="w-3.5 h-3.5 text-primary-600 dark:text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+              </svg>
+            </div>
+            <span class="text-sm font-medium text-slate-700 dark:text-slate-200">{t('nodeGatewayPage.apiExamples')}</span>
+          </div>
+          <svg class="w-4 h-4 text-slate-400 transition-transform {examplesExpanded ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        {#if examplesExpanded}
+        <div class="mt-3 space-y-1.5">
+          <p class="text-[11px] text-slate-400 dark:text-slate-500">{t('nodeGatewayPage.apiExamplesHint')}</p>
+          {#each [
+            { label: 'GET /health', desc: t('nodeGatewayPage.exampleHealthDesc'), cmd: curlCommand('GET', '/health') },
+            { label: 'GET /v1/device', desc: t('nodeGatewayPage.exampleDeviceDesc'), cmd: curlCommand('GET', '/v1/device') },
+            { label: 'GET /v1/reports', desc: t('nodeGatewayPage.exampleReportsDesc'), cmd: curlCommand('GET', '/v1/reports') },
+            { label: 'GET /v1/reports/:date', desc: t('nodeGatewayPage.exampleReportByDateDesc'), cmd: curlCommand('GET', '/v1/reports/2025-01-15') },
+            { label: 'POST /v1/reports/generate', desc: t('nodeGatewayPage.exampleGenerateDesc'), cmd: curlCommand('POST', '/v1/reports/generate', { date: '2025-01-15' }) },
+          ] as example}
+          <div class="flex items-start justify-between gap-2 rounded-lg bg-white/70 px-3 py-1.5 ring-1 ring-slate-200/70 dark:bg-slate-900/20 dark:ring-slate-700/70">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-mono font-medium text-slate-600 dark:text-slate-300">{example.label}</span>
+                <span class="text-[11px] text-slate-400">{example.desc}</span>
+              </div>
+              <code class="block text-[11px] font-mono text-slate-500 dark:text-slate-400 break-all leading-relaxed">{example.cmd}</code>
+            </div>
+            <button type="button" class="settings-chip-button text-[10px] shrink-0" on:click={() => copyCurl(example.cmd)}>
+              {t('nodeGatewayPage.copyCurl')}
+            </button>
+          </div>
+          {/each}
+        </div>
+        {/if}
+      </div>
+      {/if}
+
+      <!-- Error -->
+      {#if localStatus.lastError}
+      <div class="settings-panel-danger">
+        <div class="settings-text text-red-700 dark:text-red-400">{t('nodeGatewayPage.lastError')}</div>
+        <div class="settings-muted mt-1 break-all">{localStatus.lastError}</div>
+      </div>
+      {/if}
+
     </div>
   {/if}
 </div>

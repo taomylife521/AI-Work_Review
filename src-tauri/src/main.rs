@@ -16,6 +16,7 @@ mod commands;
 mod config;
 mod database;
 mod error;
+mod feishu_bot;
 mod idle_detector;
 mod linux_session;
 mod localhost_api;
@@ -27,6 +28,7 @@ mod privacy;
 mod screen_lock;
 mod screenshot;
 mod storage;
+mod telegram_bot;
 mod work_intelligence;
 
 use chrono;
@@ -353,6 +355,7 @@ pub struct AppState {
     pub avatar_state: avatar_engine::AvatarStatePayload,
     pub avatar_generating_report: bool,
     pub localhost_api_runtime: localhost_api::LocalhostApiRuntime,
+    pub telegram_bot_runtime: telegram_bot::TelegramBotRuntime,
     /// avatar 循环缓存的活动窗口（时间戳 + 窗口信息），供 screenshot 循环复用
     pub cached_active_window: Option<(std::time::Instant, monitor::ActiveWindow)>,
 }
@@ -2879,6 +2882,7 @@ async fn main() {
         ),
         avatar_generating_report: false,
         localhost_api_runtime: localhost_api::LocalhostApiRuntime::default(),
+        telegram_bot_runtime: telegram_bot::TelegramBotRuntime::default(),
         cached_active_window: None,
     }));
     let app_lifecycle_state = Arc::new(Mutex::new(AppLifecycleState::default()));
@@ -3010,6 +3014,9 @@ async fn main() {
             if let Err(e) = localhost_api::sync_localhost_api_runtime(&app.handle(), state.inner())
             {
                 log::warn!("初始化本地 API 失败: {e}");
+            }
+            if let Err(e) = telegram_bot::sync_telegram_bot_runtime(state.inner()) {
+                log::warn!("初始化 Telegram Bot 失败: {e}");
             }
 
             // 创建 Tauri v2 系统托盘
@@ -3201,8 +3208,7 @@ async fn main() {
             commands::export_report_markdown,
             commands::get_localhost_api_status,
             commands::get_node_gateway_status,
-            commands::register_node_gateway,
-            commands::send_node_gateway_heartbeat,
+            commands::get_telegram_bot_status,
             commands::reveal_localhost_api_token,
             commands::rotate_localhost_api_token,
             commands::get_config,

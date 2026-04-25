@@ -72,6 +72,11 @@ Work Review is closer to a personal work-trace system:
 | Dual response modes | Choose between stable templates and AI-enhanced output |
 | Desktop Avatar Beta (In Progress) | Shows lightweight state feedback such as working, reading, meeting, music, video, and generating, while interaction details and preset behavior are still being refined |
 
+### Bot Integrations (Telegram / Feishu)
+
+- Query and generate reports remotely via Local API + multi-device registry
+- Supported commands: `/devices`, `/device`, `/reports`, `/report`, `/generate` (Feishu also supports Chinese keywords)
+
 ### Privacy
 
 - Per-app `normal / anonymize / ignore`

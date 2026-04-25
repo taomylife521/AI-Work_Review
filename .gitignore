@@ -44,6 +44,9 @@ __pycache__/
 env/
 venv/
 
+# Bot config
+bots/config.json
+
 # Project docs (local only)
 plan-*.md
 TEST_REPORT_*.md

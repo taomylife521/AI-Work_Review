@@ -3255,17 +3255,15 @@ pub async fn get_node_gateway_status(
 }
 
 #[tauri::command]
-pub async fn register_node_gateway(
+pub async fn get_telegram_bot_status(
     state: State<'_, Arc<Mutex<AppState>>>,
-) -> Result<crate::node_gateway::NodeGatewayStatusPayload, AppError> {
-    crate::node_gateway::register_node_gateway(state.inner()).await
-}
-
-#[tauri::command]
-pub async fn send_node_gateway_heartbeat(
-    state: State<'_, Arc<Mutex<AppState>>>,
-) -> Result<crate::node_gateway::NodeGatewayStatusPayload, AppError> {
-    crate::node_gateway::send_node_gateway_heartbeat(state.inner()).await
+) -> Result<serde_json::Value, AppError> {
+    let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+    Ok(serde_json::json!({
+        "running": s.telegram_bot_runtime.is_running(),
+        "starting": s.telegram_bot_runtime.is_starting(),
+        "lastError": s.telegram_bot_runtime.last_error(),
+    }))
 }
 
 #[tauri::command]
@@ -3367,6 +3365,7 @@ pub(crate) fn persist_app_config(
     }
 
     crate::localhost_api::sync_localhost_api_runtime(&app, state)?;
+    crate::telegram_bot::sync_telegram_bot_runtime(state)?;
     crate::emit_config_changed(&app, &config);
 
     log::info!("配置已保存");

@@ -16,18 +16,23 @@ use tokio::sync::oneshot;
 use uuid::Uuid;
 
 pub const LOCALHOST_API_HOST: &str = "127.0.0.1";
+
+pub fn effective_api_host(config_host: Option<&str>) -> String {
+    config_host
+        .map(str::trim)
+        .filter(|h| !h.is_empty())
+        .unwrap_or(LOCALHOST_API_HOST)
+        .to_string()
+}
 const LOCALHOST_API_TOKEN_FILE: &str = "localhost_api_token.txt";
-const MOCK_CONTROL_PLANE_STORE_FILE: &str = "node_control_plane_store.json";
 const MAX_REQUEST_BYTES: usize = 256 * 1024;
 const MAX_BODY_BYTES: usize = 128 * 1024;
-const MOCK_NODE_HEARTBEAT_INTERVAL_SECS: u64 = 300;
 
 pub struct LocalhostApiRuntime {
     pub running: bool,
     pub bound_port: Option<u16>,
     pub last_error: Option<String>,
     pub shutdown_tx: Option<oneshot::Sender<()>>,
-    control_plane_store: MockControlPlaneStore,
 }
 
 impl Default for LocalhostApiRuntime {
@@ -37,7 +42,6 @@ impl Default for LocalhostApiRuntime {
             bound_port: None,
             last_error: None,
             shutdown_tx: None,
-            control_plane_store: MockControlPlaneStore::default(),
         }
     }
 }
@@ -59,11 +63,6 @@ pub struct LocalhostApiStatusPayload {
     pub platform: String,
     pub device_id: String,
     pub device_name: String,
-    pub node_protocol_version: String,
-    pub control_plane_enabled: bool,
-    pub control_plane_endpoint: Option<String>,
-    pub control_plane_configured: bool,
-    pub registration_state: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,130 +83,10 @@ struct ExportReportRequest {
     export_dir: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct NodeRegisterRequest {
-    protocol_version: String,
-    device_id: String,
-    device_name: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct NodeHeartbeatRequest {
-    protocol_version: String,
-    installation_id: String,
-    device_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct NodeInstallationRecord {
-    installation_id: String,
-    device_id: String,
-    device_name: String,
-    device_token: String,
-    last_heartbeat_at: Option<i64>,
-}
-
-#[derive(Debug, Clone)]
-struct NodeRegisterResult {
-    installation_id: String,
-    device_token: String,
-    heartbeat_interval_secs: Option<u64>,
-}
-
-#[derive(Debug)]
-enum ControlPlaneStoreError {
-    Unauthorized(String),
-    BadRequest(String),
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RequestAuthMode {
     None,
-    DeviceToken,
     LocalApiToken,
-}
-
-#[derive(Debug, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MockControlPlaneStore {
-    #[serde(default)]
-    installations: HashMap<String, NodeInstallationRecord>,
-}
-
-impl MockControlPlaneStore {
-    fn register_or_reuse_device(
-        &mut self,
-        device_id: &str,
-        device_name: &str,
-    ) -> NodeRegisterResult {
-        if let Some(existing) = self
-            .installations
-            .values_mut()
-            .find(|record| record.device_id == device_id)
-        {
-            existing.device_name = device_name.to_string();
-            return NodeRegisterResult {
-                installation_id: existing.installation_id.clone(),
-                device_token: existing.device_token.clone(),
-                heartbeat_interval_secs: Some(MOCK_NODE_HEARTBEAT_INTERVAL_SECS),
-            };
-        }
-
-        let installation_id = format!("inst_{}", Uuid::new_v4().simple());
-        let device_token = format!("wr-node-{}", Uuid::new_v4().simple());
-
-        self.installations.insert(
-            installation_id.clone(),
-            NodeInstallationRecord {
-                installation_id: installation_id.clone(),
-                device_id: device_id.to_string(),
-                device_name: device_name.to_string(),
-                device_token: device_token.clone(),
-                last_heartbeat_at: None,
-            },
-        );
-
-        NodeRegisterResult {
-            installation_id,
-            device_token,
-            heartbeat_interval_secs: Some(MOCK_NODE_HEARTBEAT_INTERVAL_SECS),
-        }
-    }
-
-    fn validate_and_record_heartbeat(
-        &mut self,
-        token: &str,
-        installation_id: &str,
-        device_id: &str,
-    ) -> std::result::Result<Option<u64>, ControlPlaneStoreError> {
-        let Some(record) = self
-            .installations
-            .values_mut()
-            .find(|record| record.device_token == token)
-        else {
-            return Err(ControlPlaneStoreError::Unauthorized(
-                "设备 token 无效，请重新注册".to_string(),
-            ));
-        };
-
-        if record.installation_id != installation_id {
-            return Err(ControlPlaneStoreError::BadRequest(
-                "installation_id 与设备 token 不匹配".to_string(),
-            ));
-        }
-
-        if record.device_id != device_id {
-            return Err(ControlPlaneStoreError::BadRequest(
-                "device_id 与设备 token 不匹配".to_string(),
-            ));
-        }
-
-        record.last_heartbeat_at = Some(chrono::Utc::now().timestamp());
-        Ok(Some(MOCK_NODE_HEARTBEAT_INTERVAL_SECS))
-    }
 }
 
 #[derive(Debug)]
@@ -293,10 +172,6 @@ fn localhost_api_token_path(data_dir: &Path) -> PathBuf {
     data_dir.join(LOCALHOST_API_TOKEN_FILE)
 }
 
-fn mock_control_plane_store_path(data_dir: &Path) -> PathBuf {
-    data_dir.join(MOCK_CONTROL_PLANE_STORE_FILE)
-}
-
 fn generate_localhost_api_token() -> String {
     format!("wr-local-{}", Uuid::new_v4().simple())
 }
@@ -339,30 +214,6 @@ fn read_localhost_api_token_from_path(path: &Path) -> Result<Option<String>> {
     } else {
         Ok(Some(token))
     }
-}
-
-fn read_control_plane_store_from_path(path: &Path) -> Result<MockControlPlaneStore> {
-    if !path.exists() {
-        return Ok(MockControlPlaneStore::default());
-    }
-
-    let content = std::fs::read_to_string(path)?;
-    if content.trim().is_empty() {
-        return Ok(MockControlPlaneStore::default());
-    }
-    serde_json::from_str::<MockControlPlaneStore>(&content).map_err(AppError::from)
-}
-
-fn write_control_plane_store_to_path(path: &Path, store: &MockControlPlaneStore) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let content = serde_json::to_string_pretty(store)?;
-    let mut file = open_secret_file(path)?;
-    file.write_all(content.as_bytes())?;
-    file.flush()?;
-    Ok(())
 }
 
 fn extract_bearer_token(value: &str) -> Option<&str> {
@@ -429,13 +280,14 @@ pub fn get_localhost_api_status(state: &Arc<Mutex<AppState>>) -> Result<Localhos
 
     let token = read_localhost_api_token_from_path(&localhost_api_token_path(&data_dir))?;
     let port = runtime_port.unwrap_or(config.localhost_api_port);
+    let host = effective_api_host(config.localhost_api_host.as_deref());
 
     Ok(LocalhostApiStatusPayload {
         enabled: config.localhost_api_enabled,
         running: runtime_running,
-        host: LOCALHOST_API_HOST.to_string(),
+        host: host.clone(),
         port,
-        base_url: format!("http://{LOCALHOST_API_HOST}:{port}"),
+        base_url: format!("http://{host}:{port}"),
         token_configured: token.is_some(),
         token_preview: token.as_deref().map(mask_localhost_api_token),
         last_error,
@@ -445,11 +297,6 @@ pub fn get_localhost_api_status(state: &Arc<Mutex<AppState>>) -> Result<Localhos
         platform: runtime_platform().to_string(),
         device_id: node_status.device_id,
         device_name: node_status.device_name,
-        node_protocol_version: node_status.protocol_version,
-        control_plane_enabled: node_status.control_plane_enabled,
-        control_plane_endpoint: node_status.control_plane_endpoint,
-        control_plane_configured: node_status.control_plane_configured,
-        registration_state: node_status.registration_state,
     })
 }
 
@@ -480,9 +327,10 @@ fn record_runtime_error(state: &Arc<Mutex<AppState>>, message: impl Into<String>
 }
 
 pub fn sync_localhost_api_runtime(app: &AppHandle, state: &Arc<Mutex<AppState>>) -> Result<()> {
-    let (enabled, port, should_restart, shutdown_tx) = {
+    let (enabled, host, port, should_restart, shutdown_tx) = {
         let mut state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
         let enabled = state.config.localhost_api_enabled;
+        let host = effective_api_host(state.config.localhost_api_host.as_deref());
         let port = if state.config.localhost_api_port == 0 {
             DEFAULT_LOCALHOST_API_PORT
         } else {
@@ -507,7 +355,7 @@ pub fn sync_localhost_api_runtime(app: &AppHandle, state: &Arc<Mutex<AppState>>)
         }
 
         let shutdown_tx = stop_runtime_locked(&mut state.localhost_api_runtime);
-        (enabled, port, true, shutdown_tx)
+        (enabled, host, port, true, shutdown_tx)
     };
 
     if let Some(shutdown_tx) = shutdown_tx {
@@ -520,7 +368,7 @@ pub fn sync_localhost_api_runtime(app: &AppHandle, state: &Arc<Mutex<AppState>>)
 
     let token = ensure_localhost_api_token(state)?;
 
-    let std_listener = StdTcpListener::bind((LOCALHOST_API_HOST, port)).map_err(|e| {
+    let std_listener = StdTcpListener::bind((host.as_str(), port)).map_err(|e| {
         let message = format!("启动本地 API 失败: {e}");
         record_runtime_error(state, &message);
         AppError::Config(message)
@@ -532,15 +380,6 @@ pub fn sync_localhost_api_runtime(app: &AppHandle, state: &Arc<Mutex<AppState>>)
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     {
         let mut state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-        let store_path = mock_control_plane_store_path(&state.data_dir);
-        state.localhost_api_runtime.control_plane_store =
-            match read_control_plane_store_from_path(&store_path) {
-                Ok(store) => store,
-                Err(error) => {
-                    log::warn!("加载控制面持久化状态失败，已回退为空状态: {error}");
-                    MockControlPlaneStore::default()
-                }
-            };
         state.localhost_api_runtime.running = true;
         state.localhost_api_runtime.bound_port = Some(port);
         state.localhost_api_runtime.last_error = None;
@@ -562,7 +401,7 @@ pub fn sync_localhost_api_runtime(app: &AppHandle, state: &Arc<Mutex<AppState>>)
     });
 
     log::info!(
-        "本地 API 已监听在 http://{LOCALHOST_API_HOST}:{port}，token={}",
+        "本地 API 已监听在 http://{host}:{port}，token={}",
         mask_localhost_api_token(&token)
     );
     Ok(())
@@ -699,6 +538,25 @@ async fn read_request(stream: &mut TcpStream) -> Result<Option<ParsedRequest>> {
     }))
 }
 
+fn handle_device_info(state: &Arc<Mutex<AppState>>) -> Result<HttpResponse> {
+    let (is_recording, is_paused, config_host, config_port) = {
+        let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+        (s.is_recording, s.is_paused, s.config.localhost_api_host.clone(), s.config.localhost_api_port)
+    };
+    let node_status = crate::node_gateway::get_node_gateway_status(state)?;
+    let host = effective_api_host(config_host.as_deref());
+    Ok(HttpResponse::json(200, &serde_json::json!({
+        "deviceId": node_status.device_id,
+        "deviceName": node_status.device_name,
+        "platform": runtime_platform(),
+        "appVersion": env!("CARGO_PKG_VERSION"),
+        "protocolVersion": node_status.protocol_version,
+        "recording": is_recording,
+        "paused": is_paused,
+        "apiEndpoint": format!("http://{host}:{config_port}"),
+    })))
+}
+
 async fn route_request(
     request: ParsedRequest,
     app: &AppHandle,
@@ -717,87 +575,6 @@ async fn route_request(
     }
 
     let result = match (request.method.as_str(), request.path.as_str()) {
-        ("GET", "/v1/node/status") => {
-            get_localhost_api_status(state).map(|payload| HttpResponse::json(200, &payload))
-        }
-        ("POST", "/v1/node/register") => parse_json_body::<NodeRegisterRequest>(&request)
-            .and_then(|body| {
-                if body.protocol_version.trim().is_empty() {
-                    return Err(AppError::Config("protocolVersion 不能为空".to_string()));
-                }
-                if body.device_id.trim().is_empty() {
-                    return Err(AppError::Config("deviceId 不能为空".to_string()));
-                }
-
-                let device_name = if body.device_name.trim().is_empty() {
-                    "Work Review Device".to_string()
-                } else {
-                    body.device_name.trim().to_string()
-                };
-
-                let mut guard = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-                let result = guard
-                    .localhost_api_runtime
-                    .control_plane_store
-                    .register_or_reuse_device(body.device_id.trim(), &device_name);
-                let store_path = mock_control_plane_store_path(&guard.data_dir);
-                write_control_plane_store_to_path(
-                    &store_path,
-                    &guard.localhost_api_runtime.control_plane_store,
-                )?;
-                Ok(HttpResponse::json(
-                    200,
-                    &serde_json::json!({
-                        "installationId": result.installation_id,
-                        "deviceToken": result.device_token,
-                        "heartbeatIntervalSecs": result.heartbeat_interval_secs,
-                    }),
-                ))
-            }),
-        ("POST", "/v1/node/heartbeat") => parse_json_body::<NodeHeartbeatRequest>(&request)
-            .and_then(|body| {
-                if body.protocol_version.trim().is_empty() {
-                    return Err(AppError::Config("protocolVersion 不能为空".to_string()));
-                }
-                if body.installation_id.trim().is_empty() {
-                    return Err(AppError::Config("installationId 不能为空".to_string()));
-                }
-                if body.device_id.trim().is_empty() {
-                    return Err(AppError::Config("deviceId 不能为空".to_string()));
-                }
-
-                let token = request
-                    .headers
-                    .get("authorization")
-                    .and_then(|value| extract_bearer_token(value))
-                    .ok_or_else(|| AppError::Config("缺少设备 token".to_string()))?;
-
-                let mut guard = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-                match guard
-                    .localhost_api_runtime
-                    .control_plane_store
-                    .validate_and_record_heartbeat(
-                        token,
-                        body.installation_id.trim(),
-                        body.device_id.trim(),
-                    ) {
-                    Ok(heartbeat_interval_secs) => {
-                        let store_path = mock_control_plane_store_path(&guard.data_dir);
-                        write_control_plane_store_to_path(
-                            &store_path,
-                            &guard.localhost_api_runtime.control_plane_store,
-                        )?;
-                        Ok(HttpResponse::json(
-                            200,
-                            &serde_json::json!({
-                                "heartbeatIntervalSecs": heartbeat_interval_secs,
-                            }),
-                        ))
-                    }
-                    Err(ControlPlaneStoreError::Unauthorized(message)) => Ok(HttpResponse::error(401, message)),
-                    Err(ControlPlaneStoreError::BadRequest(message)) => Ok(HttpResponse::error(400, message)),
-                }
-            }),
         ("POST", "/v1/reports/generate") => {
             match parse_json_body::<GenerateReportRequest>(&request) {
                 Ok(body) => {
@@ -848,7 +625,59 @@ async fn route_request(
                 .map(|report| HttpResponse::json(200, &report))
             }
         }
-        ("GET", "/health") => Ok(HttpResponse::text(200, "ok")),
+        ("GET", "/v1/reports") => {
+            let limit: usize = request
+                .query
+                .get("limit")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(30)
+                .min(100);
+            let guard = state.lock().map_err(|e| AppError::Unknown(e.to_string()));
+            match guard {
+                Ok(s) => s.database.list_report_dates(limit).map(|dates| {
+                    HttpResponse::json(200, &serde_json::json!({ "dates": dates }))
+                }),
+                Err(e) => Err(e),
+            }
+        }
+        ("GET", "/v1/device") => {
+            handle_device_info(state)
+        }
+        ("GET", "/health") => {
+            let guard = state.lock().map_err(|e| AppError::Unknown(e.to_string()));
+            match guard {
+                Ok(s) => Ok(HttpResponse::json(200, &serde_json::json!({
+                    "status": "ok",
+                    "recording": s.is_recording,
+                    "paused": s.is_paused,
+                    "version": env!("CARGO_PKG_VERSION"),
+                }))),
+                Err(e) => Err(e),
+            }
+        }
+        ("POST", "/feishu/event") => {
+            let (config, data_dir) = {
+                let guard = state.lock().map_err(|e| AppError::Unknown(e.to_string()));
+                match guard {
+                    Ok(s) => (s.config.clone(), s.data_dir.clone()),
+                    Err(e) => return HttpResponse::error(500, e.to_string()),
+                }
+            };
+            if !config.feishu_bot_enabled {
+                return HttpResponse::error(404, "飞书 Bot 未启用");
+            }
+            let body_str = String::from_utf8_lossy(&request.body);
+            let resp = crate::feishu_bot::handle_feishu_webhook(
+                &body_str, &config, &data_dir,
+            )
+            .await;
+            Ok(HttpResponse {
+                status: resp.status,
+                reason: reason_phrase(resp.status),
+                content_type: "application/json; charset=utf-8",
+                body: resp.body.into_bytes(),
+            })
+        }
         _ => Ok(HttpResponse::error(404, "未找到本地 API 路径")),
     };
 
@@ -868,11 +697,11 @@ fn parse_json_body<T: for<'de> Deserialize<'de>>(request: &ParsedRequest) -> Res
 }
 
 fn request_auth_mode(method: &str, path: &str) -> RequestAuthMode {
-    if method == "POST" && path == "/v1/node/register" {
+    if method == "GET" && path == "/health" {
         return RequestAuthMode::None;
     }
-    if method == "POST" && path == "/v1/node/heartbeat" {
-        return RequestAuthMode::DeviceToken;
+    if method == "POST" && path == "/feishu/event" {
+        return RequestAuthMode::None;
     }
     RequestAuthMode::LocalApiToken
 }
@@ -880,17 +709,6 @@ fn request_auth_mode(method: &str, path: &str) -> RequestAuthMode {
 fn authorize_request(request: &ParsedRequest, state: &Arc<Mutex<AppState>>) -> Result<()> {
     match request_auth_mode(&request.method, &request.path) {
         RequestAuthMode::None => return Ok(()),
-        RequestAuthMode::DeviceToken => {
-            let has_device_token = request
-                .headers
-                .get("authorization")
-                .and_then(|value| extract_bearer_token(value))
-                .is_some();
-            if has_device_token {
-                return Ok(());
-            }
-            return Err(AppError::Config("缺少设备 token".to_string()));
-        }
         RequestAuthMode::LocalApiToken => {}
     }
 
@@ -902,10 +720,13 @@ fn authorize_request(request: &ParsedRequest, state: &Arc<Mutex<AppState>>) -> R
         return Err(AppError::Config("缺少或无效的本地 API token".to_string()));
     };
 
-    let provided = request
+    let from_header = request
         .headers
         .get("authorization")
         .and_then(|value| extract_bearer_token(value));
+    let from_query = request.query.get("token").map(|s| s.as_str());
+
+    let provided = from_header.or(from_query);
 
     if provided == Some(expected_token.as_str()) {
         Ok(())
@@ -916,11 +737,7 @@ fn authorize_request(request: &ParsedRequest, state: &Arc<Mutex<AppState>>) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        extract_bearer_token, mask_localhost_api_token, read_control_plane_store_from_path,
-        request_auth_mode, write_control_plane_store_to_path, MockControlPlaneStore,
-        RequestAuthMode,
-    };
+    use super::{extract_bearer_token, mask_localhost_api_token, request_auth_mode, RequestAuthMode};
 
     #[test]
     fn bearer_token解析应忽略前后空白() {
@@ -938,100 +755,17 @@ mod tests {
     }
 
     #[test]
-    fn 控制面注册应复用同一device_id的安装记录() {
-        let mut store = MockControlPlaneStore::default();
-        let first = store.register_or_reuse_device("wr-device-a", "机器A");
-        let second = store.register_or_reuse_device("wr-device-a", "机器A-新名");
-
-        assert_eq!(first.installation_id, second.installation_id);
-        assert_eq!(first.device_token, second.device_token);
-        assert_eq!(second.heartbeat_interval_secs, Some(300));
-    }
-
-    #[test]
-    fn 控制面心跳鉴权应拒绝无效token() {
-        let mut store = MockControlPlaneStore::default();
-        let registration = store.register_or_reuse_device("wr-device-a", "机器A");
-
-        let result = store.validate_and_record_heartbeat(
-            "invalid-token",
-            &registration.installation_id,
-            "wr-device-a",
-        );
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn 控制面心跳鉴权应接受有效token与匹配安装信息() {
-        let mut store = MockControlPlaneStore::default();
-        let registration = store.register_or_reuse_device("wr-device-a", "机器A");
-
-        let result = store.validate_and_record_heartbeat(
-            &registration.device_token,
-            &registration.installation_id,
-            "wr-device-a",
-        );
-
-        assert_eq!(result.expect("心跳应通过"), Some(300));
-    }
-
-    #[test]
-    fn 控制面完整链路应支持注册后立即心跳() {
-        let mut store = MockControlPlaneStore::default();
-        let registration = store.register_or_reuse_device("wr-device-a", "机器A");
-        let heartbeat = store.validate_and_record_heartbeat(
-            &registration.device_token,
-            &registration.installation_id,
-            "wr-device-a",
-        );
-
-        assert_eq!(heartbeat.expect("注册后心跳应成功"), Some(300));
-    }
-
-    #[test]
-    fn 控制面状态应支持持久化恢复() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "work-review-control-plane-store-test-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let store_path = temp_dir.join("store.json");
-
-        let mut store = MockControlPlaneStore::default();
-        let registration = store.register_or_reuse_device("wr-device-a", "机器A");
-        write_control_plane_store_to_path(&store_path, &store).expect("写入持久化状态失败");
-
-        let loaded = read_control_plane_store_from_path(&store_path).expect("读取持久化状态失败");
-        let recovered = loaded
-            .installations
-            .get(&registration.installation_id)
-            .expect("应恢复已注册安装记录");
-        assert_eq!(recovered.device_id, "wr-device-a");
-        assert_eq!(recovered.device_token, registration.device_token);
-
-        let _ = std::fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
-    fn 鉴权模式应将注册路由标记为免鉴权() {
+    fn 鉴权模式应将健康检查标记为免鉴权() {
         assert_eq!(
-            request_auth_mode("POST", "/v1/node/register"),
+            request_auth_mode("GET", "/health"),
             RequestAuthMode::None
-        );
-    }
-
-    #[test]
-    fn 鉴权模式应将心跳路由标记为设备token鉴权() {
-        assert_eq!(
-            request_auth_mode("POST", "/v1/node/heartbeat"),
-            RequestAuthMode::DeviceToken
         );
     }
 
     #[test]
     fn 鉴权模式应将其余路由标记为本地api_token鉴权() {
         assert_eq!(
-            request_auth_mode("GET", "/v1/node/status"),
+            request_auth_mode("GET", "/v1/device"),
             RequestAuthMode::LocalApiToken
         );
     }

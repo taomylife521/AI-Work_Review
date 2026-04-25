@@ -27,7 +27,7 @@ rusqlite = { version = "0.30", features = ["bundled"] }
 base64 = "0.21"
 
 # HTTP 客户端
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["json", "socks"] }
 
 # 日期时间
 chrono = { version = "0.4", features = ["serde"] }

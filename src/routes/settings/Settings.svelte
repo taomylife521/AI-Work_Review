@@ -83,21 +83,37 @@
       if (!Number.isInteger(config.localhost_api_port) || config.localhost_api_port <= 0) {
         config.localhost_api_port = 47831;
       }
+      if (typeof config.localhost_api_host !== 'string' && config.localhost_api_host !== null) {
+        config.localhost_api_host = null;
+      }
+      if (typeof config.telegram_bot_enabled !== 'boolean') {
+        config.telegram_bot_enabled = false;
+      }
+      if (typeof config.telegram_bot_token !== 'string' && config.telegram_bot_token !== null) {
+        config.telegram_bot_token = null;
+      }
+      if (typeof config.telegram_bot_proxy !== 'string' && config.telegram_bot_proxy !== null) {
+        config.telegram_bot_proxy = null;
+      }
+      if (!Array.isArray(config.node_devices)) {
+        config.node_devices = [];
+      }
+      if (typeof config.feishu_bot_enabled !== 'boolean') {
+        config.feishu_bot_enabled = false;
+      }
+      if (typeof config.feishu_app_id !== 'string' && config.feishu_app_id !== null) {
+        config.feishu_app_id = null;
+      }
+      if (typeof config.feishu_app_secret !== 'string' && config.feishu_app_secret !== null) {
+        config.feishu_app_secret = null;
+      }
+      if (typeof config.feishu_verification_token !== 'string' && config.feishu_verification_token !== null) {
+        config.feishu_verification_token = null;
+      }
       if (!config.node_gateway || typeof config.node_gateway !== 'object') {
         config.node_gateway = {
-          control_plane_enabled: false,
-          control_plane_endpoint: null,
           device_name: null,
         };
-      }
-      if (typeof config.node_gateway.control_plane_enabled !== 'boolean') {
-        config.node_gateway.control_plane_enabled = false;
-      }
-      if (
-        typeof config.node_gateway.control_plane_endpoint !== 'string' &&
-        config.node_gateway.control_plane_endpoint !== null
-      ) {
-        config.node_gateway.control_plane_endpoint = null;
       }
       if (
         typeof config.node_gateway.device_name !== 'string' &&

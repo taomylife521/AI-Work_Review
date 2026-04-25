@@ -1,0 +1,15 @@
+{
+  "local_api": {
+    "base_url": "http://127.0.0.1:47831",
+    "token": "wr-local-替换为你的token"
+  },
+  "telegram": {
+    "bot_token": "替换为你的TG Bot Token (从 @BotFather 获取)"
+  },
+  "feishu": {
+    "app_id": "替换为飞书应用 App ID",
+    "app_secret": "替换为飞书应用 App Secret",
+    "verification_token": "替换为事件订阅 Verification Token",
+    "encrypt_key": ""
+  }
+}

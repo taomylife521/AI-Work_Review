@@ -1601,6 +1601,21 @@ impl Database {
         }
     }
 
+    /// 列出所有可用日报日期
+    pub fn list_report_dates(&self, limit: usize) -> Result<Vec<String>> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT date FROM daily_reports_localized ORDER BY date DESC LIMIT ?1",
+        )?;
+        let dates: Vec<String> = stmt
+            .query_map(params![limit], |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(dates)
+    }
+
     /// 获取指定日期的所有截图路径
     pub fn get_screenshots(&self, date: &str) -> Result<Vec<String>> {
         let conn = self.conn.lock().map_err(|e| {
