@@ -89,9 +89,11 @@ jobs:
             rm -f /tmp/codesign.p12
             exit 0
           fi
-          security set-key-partition-list -S apple-tool:,apple: -s -k actions ci-keychain
-          security list-keychains -d user -s ci-keychain
+          security set-key-partition-list -S apple-tool:,apple:,codesign -s -k actions ci-keychain
+          default_keychain="$(security default-keychain -d user | sed 's/["]//g')"
+          security list-keychains -d user -s ci-keychain "$default_keychain"
           rm -f /tmp/codesign.p12
+          echo "MACOS_CODESIGN_AVAILABLE=1" >> "$GITHUB_ENV"
           echo "Code signing certificate imported"
 
       - name: Install frontend dependencies
