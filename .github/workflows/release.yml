@@ -20,7 +20,7 @@ jobs:
             args: "--target x86_64-apple-darwin"
             target: x86_64-apple-darwin
           - platform: ubuntu-22.04
-            args: "--target x86_64-unknown-linux-gnu"
+            args: ""
             target: x86_64-unknown-linux-gnu
           - platform: windows-latest
             args: ""
@@ -71,14 +71,6 @@ jobs:
             rm -f /tmp/codesign.p12
             exit 0
           fi
-          file_type="$(file -b /tmp/codesign.p12)"
-          if echo "$file_type" | grep -qi "data"; then
-            :
-          elif echo "$file_type" | grep -qi "text"; then
-            echo "::warning::Decoded P12 appears to be text, not a binary certificate. Check MACOS_CODESIGN_P12 secret encoding."
-            rm -f /tmp/codesign.p12
-            exit 0
-          fi
           security create-keychain -p actions ci-keychain 2>/dev/null || true
           security unlock-keychain -p actions ci-keychain
           if ! security import /tmp/codesign.p12 \
@@ -102,7 +94,7 @@ jobs:
       - name: Run frontend tests
         run: node --test
 
-      - name: Build frontend assets for Rust tests
+      - name: Build frontend assets
         run: npm run build
 
       - name: Run Rust tests
@@ -114,11 +106,31 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build -- ${{ matrix.args }}
 
+      - name: List build output
+        if: always()
+        shell: bash
+        run: |
+          echo "=== src-tauri/target exists? ==="
+          if [[ -d "src-tauri/target" ]]; then
+            echo "Yes"
+            find src-tauri/target -maxdepth 5 -type f \( -name "*.app" -o -name "*.dmg" -o -name "*.exe" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.tar.gz" -o -name "*.sig" \) 2>/dev/null || true
+          else
+            echo "No - build may have failed"
+            if [[ -d "src-tauri" ]]; then
+              ls -la src-tauri/ 2>/dev/null || true
+            fi
+          fi
+
       - name: Re-sign macOS app with stable identity
         if: startsWith(matrix.platform, 'macos')
         shell: bash
         run: |
           set -euo pipefail
+          if [[ ! -d "src-tauri/target" ]]; then
+            echo "No build output, skipping re-sign"
+            exit 0
+          fi
+
           CERT_NAME="WorkReview Self-Signed"
           if ! security find-certificate -c "$CERT_NAME" ci-keychain &>/dev/null; then
             echo "No signing certificate found, skipping re-sign"
@@ -144,6 +156,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ ! -d "src-tauri/target" ]]; then
+            echo "No build output, skipping rename"
+            exit 0
+          fi
 
           normalize_name() {
             local filename="$1"
@@ -183,6 +199,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ ! -d "src-tauri/target" ]]; then
+            echo "No build output, skipping rename"
+            exit 0
+          fi
 
           normalize_name() {
             local filename="$1"
@@ -208,6 +228,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ ! -d "src-tauri/target" ]]; then
+            echo "No build output, skipping rename"
+            exit 0
+          fi
 
           normalize_name() {
             local filename="$1"
@@ -251,6 +275,8 @@ jobs:
             match="$(find src-tauri/target -type f -path "$pattern" | sort | head -n 1 || true)"
             if [[ -z "$match" ]]; then
               echo "缺少 ${label}: ${pattern}" >&2
+              echo "Available bundle files:" >&2
+              find src-tauri/target -type f -path "*/bundle/*" 2>/dev/null | head -20 >&2 || true
               exit 1
             fi
             echo "${label}: ${match}"
