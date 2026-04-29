@@ -4,6 +4,7 @@
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
   import { open } from '@tauri-apps/plugin-shell';
   import { marked } from 'marked';
+  import DOMPurify from 'dompurify';
   import { showToast } from '../../lib/stores/toast.js';
   import { cache } from '../../lib/stores/cache.js';
   import { formatLocalizedDate, formatLocalizedTime, locale, t } from '$lib/i18n/index.js';
@@ -44,15 +45,6 @@
       'cloud': t('report.modeNames.cloud')
     };
     return modeNames[normalizedMode] || mode || t('report.modeNames.unknown');
-  }
-
-  function getConfigMetaSummary(meta) {
-    return [
-      getAiModeName(meta?.configMode),
-      meta?.configMode === 'summary' ? meta?.configModelName : null,
-    ]
-      .filter(Boolean)
-      .join(' · ');
   }
 
   function getFallbackReasonText(meta) {
@@ -224,7 +216,8 @@
   }
 
   function renderMarkdown(content) {
-    return marked(content);
+    const rawHtml = marked(content);
+    return DOMPurify.sanitize(rawHtml);
   }
 
   async function handleReportLinkClick(event) {
@@ -294,23 +287,14 @@
         <div class="report-hero-meta">
           <div class="report-hero-date-row">
             <span class="report-hero-date">{formatReportDate(selectedDate)}</span>
+            {#if config || report}
+              <span class="report-hero-mode-chip">{getAiModeName(reportMeta.reportMode)}</span>
+            {/if}
           </div>
           {#if config || report}
-            <div class="report-hero-status-row">
-              <p class="report-hero-summary-line">
-                <span class="report-hero-summary-label">{t('report.currentReportLabel')}</span>
-                <span class="report-hero-summary-divider">·</span>
-                <span class="report-hero-summary-value">{getAiModeName(reportMeta.reportMode)}</span>
-              </p>
-              {#if reportMeta.showUsageMismatchNotice}
-                <p class="report-hero-mode-note">{t('report.aiNotAppliedPrefix')}{getFallbackReasonText(reportMeta)}</p>
-              {/if}
-              {#if reportMeta.showConfigMeta}
-                <p class="report-hero-config-note">
-                  {t('report.currentConfigLabel')}：{getConfigMetaSummary(reportMeta)}
-                </p>
-              {/if}
-            </div>
+            {#if reportMeta.showUsageMismatchNotice}
+              <p class="report-hero-mode-note">{t('report.aiNotAppliedPrefix')}{getFallbackReasonText(reportMeta)}</p>
+            {/if}
           {/if}
         </div>
       </div>
@@ -338,7 +322,6 @@
           />
         {/key}
       </div>
-      <span class="page-help-text">{t('report.switchDateHint')}</span>
       <div class="flex flex-wrap justify-end gap-2">
         {#if report}
           <button
@@ -376,29 +359,17 @@
   </div>
 
   <div class="report-editorial-stack">
-  {#if config}
+  {#if config && config.ai_mode === 'summary'}
     <div class="page-card report-sheet report-sheet-controls">
-      <h3 class="settings-card-title">{t('report.generationOptions')}</h3>
-      {#if config.ai_mode === 'summary'}
-        <div class="space-y-3">
-          <div>
-            <label for="daily-report-custom-prompt" class="settings-label mb-1.5">{t('report.promptLabel')}</label>
-            <textarea
-              id="daily-report-custom-prompt"
-              bind:value={config.daily_report_custom_prompt}
-              on:change={persistReportPrompt}
-              rows="4"
-              class="control-input resize-y min-h-[110px]"
-              placeholder={t('report.promptPlaceholder')}
-            ></textarea>
-          </div>
-          <p class="settings-note">
-            {t('report.promptHint')}
-          </p>
-        </div>
-      {:else}
-        <p class="settings-empty">{t('report.templateModeHint')}</p>
-      {/if}
+      <label for="daily-report-custom-prompt" class="settings-label mb-1.5">{t('report.promptLabel')}</label>
+      <textarea
+        id="daily-report-custom-prompt"
+        bind:value={config.daily_report_custom_prompt}
+        on:change={persistReportPrompt}
+        rows="3"
+        class="control-input resize-y min-h-[80px]"
+        placeholder={t('report.promptPlaceholder')}
+      ></textarea>
     </div>
   {/if}
 

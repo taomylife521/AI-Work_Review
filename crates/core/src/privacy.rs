@@ -76,17 +76,13 @@ impl PrivacyFilter {
     pub fn check_url_privacy(&self, url: Option<&str>) -> PrivacyAction {
         if let Some(url) = url {
             if !url.is_empty() {
-                // 提取当前 URL 的域名
-                let domain = Self::extract_domain(url);
+                let domain = PrivacyConfig::extract_domain(url);
 
-                // 检查域名黑名单
                 for excluded in &self.config.excluded_domains {
-                    // 从黑名单项也提取域名（用户可能输入完整 URL）
-                    let excluded_domain = Self::extract_domain(excluded);
+                    let excluded_domain = PrivacyConfig::extract_domain(excluded);
 
                     if !domain.is_empty() && !excluded_domain.is_empty() {
-                        // 域名匹配（包含关系）
-                        if domain.contains(&excluded_domain) || excluded_domain.contains(&domain) {
+                        if PrivacyConfig::domain_matches(&domain, &excluded_domain) {
                             log::debug!("URL 域名 {domain} 匹配黑名单 {excluded_domain}, 跳过记录");
                             return PrivacyAction::Skip;
                         }
@@ -95,20 +91,6 @@ impl PrivacyFilter {
             }
         }
         PrivacyAction::Record
-    }
-
-    /// 从 URL 中提取域名
-    fn extract_domain(url: &str) -> String {
-        // 移除协议前缀
-        let without_protocol = url
-            .trim_start_matches("https://")
-            .trim_start_matches("http://");
-        // 取第一个 / 之前的部分作为域名
-        without_protocol
-            .split('/')
-            .next()
-            .unwrap_or("")
-            .to_lowercase()
     }
 
     /// 综合检查：应用 + 窗口标题 + URL
@@ -141,10 +123,6 @@ impl PrivacyFilter {
 
     /// 过滤OCR文本中的敏感信息
     pub fn filter_text(&self, text: &str) -> String {
-        if !self.config.filter_sensitive {
-            return text.to_string();
-        }
-
         let mut filtered = text.to_string();
 
         for pattern in &self.sensitive_patterns {

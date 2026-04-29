@@ -2,6 +2,10 @@ use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+fn default_true() -> bool {
+    true
+}
+
 /// AI 提供商类型
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -293,11 +297,13 @@ pub struct PrivacyConfig {
     #[serde(default)]
     pub app_rules: Vec<AppPrivacyRule>,
     /// 排除的窗口标题关键词（触发时使用 Anonymized 级别）
+    #[serde(default)]
     pub excluded_keywords: Vec<String>,
     /// URL 域名黑名单（匹配时完全忽略，不记录）
     #[serde(default)]
     pub excluded_domains: Vec<String>,
-    /// 是否启用OCR敏感词过滤
+    /// 已弃用：敏感词过滤始终启用，此字段仅保留反序列化兼容
+    #[serde(default = "default_true")]
     pub filter_sensitive: bool,
 
     // 兼容旧版
@@ -331,8 +337,8 @@ impl Default for PrivacyConfig {
                 "支付".to_string(),
             ],
             excluded_domains: vec![], // 默认无域名黑名单
-            filter_sensitive: true,
-            excluded_apps: vec![], // 旧版兼容
+            filter_sensitive: true, // 已弃用，保留兼容
+            excluded_apps: vec![],
         }
     }
 }
@@ -371,6 +377,75 @@ impl PrivacyConfig {
         self.excluded_keywords
             .iter()
             .any(|k| title_lower.contains(&k.to_lowercase()))
+    }
+
+    /// 从 URL 中提取域名
+    pub fn extract_domain(url: &str) -> String {
+        let without_protocol = url
+            .trim_start_matches("https://")
+            .trim_start_matches("http://");
+        without_protocol
+            .split('/')
+            .next()
+            .unwrap_or("")
+            .to_lowercase()
+    }
+
+    /// 后缀匹配域名：domain == pattern 或 domain 以 .pattern 结尾
+    pub fn domain_matches(domain: &str, pattern: &str) -> bool {
+        if domain == pattern {
+            return true;
+        }
+        domain.ends_with(&format!(".{pattern}"))
+    }
+
+    /// 迁移旧版 excluded_apps 到 app_rules
+    pub fn migrate_legacy_excluded_apps(&mut self) -> bool {
+        if self.excluded_apps.is_empty() {
+            return false;
+        }
+        let existing_names: std::collections::HashSet<String> = self
+            .app_rules
+            .iter()
+            .map(|r| r.app_name.to_lowercase())
+            .collect();
+        let mut migrated = false;
+        for app in self.excluded_apps.drain(..) {
+            if !existing_names.contains(&app.to_lowercase()) {
+                self.app_rules.push(AppPrivacyRule {
+                    app_name: app,
+                    level: PrivacyLevel::Ignored,
+                });
+                migrated = true;
+            }
+        }
+        migrated
+    }
+
+    /// 收集所有应忽略的应用名（小写），包含 app_rules 和遗留 excluded_apps
+    pub fn collect_ignored_app_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .app_rules
+            .iter()
+            .filter(|rule| rule.level == PrivacyLevel::Ignored)
+            .map(|rule| rule.app_name.to_lowercase())
+            .collect();
+        for app in &self.excluded_apps {
+            let lower = app.to_lowercase();
+            if !names.contains(&lower) {
+                names.push(lower);
+            }
+        }
+        names
+    }
+
+    /// 收集所有域名黑名单（已提取域名、已去空）
+    pub fn collect_excluded_domains(&self) -> Vec<String> {
+        self.excluded_domains
+            .iter()
+            .map(|d| Self::extract_domain(d))
+            .filter(|d| !d.is_empty())
+            .collect()
     }
 }
 
@@ -496,6 +571,7 @@ pub struct AppConfig {
     #[serde(default = "ModelConfig::default_vision")]
     pub vision_model: ModelConfig,
     /// 隐私配置
+    #[serde(default)]
     pub privacy: PrivacyConfig,
     /// 应用分类覆盖规则
     #[serde(default)]
@@ -720,8 +796,18 @@ impl Default for AppConfig {
             work_start_minute: 0,
             work_end_minute: 0,
             work_time_segments: vec![
-                WorkTimeSegment { start_hour: 9, start_minute: 0, end_hour: 12, end_minute: 0 },
-                WorkTimeSegment { start_hour: 13, start_minute: 0, end_hour: 18, end_minute: 0 },
+                WorkTimeSegment {
+                    start_hour: 9,
+                    start_minute: 0,
+                    end_hour: 12,
+                    end_minute: 0,
+                },
+                WorkTimeSegment {
+                    start_hour: 13,
+                    start_minute: 0,
+                    end_hour: 18,
+                    end_minute: 0,
+                },
             ],
             // 旧版兼容字段
             ai_provider: AiProviderConfig::default(),
@@ -772,8 +858,7 @@ impl AppConfig {
         self.daily_report_export_dir =
             normalize_optional_string(self.daily_report_export_dir.take());
         self.localhost_api_port = normalize_localhost_api_port(self.localhost_api_port);
-        self.localhost_api_host =
-            normalize_optional_string(self.localhost_api_host.take());
+        self.localhost_api_host = normalize_optional_string(self.localhost_api_host.take());
         self.node_gateway.device_name =
             normalize_optional_string(self.node_gateway.device_name.take());
         self.sync_text_model_profiles();

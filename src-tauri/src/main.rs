@@ -354,6 +354,7 @@ pub struct AppState {
     pub is_paused: bool,
     pub avatar_state: avatar_engine::AvatarStatePayload,
     pub avatar_generating_report: bool,
+    pub generating_report: bool,
     pub localhost_api_runtime: localhost_api::LocalhostApiRuntime,
     pub telegram_bot_runtime: telegram_bot::TelegramBotRuntime,
     /// avatar 循环缓存的活动窗口（时间戳 + 窗口信息），供 screenshot 循环复用
@@ -1383,8 +1384,12 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
             let sig = rules.len() as u64
                 | rules.last().map_or(0u64, |r| {
                     let mut h: u64 = 0;
-                    for b in r.app_name.as_bytes() { h = h.wrapping_add(*b as u64); }
-                    for b in r.category.as_bytes() { h = h.wrapping_mul(31).wrapping_add(*b as u64); }
+                    for b in r.app_name.as_bytes() {
+                        h = h.wrapping_add(*b as u64);
+                    }
+                    for b in r.category.as_bytes() {
+                        h = h.wrapping_mul(31).wrapping_add(*b as u64);
+                    }
                     h
                 });
             if sig != cached_rules_signature {
@@ -2814,9 +2819,22 @@ async fn main() {
         AppConfig::default()
     });
 
+    // 迁移旧版 excluded_apps → app_rules
+    if config.privacy.migrate_legacy_excluded_apps() {
+        log::info!("已迁移旧版 excluded_apps 到 app_rules");
+        if let Err(e) = config.save(&config_path) {
+            log::warn!("保存迁移后的配置失败: {e}");
+        }
+    }
+
     // 初始化数据库
     let db_path = data_dir.join("workreview.db");
     let database = Database::new(&db_path).expect("初始化数据库失败");
+
+    // 首次启动或升级后重建 FTS 索引，确保历史数据可被全文检索
+    if let Err(e) = database.rebuild_fts_index() {
+        log::warn!("FTS 索引重建失败（不影响核心功能）: {e}");
+    }
 
     // 初始化隐私过滤器
     let privacy_filter = PrivacyFilter::from_config(&config.privacy);
@@ -2898,6 +2916,7 @@ async fn main() {
             &initial_avatar_persona,
         ),
         avatar_generating_report: false,
+        generating_report: false,
         localhost_api_runtime: localhost_api::LocalhostApiRuntime::default(),
         telegram_bot_runtime: telegram_bot::TelegramBotRuntime::default(),
         cached_active_window: None,

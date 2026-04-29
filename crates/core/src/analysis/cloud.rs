@@ -1,6 +1,6 @@
 use crate::analysis::{
-    append_custom_prompt_for_locale, generate_activity_timeline,
-    generate_stats_summary_for_locale, Analyzer, AppLocale, GeneratedReport,
+    append_custom_prompt_for_locale, generate_activity_timeline, generate_stats_summary_for_locale,
+    Analyzer, AppLocale, GeneratedReport,
 };
 use crate::database::{Activity, DailyStats};
 use crate::error::{AppError, Result};
@@ -90,6 +90,7 @@ impl CloudAnalyzer {
                     }
                 ],
                 "max_tokens": 100,
+                "stream": false,
             }))
             .send()
             .await?;
@@ -155,6 +156,7 @@ impl CloudAnalyzer {
                 ],
                 "max_tokens": 2000,
                 "temperature": 0.8,
+                "stream": false,
             }))
             .send()
             .await?;

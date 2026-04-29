@@ -209,31 +209,21 @@
 <!-- 截图与保留 -->
 <div class="settings-card mb-5" data-locale={currentLocale}>
   <h3 class="settings-card-title">{t('settingsStorage.screenshotCardTitle')}</h3>
-  <p class="settings-card-desc">{t('settingsStorage.screenshotCardDesc')}</p>
   
   <div class="settings-section">
-    <div class="settings-block">
-      <div class="flex items-center justify-between gap-4">
-        <div>
-          <p class="settings-text">{t('settingsStorage.screenshotsEnabled')}</p>
-          <p class="settings-note">{t('settingsStorage.screenshotsEnabledHint')}</p>
-        </div>
-        <button
-          type="button"
-          on:click={() => {
-            config.storage.screenshots_enabled = !config.storage.screenshots_enabled;
-            handleChange();
-          }}
-          class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-150
-            {config.storage.screenshots_enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}"
-          aria-pressed={config.storage.screenshots_enabled}
-        >
-          <span
-            class="inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-150
-              {config.storage.screenshots_enabled ? 'translate-x-5' : 'translate-x-0.5'}"
-          ></span>
-        </button>
-      </div>
+    <div class="settings-row">
+      <span class="settings-text">{t('settingsStorage.screenshotsEnabled')}</span>
+      <button
+        type="button"
+        on:click={() => {
+          config.storage.screenshots_enabled = !config.storage.screenshots_enabled;
+          handleChange();
+        }}
+        class="switch-track {config.storage.screenshots_enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}"
+        aria-pressed={config.storage.screenshots_enabled}
+      >
+        <span class="switch-thumb {config.storage.screenshots_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
+      </button>
     </div>
 
     <!-- 轮询间隔 -->
@@ -256,7 +246,6 @@
         <span>{t('settingsStorage.precise')}</span>
         <span>{t('settingsStorage.powerSave')}</span>
       </div>
-      <p class="settings-note">{t('settingsStorage.pollingHint')}</p>
     </div>
 
     <!-- 数据保留 -->
@@ -282,7 +271,6 @@
         <span>{t('settingsStorage.retentionMin')}</span>
         <span>{t('settingsStorage.retentionMax')}</span>
       </div>
-      <p class="settings-note">{t('settingsStorage.retentionHint')}</p>
     </div>
 
     <div class="settings-block">
@@ -309,9 +297,6 @@
           </button>
         {/each}
       </div>
-      <p class="settings-note">
-        {t('settingsStorage.screenshotModeHint')}
-      </p>
     </div>
   </div>
 </div>
@@ -319,7 +304,6 @@
 <!-- 截图分辨率 -->
 <div class="settings-card mb-5" data-locale={currentLocale}>
   <h3 class="settings-card-title">{t('settingsStorage.widthMode')}</h3>
-  <p class="settings-card-desc">{t('settingsStorage.widthModeHint')}</p>
 
   <div class="settings-section">
     <div class="settings-block">
@@ -383,7 +367,6 @@
           <span>640px</span>
           <span>3840px</span>
         </div>
-        <p class="settings-note">{t('settingsStorage.maxWidthHint')}</p>
       </div>
     {/if}
   </div>
@@ -392,7 +375,6 @@
 <!-- 日报导出 -->
 <div class="settings-card mb-5" data-locale={currentLocale}>
   <h3 class="settings-card-title">{t('settingsStorage.exportTitle')}</h3>
-  <p class="settings-card-desc">{t('settingsStorage.exportDesc')}</p>
 
   <div class="settings-block">
     <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 dark:border-slate-700/80 dark:bg-slate-800/40">
@@ -400,7 +382,6 @@
       <p class="settings-muted mt-1 break-all">
         {config.daily_report_export_dir || t('settingsStorage.notSet')}
       </p>
-      <p class="settings-note mt-3">{t('settingsStorage.exportDirHint')}</p>
       <div class="mt-4 flex flex-wrap gap-3">
         <button
           type="button"
@@ -425,7 +406,6 @@
 
 <div class="settings-card mb-5" data-locale={currentLocale}>
   <h3 class="settings-card-title">{t('settingsStorage.dataDirTitle')}</h3>
-  <p class="settings-card-desc">{t('settingsStorage.dataDirDesc')}</p>
 
   <div class="settings-section">
     <div class="settings-block">
@@ -473,17 +453,10 @@
           {/if}
         </div>
 
-        <p class="settings-note mt-3">
-          {t('settingsStorage.dataDirHint')}
-        </p>
-
         {#if cleanupCandidateDir}
           <div class="mt-4 rounded-xl border border-amber-200/70 bg-amber-50/90 p-3 dark:border-amber-500/30 dark:bg-amber-950/20">
             <p class="settings-text">{t('settingsStorage.oldDirPending')}</p>
             <p class="settings-muted mt-1 break-all">{cleanupCandidateDir}</p>
-            <p class="settings-note mt-2">
-              {t('settingsStorage.oldDirHint')}
-            </p>
             <div class="mt-3 flex flex-wrap gap-3">
               <button
                 on:click={cleanupPreviousDataDir}
@@ -546,12 +519,9 @@
       </div>
     {/if}
 
-    <div class="settings-block">
-      <div class="flex items-center justify-between rounded-xl bg-slate-50 p-3 dark:bg-slate-700/30">
-        <div>
-          <p class="settings-text">{t('settingsStorage.clearCache')}</p>
-          <p class="settings-muted mt-0.5">{t('settingsStorage.clearCacheHint')}</p>
-        </div>
+    <div class="space-y-2.5">
+      <div class="settings-row">
+        <span class="settings-text">{t('settingsStorage.clearCache')}</span>
         <button
           on:click={clearCache}
           class="settings-action-secondary"
@@ -561,10 +531,7 @@
       </div>
 
       <div class="settings-panel-danger flex items-center justify-between">
-        <div>
-          <p class="settings-text-danger text-sm font-medium">{t('settingsStorage.clearHistory')}</p>
-          <p class="settings-muted mt-0.5">{t('settingsStorage.clearHistoryHint')}</p>
-        </div>
+        <span class="settings-text-danger text-sm font-medium">{t('settingsStorage.clearHistory')}</span>
         <button
           on:click={clearOldData}
           disabled={isClearing}

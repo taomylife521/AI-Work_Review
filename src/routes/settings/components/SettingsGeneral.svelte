@@ -211,7 +211,6 @@
 
 <div class="settings-card" data-locale={currentLocale}>
   <h3 class="settings-card-title">{t('settingsGeneral.title')}</h3>
-  <p class="settings-card-desc">{t('settingsGeneral.description')}</p>
 
   <div class="settings-section">
     <div class="settings-block">
@@ -294,71 +293,58 @@
       <p class="settings-note">{t('settingsGeneral.reportAutoGenerateTimeHint')}</p>
     </div>
 
-    <hr class="border-slate-200 dark:border-slate-700" />
-
-    <div class="flex items-center justify-between">
-      <div>
-        <div class="settings-text">{t('settingsGeneral.autoStart')}</div>
-        <div class="settings-muted mt-0.5">{t('settingsGeneral.autoStartDescription')}</div>
+    <div class="space-y-2.5">
+      <div class="settings-row">
+        <span class="settings-text">{t('settingsGeneral.autoStart')}</span>
+        <button
+          on:click={toggleAutoStart}
+          class="switch-track {autoStartEnabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'}"
+        >
+          <span class="switch-thumb {autoStartEnabled ? 'translate-x-5' : 'translate-x-0'}"></span>
+        </button>
       </div>
-      <button
-        on:click={toggleAutoStart}
-        class="switch-track {autoStartEnabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'}"
-      >
-        <span class="switch-thumb {autoStartEnabled ? 'translate-x-5' : 'translate-x-0'}"></span>
-      </button>
-    </div>
 
-    {#if autoStartEnabled}
-      <div class="settings-block pt-3 border-t border-slate-200 dark:border-slate-700">
-        <div class="settings-text">{t('settingsGeneral.autoStartLaunchMode')}</div>
-        <div class="mt-2 flex gap-2">
-          <button
-            type="button"
-            on:click={() => updateAutoStartLaunchMode(false)}
-            class="segment-btn {config.auto_start_silent ? 'settings-segment-base' : 'settings-segment-active'}"
-          >
-            {t('settingsGeneral.autoStartLaunchShow')}
-          </button>
-          <button
-            type="button"
-            on:click={() => updateAutoStartLaunchMode(true)}
-            class="segment-btn {config.auto_start_silent ? 'settings-segment-active' : 'settings-segment-base'}"
-          >
-            {t('settingsGeneral.autoStartLaunchSilent')}
-          </button>
+      {#if autoStartEnabled}
+        <div class="ml-3 pl-3 border-l-2 border-primary-200/60 dark:border-primary-800/40">
+          <span class="settings-label">{t('settingsGeneral.autoStartLaunchMode')}</span>
+          <div class="mt-2 flex gap-2">
+            <button
+              type="button"
+              on:click={() => updateAutoStartLaunchMode(false)}
+              class="segment-btn {config.auto_start_silent ? 'settings-segment-base' : 'settings-segment-active'}"
+            >
+              {t('settingsGeneral.autoStartLaunchShow')}
+            </button>
+            <button
+              type="button"
+              on:click={() => updateAutoStartLaunchMode(true)}
+              class="segment-btn {config.auto_start_silent ? 'settings-segment-active' : 'settings-segment-base'}"
+            >
+              {t('settingsGeneral.autoStartLaunchSilent')}
+            </button>
+          </div>
         </div>
+      {/if}
+
+      <div class="settings-row">
+        <span class="settings-text">{t('settingsGeneral.hideDockIcon')}</span>
+        <button
+          on:click={toggleDockIcon}
+          class="switch-track {config.hide_dock_icon ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'}"
+        >
+          <span class="switch-thumb {config.hide_dock_icon ? 'translate-x-5' : 'translate-x-0'}"></span>
+        </button>
       </div>
-    {/if}
 
-    <hr class="border-slate-200 dark:border-slate-700" />
-
-    <div class="flex items-center justify-between">
-      <div>
-        <div class="settings-text">{t('settingsGeneral.hideDockIcon')}</div>
-        <div class="settings-muted mt-0.5">{t('settingsGeneral.hideDockIconDescription')}</div>
+      <div class="settings-row">
+        <span class="settings-text">{t('settingsGeneral.lightweightMode')}</span>
+        <button
+          on:click={toggleLightweightMode}
+          class="switch-track {config.lightweight_mode ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'}"
+        >
+          <span class="switch-thumb {config.lightweight_mode ? 'translate-x-5' : 'translate-x-0'}"></span>
+        </button>
       </div>
-      <button
-        on:click={toggleDockIcon}
-        class="switch-track {config.hide_dock_icon ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'}"
-      >
-        <span class="switch-thumb {config.hide_dock_icon ? 'translate-x-5' : 'translate-x-0'}"></span>
-      </button>
-    </div>
-
-    <hr class="border-slate-200 dark:border-slate-700" />
-
-    <div class="flex items-center justify-between">
-      <div>
-        <div class="settings-text">{t('settingsGeneral.lightweightMode')}</div>
-        <div class="settings-muted mt-0.5">{t('settingsGeneral.lightweightModeDescription')}</div>
-      </div>
-      <button
-        on:click={toggleLightweightMode}
-        class="switch-track {config.lightweight_mode ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'}"
-      >
-        <span class="switch-thumb {config.lightweight_mode ? 'translate-x-5' : 'translate-x-0'}"></span>
-      </button>
     </div>
   </div>
 </div>

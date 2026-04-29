@@ -1,8 +1,7 @@
 use crate::analysis::{
-    append_custom_prompt_for_locale, format_duration_for_locale,
-    generate_activity_timeline, generate_hourly_activity_summary_for_locale,
-    translate_category_name, translate_semantic_category_name, Analyzer, AppLocale,
-    GeneratedReport,
+    append_custom_prompt_for_locale, format_duration_for_locale, generate_activity_timeline,
+    generate_hourly_activity_summary_for_locale, translate_category_name,
+    translate_semantic_category_name, Analyzer, AppLocale, GeneratedReport,
 };
 use crate::config::AiProvider;
 use crate::database::{Activity, DailyStats};
@@ -76,7 +75,10 @@ fn empty_ai_fallback_reason(locale: AppLocale) -> String {
     match locale {
         AppLocale::ZhCn => "返回空内容，已回退到基础模板".to_string(),
         AppLocale::ZhTw => "回傳空內容，已回退到基礎模板".to_string(),
-        AppLocale::En => "the model returned empty content, so the report fell back to the base template".to_string(),
+        AppLocale::En => {
+            "the model returned empty content, so the report fell back to the base template"
+                .to_string()
+        }
     }
 }
 
@@ -100,6 +102,20 @@ fn request_ai_fallback_reason(locale: AppLocale, error_text: &str) -> String {
             "the AI request failed, so the report fell back to the base template".to_string()
         }
     }
+}
+
+fn openai_compatible_chat_completion_urls(endpoint: &str) -> Vec<String> {
+    let base = endpoint.trim().trim_end_matches('/');
+    if base.is_empty() {
+        return Vec::new();
+    }
+
+    let mut urls = vec![format!("{base}/chat/completions")];
+    if !base.ends_with("/v1") {
+        urls.push(format!("{base}/v1/chat/completions"));
+    }
+    urls.dedup();
+    urls
 }
 
 /// 摘要上传分析器
@@ -164,43 +180,60 @@ impl SummaryAnalyzer {
     }
 
     async fn generate_with_openai_compatible(&self, prompt: &str) -> Result<String> {
-        let mut request = self
-            .client
-            .post(format!("{}/chat/completions", self.endpoint))
-            .json(&json!({
-                "model": self.model,
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": ai_system_prompt(self.locale)
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                "max_tokens": 5000,
-                "temperature": 0.2,
-            }));
+        let payload = json!({
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": ai_system_prompt(self.locale)
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "max_tokens": 5000,
+            "temperature": 0.2,
+            "stream": false,
+        });
 
-        if let Some(api_key) = &self.api_key {
-            if !api_key.is_empty() {
-                request = request.header("Authorization", format!("Bearer {api_key}"));
+        let mut last_error: Option<String> = None;
+
+        for url in openai_compatible_chat_completion_urls(&self.endpoint) {
+            let mut request = self.client.post(&url).json(&payload);
+
+            if let Some(api_key) = &self.api_key {
+                if !api_key.is_empty() {
+                    request = request.header("Authorization", format!("Bearer {api_key}"));
+                }
             }
+
+            let response = match request.send().await {
+                Ok(response) => response,
+                Err(error) => {
+                    last_error = Some(format!("{url} 请求失败: {error}"));
+                    continue;
+                }
+            };
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let error_text = response.text().await.unwrap_or_default();
+                last_error = Some(format!("{url} API 错误 ({status}): {error_text}"));
+                continue;
+            }
+
+            let result: serde_json::Value = response.json().await?;
+            return Ok(result["choices"][0]["message"]["content"]
+                .as_str()
+                .unwrap_or("")
+                .trim()
+                .to_string());
         }
 
-        let response = request.send().await?;
-        if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(AppError::Analysis(format!("API 错误: {error_text}")));
-        }
-
-        let result: serde_json::Value = response.json().await?;
-        Ok(result["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("")
-            .trim()
-            .to_string())
+        Err(AppError::Analysis(last_error.unwrap_or_else(|| {
+            "API 请求失败：未生成可用请求地址".to_string()
+        })))
     }
 
     async fn generate_with_claude(&self, prompt: &str) -> Result<String> {
@@ -284,6 +317,13 @@ impl SummaryAnalyzer {
     }
 
     async fn generate_ai_content(&self, prompt: &str) -> Result<String> {
+        log::info!(
+            "generate_ai_content: provider={:?}, endpoint={}, model={}, prompt_len={}",
+            self.provider,
+            self.endpoint,
+            self.model,
+            prompt.len()
+        );
         match self.provider {
             AiProvider::Ollama => self.generate_with_ollama(prompt).await,
             AiProvider::Claude => self.generate_with_claude(prompt).await,
@@ -299,7 +339,10 @@ impl SummaryAnalyzer {
             let title_words = activity
                 .window_title
                 .split(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
-                .filter(|word| word.len() > 3)
+                .filter(|word| {
+                    let len = word.chars().count();
+                    len >= 2 && len <= 30
+                })
                 .take(3)
                 .collect::<Vec<_>>();
 
@@ -314,10 +357,10 @@ impl SummaryAnalyzer {
                 let ocr_words = ocr_text
                     .split(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
                     .filter(|word| {
-                        word.len() > 3
-                            && word
-                                .chars()
-                                .all(|char| char.is_alphabetic() || char >= '\u{4e00}')
+                        let len = word.chars().count();
+                        len >= 2
+                            && len <= 20
+                            && word.chars().all(|c| c.is_alphabetic() || c >= '\u{4e00}')
                     })
                     .take(5)
                     .collect::<Vec<_>>();
@@ -747,7 +790,8 @@ impl Analyzer for SummaryAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::{
-        empty_ai_fallback_reason, request_ai_fallback_reason, summary_request_timeout,
+        empty_ai_fallback_reason, openai_compatible_chat_completion_urls,
+        request_ai_fallback_reason, summary_request_timeout,
     };
     use crate::analysis::AppLocale;
     use crate::config::AiProvider;
@@ -780,7 +824,10 @@ mod tests {
             Duration::from_secs(90)
         );
         assert_eq!(
-            summary_request_timeout(AiProvider::Gemini, "https://generativelanguage.googleapis.com/v1"),
+            summary_request_timeout(
+                AiProvider::Gemini,
+                "https://generativelanguage.googleapis.com/v1"
+            ),
             Duration::from_secs(90)
         );
     }
@@ -798,6 +845,21 @@ mod tests {
         assert_eq!(
             request_ai_fallback_reason(AppLocale::ZhCn, "API 错误: 500"),
             "请求失败，已回退到基础模板"
+        );
+    }
+
+    #[test]
+    fn openai兼容端点应补齐_chat_completions_路径并兼容_v1_回退() {
+        assert_eq!(
+            openai_compatible_chat_completion_urls("https://api.deepseek.com"),
+            vec![
+                "https://api.deepseek.com/chat/completions".to_string(),
+                "https://api.deepseek.com/v1/chat/completions".to_string()
+            ]
+        );
+        assert_eq!(
+            openai_compatible_chat_completion_urls("https://api.openai.com/v1"),
+            vec!["https://api.openai.com/v1/chat/completions".to_string()]
         );
     }
 }

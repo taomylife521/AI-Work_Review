@@ -1,7 +1,7 @@
 use crate::analysis::AppLocale;
 use crate::config::{
     AiProvider, AiProviderConfig, AppCategoryRule, AppConfig, AvatarFollowupItem,
-    CustomSemanticCategory, ModelConfig, WebsiteSemanticRule,
+    CustomSemanticCategory, ModelConfig, PrivacyConfig, WebsiteSemanticRule,
 };
 use crate::database::Database;
 use crate::database::{
@@ -840,16 +840,32 @@ enum AssistantReasoningMode {
 }
 
 impl AssistantQuestionKind {
-    fn label(&self) -> &'static str {
-        match self {
-            AssistantQuestionKind::StageSummary => "阶段总结",
-            AssistantQuestionKind::OutcomeRecap => "结果复盘",
-            AssistantQuestionKind::ProcessRecap => "过程复盘",
-            AssistantQuestionKind::EvidenceQuery => "依据追问",
-            AssistantQuestionKind::TimeStat => "时间统计",
-            AssistantQuestionKind::Comparison => "对比分析",
-            AssistantQuestionKind::Listing => "清单列举",
-            AssistantQuestionKind::Freeform => "自由提问",
+    fn label(&self, locale: AppLocale) -> &'static str {
+        match (locale, self) {
+            (AppLocale::En, AssistantQuestionKind::StageSummary) => "stage summary",
+            (AppLocale::En, AssistantQuestionKind::OutcomeRecap) => "outcome recap",
+            (AppLocale::En, AssistantQuestionKind::ProcessRecap) => "process recap",
+            (AppLocale::En, AssistantQuestionKind::EvidenceQuery) => "evidence query",
+            (AppLocale::En, AssistantQuestionKind::TimeStat) => "time statistics",
+            (AppLocale::En, AssistantQuestionKind::Comparison) => "comparison",
+            (AppLocale::En, AssistantQuestionKind::Listing) => "listing",
+            (AppLocale::En, AssistantQuestionKind::Freeform) => "freeform",
+            (AppLocale::ZhTw, AssistantQuestionKind::StageSummary) => "階段總結",
+            (AppLocale::ZhTw, AssistantQuestionKind::OutcomeRecap) => "結果復盤",
+            (AppLocale::ZhTw, AssistantQuestionKind::ProcessRecap) => "過程復盤",
+            (AppLocale::ZhTw, AssistantQuestionKind::EvidenceQuery) => "依據追問",
+            (AppLocale::ZhTw, AssistantQuestionKind::TimeStat) => "時間統計",
+            (AppLocale::ZhTw, AssistantQuestionKind::Comparison) => "對比分析",
+            (AppLocale::ZhTw, AssistantQuestionKind::Listing) => "清單列舉",
+            (AppLocale::ZhTw, AssistantQuestionKind::Freeform) => "自由提問",
+            (_, AssistantQuestionKind::StageSummary) => "阶段总结",
+            (_, AssistantQuestionKind::OutcomeRecap) => "结果复盘",
+            (_, AssistantQuestionKind::ProcessRecap) => "过程复盘",
+            (_, AssistantQuestionKind::EvidenceQuery) => "依据追问",
+            (_, AssistantQuestionKind::TimeStat) => "时间统计",
+            (_, AssistantQuestionKind::Comparison) => "对比分析",
+            (_, AssistantQuestionKind::Listing) => "清单列举",
+            (_, AssistantQuestionKind::Freeform) => "自由提问",
         }
     }
 }
@@ -869,15 +885,28 @@ fn build_history_context(history: &[AssistantChatMessage]) -> String {
 
 /// Extract contextual time keywords from recent user messages to improve
 /// continuity across turns (e.g. "今天", "昨天", "本周", "最近").
-fn extract_contextual_entities(history: &[AssistantChatMessage]) -> String {
-    let time_keywords = ["今天", "昨天", "本周", "上周", "本月", "上月", "最近"];
+fn extract_contextual_entities(history: &[AssistantChatMessage], locale: AppLocale) -> String {
+    let zh_keywords = ["今天", "昨天", "本周", "上周", "本月", "上月", "最近"];
+    let en_keywords = [
+        "today",
+        "yesterday",
+        "this week",
+        "last week",
+        "this month",
+        "last month",
+        "recently",
+    ];
+    let keywords: &[&str] = match locale {
+        AppLocale::En => &en_keywords,
+        _ => &zh_keywords,
+    };
     let mut found = Vec::new();
 
     for msg in history.iter().rev().take(6) {
         if msg.role != "user" {
             continue;
         }
-        for keyword in &time_keywords {
+        for keyword in keywords {
             if msg.content.contains(keyword) && !found.contains(&(*keyword).to_string()) {
                 found.push(keyword.to_string());
             }
@@ -887,7 +916,11 @@ fn extract_contextual_entities(history: &[AssistantChatMessage]) -> String {
     if found.is_empty() {
         String::new()
     } else {
-        format!("上下文提及的时间关键词：{}", found.join("、"))
+        match locale {
+            AppLocale::En => format!("Contextual time keywords mentioned: {}", found.join(", ")),
+            AppLocale::ZhTw => format!("上下文提及的時間關鍵詞：{}", found.join("、")),
+            AppLocale::ZhCn => format!("上下文提及的时间关键词：{}", found.join("、")),
+        }
     }
 }
 
@@ -982,13 +1015,7 @@ fn detect_question_kind_from_text(text: &str) -> AssistantQuestionKind {
         return AssistantQuestionKind::StageSummary;
     }
 
-    let time_stat_patterns = [
-        "花了多少时间",
-        "多少时间",
-        "总时长",
-        "时间分布",
-        "时间占比",
-    ];
+    let time_stat_patterns = ["花了多少时间", "多少时间", "总时长", "时间分布", "时间占比"];
     if time_stat_patterns
         .iter()
         .any(|pattern| context.contains(pattern))
@@ -996,15 +1023,7 @@ fn detect_question_kind_from_text(text: &str) -> AssistantQuestionKind {
         return AssistantQuestionKind::TimeStat;
     }
 
-    let comparison_patterns = [
-        "对比",
-        "比较",
-        "和上周",
-        "相比",
-        "比上周",
-        "变化",
-        "差异",
-    ];
+    let comparison_patterns = ["对比", "比较", "和上周", "相比", "比上周", "变化", "差异"];
     if comparison_patterns
         .iter()
         .any(|pattern| context.contains(pattern))
@@ -1012,14 +1031,7 @@ fn detect_question_kind_from_text(text: &str) -> AssistantQuestionKind {
         return AssistantQuestionKind::Comparison;
     }
 
-    let listing_patterns = [
-        "列出",
-        "列举",
-        "所有",
-        "全部",
-        "哪些",
-        "清单",
-    ];
+    let listing_patterns = ["列出", "列举", "所有", "全部", "哪些", "清单"];
     if listing_patterns
         .iter()
         .any(|pattern| context.contains(pattern))
@@ -1142,35 +1154,15 @@ fn infer_question_kind_from_assistant_reply(
         ),
         (
             AssistantQuestionKind::TimeStat,
-            &[
-                "## 时间统计",
-                "时长",
-                "时间分布",
-                "占比",
-                "花了多少时间",
-            ],
+            &["## 时间统计", "时长", "时间分布", "占比", "花了多少时间"],
         ),
         (
             AssistantQuestionKind::Comparison,
-            &[
-                "## 对比分析",
-                "对比",
-                "比较",
-                "变化",
-                "差异",
-                "相比",
-            ],
+            &["## 对比分析", "对比", "比较", "变化", "差异", "相比"],
         ),
         (
             AssistantQuestionKind::Listing,
-            &[
-                "## 清单",
-                "列举",
-                "列出",
-                "所有",
-                "全部",
-                "清单",
-            ],
+            &["## 清单", "列举", "列出", "所有", "全部", "清单"],
         ),
     ];
 
@@ -1433,47 +1425,110 @@ fn build_assistant_prompt(
     locale: AppLocale,
 ) -> String {
     let range = match (date_from, date_to) {
-        (Some(start), Some(end)) if start == end => format!("{start} 当天"),
-        (Some(start), Some(end)) => format!("{start} 到 {end}"),
-        (Some(start), None) => format!("{start} 之后"),
-        (None, Some(end)) => format!("{end} 之前"),
-        (None, None) => "全部可用记录".to_string(),
+        (Some(start), Some(end)) if start == end => match locale {
+            AppLocale::En => format!("{start} (that day)"),
+            AppLocale::ZhTw => format!("{start} \u{7576}\u{5929}"),
+            AppLocale::ZhCn => format!("{start} \u{5f53}\u{5929}"),
+        },
+        (Some(start), Some(end)) => match locale {
+            AppLocale::En => format!("{start} to {end}"),
+            AppLocale::ZhTw => format!("{start} \u{5230} {end}"),
+            AppLocale::ZhCn => format!("{start} \u{5230} {end}"),
+        },
+        (Some(start), None) => match locale {
+            AppLocale::En => format!("after {start}"),
+            AppLocale::ZhTw => format!("{start} \u{4e4b}\u{5f8c}"),
+            AppLocale::ZhCn => format!("{start} \u{4e4b}\u{540e}"),
+        },
+        (None, Some(end)) => match locale {
+            AppLocale::En => format!("before {end}"),
+            AppLocale::ZhTw => format!("{end} \u{4e4b}\u{524d}"),
+            AppLocale::ZhCn => format!("{end} \u{4e4b}\u{524d}"),
+        },
+        (None, None) => match locale {
+            AppLocale::En => "all available records".to_string(),
+            AppLocale::ZhTw => "\u{5168}\u{90e8}\u{53ef}\u{7528}\u{8a18}\u{9304}".to_string(),
+            AppLocale::ZhCn => "\u{5168}\u{90e8}\u{53ef}\u{7528}\u{8bb0}\u{5f55}".to_string(),
+        },
     };
 
-    let mut prompt = format!(
-        "用户问题：{question}\n问题类型：{}\n数据时间范围：{range}（以下所有数据均在此范围内，超出范围的信息不可用）\n\n请用“分析复盘型”风格直接回答。严格基于以下数据，不要编造未出现的事实；证据不足时明确说明。\n",
-        question_kind.label()
-    );
+    let mut prompt = match locale {
+        AppLocale::En => format!(
+            "User question: {question}\nQuestion type: {}\nData range: {range} (all data below is within this range; information outside the range is unavailable)\n\nAnswer in an analytical-review style. Strictly use the data below; do not fabricate facts. State clearly when evidence is insufficient.\n",
+            question_kind.label(locale)
+        ),
+        AppLocale::ZhTw => format!(
+            "\u{4f7f}\u{7528}\u{8005}\u{554f}\u{984c}\u{ff1a}{question}\n\u{554f}\u{984c}\u{985e}\u{578b}\u{ff1a}{}\n\u{8cc7}\u{6599}\u{6642}\u{9593}\u{7bc4}\u{570d}\u{ff1a}{range}\u{ff08}\u{4ee5}\u{4e0b}\u{6240}\u{6709}\u{8cc7}\u{6599}\u{5747}\u{5728}\u{6b64}\u{7bc4}\u{570d}\u{5167}\u{ff0c}\u{8d85}\u{51fa}\u{7bc4}\u{570d}\u{7684}\u{8cc7}\u{8a0a}\u{4e0d}\u{53ef}\u{7528}\u{ff09}\n\n\u{8acb}\u{7528}\u{300c}\u{5206}\u{6790}\u{5fa9}\u{76e4}\u{578b}\u{300d}\u{98a8}\u{683c}\u{76f4}\u{63a5}\u{56de}\u{7b54}\u{3002}\u{56b4}\u{683c}\u{57fa}\u{65bc}\u{4ee5}\u{4e0b}\u{8cc7}\u{6599}\u{ff0c}\u{4e0d}\u{8981}\u{7de8}\u{9020}\u{672a}\u{51fa}\u{73fe}\u{7684}\u{4e8b}\u{5be6}\u{ff1b}\u{8b49}\u{64da}\u{4e0d}\u{8db3}\u{6642}\u{660e}\u{78ba}\u{8aaa}\u{660e}\u{3002}\n",
+            question_kind.label(locale)
+        ),
+        AppLocale::ZhCn => format!(
+            "\u{7528}\u{6237}\u{95ee}\u{9898}\u{ff1a}{question}\n\u{95ee}\u{9898}\u{7c7b}\u{578b}\u{ff1a}{}\n\u{6570}\u{636e}\u{65f6}\u{95f4}\u{8303}\u{56f4}\u{ff1a}{range}\u{ff08}\u{4ee5}\u{4e0b}\u{6240}\u{6709}\u{6570}\u{636e}\u{5747}\u{5728}\u{6b64}\u{8303}\u{56f4}\u{5185}\u{ff0c}\u{8d85}\u{51fa}\u{8303}\u{56f4}\u{7684}\u{4fe1}\u{606f}\u{4e0d}\u{53ef}\u{7528}\u{ff09}\n\n\u{8bf7}\u{7528}\u{201c}\u{5206}\u{6790}\u{590d}\u{76d8}\u{578b}\u{201d}\u{98ce}\u{683c}\u{76f4}\u{63a5}\u{56de}\u{7b54}\u{3002}\u{4e25}\u{683c}\u{57fa}\u{4e8e}\u{4ee5}\u{4e0b}\u{6570}\u{636e}\u{ff0c}\u{4e0d}\u{8981}\u{7f16}\u{9020}\u{672a}\u{51fa}\u{73b0}\u{7684}\u{4e8b}\u{5b9e}\u{ff1b}\u{8bc1}\u{636e}\u{4e0d}\u{8db3}\u{65f6}\u{660e}\u{786e}\u{8bf4}\u{660e}\u{3002}\n",
+            question_kind.label(locale)
+        ),
+    };
 
     let recent_history: Vec<_> = history.iter().rev().take(8).collect::<Vec<_>>();
     if !recent_history.is_empty() {
-        prompt.push_str("\n【对话上下文】\n");
+        prompt.push_str(match locale {
+            AppLocale::En => "\n[Conversation context]\n",
+            AppLocale::ZhTw => "\n\u{3010}\u{5c0d}\u{8a71}\u{4e0a}\u{4e0b}\u{6587}\u{3011}\n",
+            AppLocale::ZhCn => "\n\u{3010}\u{5bf9}\u{8bdd}\u{4e0a}\u{4e0b}\u{6587}\u{3011}\n",
+        });
         for msg in recent_history.into_iter().rev() {
-            let role_label = if msg.role == "user" {
-                "用户"
-            } else {
-                "助手"
+            let role_label = match locale {
+                AppLocale::En => {
+                    if msg.role == "user" {
+                        "User"
+                    } else {
+                        "Assistant"
+                    }
+                }
+                AppLocale::ZhTw => {
+                    if msg.role == "user" {
+                        "\u{4f7f}\u{7528}\u{8005}"
+                    } else {
+                        "\u{52a9}\u{624b}"
+                    }
+                }
+                AppLocale::ZhCn => {
+                    if msg.role == "user" {
+                        "\u{7528}\u{6237}"
+                    } else {
+                        "\u{52a9}\u{624b}"
+                    }
+                }
             };
             let content = msg.content.trim();
             let short = if content.chars().count() > 200 {
-                format!("{}…", content.chars().take(200).collect::<String>())
+                format!("{}\u{2026}", content.chars().take(200).collect::<String>())
             } else {
                 content.to_string()
             };
-            prompt.push_str(&format!("{role_label}：{short}\n"));
+            match locale {
+                AppLocale::En => prompt.push_str(&format!("{role_label}: {short}\n")),
+                _ => prompt.push_str(&format!("{role_label}\u{ff1a}{short}\n")),
+            }
         }
     }
 
-    let entity_ctx = extract_contextual_entities(history);
+    let entity_ctx = extract_contextual_entities(history, locale);
     if !entity_ctx.is_empty() {
         prompt.push_str(&format!("\n{entity_ctx}\n"));
     }
 
     if !references.is_empty() {
         let filtered_references = filter_reference_items(references, 5);
-        prompt.push_str("\n【相关记忆】\n");
+        prompt.push_str(match locale {
+            AppLocale::En => "\n[Related memories]\n",
+            AppLocale::ZhTw => "\n【相關記憶】\n",
+            AppLocale::ZhCn => "\n【相关记忆】\n",
+        });
         if filtered_references.is_empty() {
-            prompt.push_str("直接命中的原始记录区分度不高，多数是窗口标题或菜单噪声，请优先参考阶段复盘、意图分布和工作段。\n");
+            prompt.push_str(match locale {
+                AppLocale::En => "Direct hits have low signal quality (mostly window titles or menu noise). Prioritize review summaries, intent distributions, and sessions.\n",
+                AppLocale::ZhTw => "直接命中的原始記錄區分度不高，多數是視窗標題或選單雜訊，請優先參考階段復盤、意圖分布和工作段。\n",
+                AppLocale::ZhCn => "直接命中的原始记录区分度不高，多数是窗口标题或菜单噪声，请优先参考阶段复盘、意图分布和工作段。\n",
+            });
         } else {
             let filtered = filtered_references.into_iter().cloned().collect::<Vec<_>>();
             prompt.push_str(&format_memory_references(&filtered));
@@ -1482,33 +1537,53 @@ fn build_assistant_prompt(
     }
 
     if let Some(sessions) = sessions {
-        prompt.push_str("\n【工作段】\n");
+        prompt.push_str(match locale {
+            AppLocale::En => "\n[Work sessions]\n",
+            AppLocale::ZhTw => "\n【工作段】\n",
+            AppLocale::ZhCn => "\n【工作段】\n",
+        });
         prompt.push_str(&summarize_sessions_for_prompt(sessions));
         prompt.push('\n');
     }
 
     if let Some(intents) = intents {
-        prompt.push_str("\n【意图分布】\n");
+        prompt.push_str(match locale {
+            AppLocale::En => "\n[Intent distribution]\n",
+            AppLocale::ZhTw => "\n【意圖分布】\n",
+            AppLocale::ZhCn => "\n【意图分布】\n",
+        });
         prompt.push_str(&summarize_intents_for_prompt(intents));
         prompt.push('\n');
     }
 
     if let Some(review) = review {
-        prompt.push_str("\n【阶段复盘】\n");
+        prompt.push_str(match locale {
+            AppLocale::En => "\n[Phase review]\n",
+            AppLocale::ZhTw => "\n【階段復盤】\n",
+            AppLocale::ZhCn => "\n【阶段复盘】\n",
+        });
         prompt.push_str(&review.markdown);
         prompt.push('\n');
     }
 
     if let Some(todos) = todos {
-        prompt.push_str("\n【待办事项】\n");
+        prompt.push_str(match locale {
+            AppLocale::En => "\n[To-do items]\n",
+            AppLocale::ZhTw => "\n【待辦事項】\n",
+            AppLocale::ZhCn => "\n【待办事项】\n",
+        });
         prompt.push_str(&summarize_todos_for_prompt(todos));
         prompt.push('\n');
     }
 
     // 主动洞察：检测异常模式
-    let insights = generate_active_insights(intents, review, sessions);
+    let insights = generate_active_insights(intents, review, sessions, locale);
     if !insights.is_empty() {
-        prompt.push_str("\n【主动洞察】\n以下是从数据中检测到的异常模式，请在回答中自然提及：\n");
+        prompt.push_str(match locale {
+            AppLocale::En => "\n[Active insights]\nThe following anomalies were detected — mention them naturally in your answer:\n",
+            AppLocale::ZhTw => "\n【主動洞察】\n以下是從資料中偵測到的異常模式，請在回答中自然提及：\n",
+            AppLocale::ZhCn => "\n【主动洞察】\n以下是从数据中检测到的异常模式，请在回答中自然提及：\n",
+        });
         for insight in &insights {
             prompt.push_str(&format!("- {insight}\n"));
         }
@@ -1563,14 +1638,32 @@ fn build_assistant_prompt(
     };
     prompt.push_str(output_requirements);
 
-    let few_shot = match question_kind {
-        AssistantQuestionKind::TimeStat => {
+    let few_shot = match (locale, question_kind) {
+        (AppLocale::En, AssistantQuestionKind::TimeStat) => {
+            "\n[Example]\nUser: How much time did I spend coding?\nAssistant:\n## Conclusion\nCoding-related work accounted for ~45% of total time, mainly in code reviews and feature development.\n## Time Distribution\n- **Code review**: 2h 15m, 28%\n- **Feature dev**: 1h 30m, 19%\n- **Documentation**: 45m, 10%\n\n"
+        }
+        (AppLocale::En, AssistantQuestionKind::Comparison) => {
+            "\n[Example]\nUser: How does this week compare to last week?\nAssistant:\n## Conclusion\nTotal hours increased ~20%, but deep-work sessions decreased.\n## Comparison\n- **Total hours**: 25h this week vs 21h last week\n- **Deep work**: 6 blocks this week vs 9 last week\n- **Context switching**: More frequent this week, may hurt efficiency\n\n"
+        }
+        (AppLocale::En, AssistantQuestionKind::Listing) => {
+            "\n[Example]\nUser: List all completed tasks\nAssistant:\n## Listing\n- Fix login page styling (Apr 25)\n- Refactor user permissions module (Apr 26)\n- Write API documentation (Apr 27)\n- Deploy and verify test environment (Apr 28)\n\n"
+        }
+        (AppLocale::ZhTw, AssistantQuestionKind::TimeStat) => {
+            "\n【示例】\n使用者：花了多少時間在編碼上？\n助手：\n## 結論\n這段時間編碼相關工作約佔總時長的 45%，主要集中在程式碼審查和功能開發。\n## 時間分布\n- **程式碼審查**：2 小時 15 分鐘，佔 28%\n- **功能開發**：1 小時 30 分鐘，佔 19%\n- **文件撰寫**：45 分鐘，佔 10%\n\n"
+        }
+        (AppLocale::ZhTw, AssistantQuestionKind::Comparison) => {
+            "\n【示例】\n使用者：和上週相比有什麼變化？\n助手：\n## 結論\n本週總投入時間比上週增加約 20%，但深度工作時段減少了。\n## 對比分析\n- **總時長**：本週 25 小時 vs 上週 21 小時\n- **深度工作**：本週 6 段 vs 上週 9 段\n- **任務切換**：本週更頻繁，可能影響效率\n\n"
+        }
+        (AppLocale::ZhTw, AssistantQuestionKind::Listing) => {
+            "\n【示例】\n使用者：列出所有完成的任務\n助手：\n## 清單\n- 修復登入頁面的樣式問題（4月25日）\n- 完成使用者權限模組的重構（4月26日）\n- 撰寫 API 介面文件（4月27日）\n- 部署測試環境並驗證（4月28日）\n\n"
+        }
+        (_, AssistantQuestionKind::TimeStat) => {
             "\n【示例】\n用户：花了多少时间在编码上？\n助手：\n## 结论\n这段时间编码相关工作约占总时长的 45%，主要集中在代码审查和功能开发。\n## 时间分布\n- **代码审查**：2 小时 15 分钟，占 28%\n- **功能开发**：1 小时 30 分钟，占 19%\n- **文档编写**：45 分钟，占 10%\n\n"
         }
-        AssistantQuestionKind::Comparison => {
+        (_, AssistantQuestionKind::Comparison) => {
             "\n【示例】\n用户：和上周相比有什么变化？\n助手：\n## 结论\n本周总投入时间比上周增加约 20%，但深度工作时段减少了。\n## 对比分析\n- **总时长**：本周 25 小时 vs 上周 21 小时\n- **深度工作**：本周 6 段 vs 上周 9 段\n- **任务切换**：本周更频繁，可能影响效率\n\n"
         }
-        AssistantQuestionKind::Listing => {
+        (_, AssistantQuestionKind::Listing) => {
             "\n【示例】\n用户：列出所有完成的任务\n助手：\n## 清单\n- 修复登录页面的样式问题（4月25日）\n- 完成用户权限模块的重构（4月26日）\n- 编写 API 接口文档（4月27日）\n- 部署测试环境并验证（4月28日）\n\n"
         }
         _ => "",
@@ -1632,24 +1725,46 @@ fn collect_reference_lines(references: &[MemorySearchItem], limit: usize) -> Vec
         .collect()
 }
 
-fn collect_session_lines(sessions: Option<&[WorkSession]>, limit: usize) -> Vec<String> {
+fn collect_session_lines(
+    sessions: Option<&[WorkSession]>,
+    limit: usize,
+    locale: AppLocale,
+) -> Vec<String> {
     sessions
         .unwrap_or(&[])
         .iter()
         .take(limit)
-        .map(|session| {
-            format!(
+        .map(|session| match locale {
+            AppLocale::En => format!(
+                "**{}**: {}, mainly {}, intent: {}",
+                session.title,
+                crate::analysis::format_duration(session.duration),
+                session.dominant_app,
+                session.intent_label
+            ),
+            AppLocale::ZhTw => format!(
+                "**{}**：{}，主要使用 {}，意圖為 {}",
+                session.title,
+                crate::analysis::format_duration(session.duration),
+                session.dominant_app,
+                session.intent_label
+            ),
+            AppLocale::ZhCn => format!(
                 "**{}**：{}，主要使用 {}，意图为 {}",
                 session.title,
                 crate::analysis::format_duration(session.duration),
                 session.dominant_app,
                 session.intent_label
-            )
+            ),
         })
         .collect()
 }
 
-fn collect_intent_lines(intents: Option<&IntentAnalysisResult>, limit: usize) -> Vec<String> {
+fn collect_intent_lines(
+    intents: Option<&IntentAnalysisResult>,
+    limit: usize,
+    locale: AppLocale,
+) -> Vec<String> {
     intents
         .map(|result| {
             let total_duration: i64 = result.summary.iter().map(|item| item.duration).sum();
@@ -1663,13 +1778,29 @@ fn collect_intent_lines(intents: Option<&IntentAnalysisResult>, limit: usize) ->
                     } else {
                         0.0
                     };
-                    format!(
-                        "**{}**：{}，{} 段（{:.0}%）",
-                        item.label,
-                        crate::analysis::format_duration(item.duration),
-                        item.session_count,
-                        pct
-                    )
+                    match locale {
+                        AppLocale::En => format!(
+                            "**{}**: {}, {} sessions ({:.0}%)",
+                            item.label,
+                            crate::analysis::format_duration(item.duration),
+                            item.session_count,
+                            pct
+                        ),
+                        AppLocale::ZhTw => format!(
+                            "**{}**：{}，{} 段（{:.0}%）",
+                            item.label,
+                            crate::analysis::format_duration(item.duration),
+                            item.session_count,
+                            pct
+                        ),
+                        AppLocale::ZhCn => format!(
+                            "**{}**：{}，{} 段（{:.0}%）",
+                            item.label,
+                            crate::analysis::format_duration(item.duration),
+                            item.session_count,
+                            pct
+                        ),
+                    }
                 })
                 .collect::<Vec<_>>()
         })
@@ -1694,25 +1825,38 @@ fn build_summary_header(
     review: Option<&WeeklyReviewResult>,
     intents: Option<&IntentAnalysisResult>,
     sessions: Option<&[WorkSession]>,
+    locale: AppLocale,
 ) -> String {
     let mut parts = Vec::new();
 
     if let Some(review) = review {
         let total_hours = review.total_duration as f64 / 3600.0;
         parts.push(format!("⏱ {:.1}h", total_hours));
-        parts.push(format!("活跃 {} 天", review.active_days));
+        parts.push(match locale {
+            AppLocale::En => format!("active {} days", review.active_days),
+            AppLocale::ZhTw => format!("活躍 {} 天", review.active_days),
+            AppLocale::ZhCn => format!("活跃 {} 天", review.active_days),
+        });
     }
 
     if let Some(intents) = intents {
         let count = intents.summary.len();
         if count > 0 {
-            parts.push(format!("🎯 {} 个意图", count));
+            parts.push(match locale {
+                AppLocale::En => format!("🎯 {} intents", count),
+                AppLocale::ZhTw => format!("🎯 {} 個意圖", count),
+                AppLocale::ZhCn => format!("🎯 {} 个意图", count),
+            });
         }
     }
 
     if let Some(sessions) = sessions {
         if !sessions.is_empty() {
-            parts.push(format!("📝 {} 个 session", sessions.len()));
+            parts.push(match locale {
+                AppLocale::En => format!("📝 {} sessions", sessions.len()),
+                AppLocale::ZhTw => format!("📝 {} 個 session", sessions.len()),
+                AppLocale::ZhCn => format!("📝 {} 个 session", sessions.len()),
+            });
         }
     }
 
@@ -1732,71 +1876,215 @@ fn build_conclusion_line(
     todo_lines: &[String],
     reference_lines: &[String],
     review: Option<&WeeklyReviewResult>,
+    locale: AppLocale,
 ) -> String {
     match kind {
         AssistantQuestionKind::StageSummary => {
             if !intent_lines.is_empty() {
-                let top_intents: Vec<&str> = intent_lines.iter().take(2)
-                    .map(|l| l.split('：').next().unwrap_or(l).trim_start_matches("**").trim_end_matches("**"))
+                let top_intents: Vec<&str> = intent_lines
+                    .iter()
+                    .take(2)
+                    .map(|l| {
+                        l.split('：')
+                            .next()
+                            .unwrap_or(l)
+                            .trim_start_matches("**")
+                            .trim_end_matches("**")
+                    })
                     .collect();
-                format!("主线工作集中在 **{}**。", top_intents.join("**、**"))
+                match locale {
+                    AppLocale::En => {
+                        format!("Main focus areas: **{}**.", top_intents.join("**, **"))
+                    }
+                    AppLocale::ZhTw => {
+                        format!("主線工作集中在 **{}**。", top_intents.join("**、**"))
+                    }
+                    AppLocale::ZhCn => {
+                        format!("主线工作集中在 **{}**。", top_intents.join("**、**"))
+                    }
+                }
             } else if let Some(r) = review {
-                format!("总投入 {:.1}h，活跃 {} 天。", r.total_duration as f64 / 3600.0, r.active_days)
+                match locale {
+                    AppLocale::En => format!(
+                        "Total investment: {:.1}h across {} active days.",
+                        r.total_duration as f64 / 3600.0,
+                        r.active_days
+                    ),
+                    AppLocale::ZhTw => format!(
+                        "總投入 {:.1}h，活躍 {} 天。",
+                        r.total_duration as f64 / 3600.0,
+                        r.active_days
+                    ),
+                    AppLocale::ZhCn => format!(
+                        "总投入 {:.1}h，活跃 {} 天。",
+                        r.total_duration as f64 / 3600.0,
+                        r.active_days
+                    ),
+                }
             } else {
-                "当前记录不足以给出明确结论。".to_string()
+                match locale {
+                    AppLocale::En => "Insufficient records to draw a clear conclusion.".to_string(),
+                    AppLocale::ZhTw => "當前記錄不足以給出明確結論。".to_string(),
+                    AppLocale::ZhCn => "当前记录不足以给出明确结论。".to_string(),
+                }
             }
         }
         AssistantQuestionKind::OutcomeRecap => {
             if !todo_lines.is_empty() {
-                format!("已有阶段性推进，但仍有 {} 项待收口。", todo_lines.len())
+                match locale {
+                    AppLocale::En => format!(
+                        "Phase progress exists, but {} item(s) still need closure.",
+                        todo_lines.len()
+                    ),
+                    AppLocale::ZhTw => {
+                        format!("已有階段性推進，但仍有 {} 項待收口。", todo_lines.len())
+                    }
+                    AppLocale::ZhCn => {
+                        format!("已有阶段性推进，但仍有 {} 项待收口。", todo_lines.len())
+                    }
+                }
             } else if let Some(r) = review {
-                format!("完成 {} 个 session，深度工作 {} 段。", r.session_count, r.deep_work_sessions)
+                match locale {
+                    AppLocale::En => format!(
+                        "Completed {} sessions with {} deep-work blocks.",
+                        r.session_count, r.deep_work_sessions
+                    ),
+                    AppLocale::ZhTw => format!(
+                        "完成 {} 個 session，深度工作 {} 段。",
+                        r.session_count, r.deep_work_sessions
+                    ),
+                    AppLocale::ZhCn => format!(
+                        "完成 {} 个 session，深度工作 {} 段。",
+                        r.session_count, r.deep_work_sessions
+                    ),
+                }
             } else {
-                "当前记录能看到零散进展。".to_string()
+                match locale {
+                    AppLocale::En => {
+                        "Some scattered progress is visible in current records.".to_string()
+                    }
+                    AppLocale::ZhTw => "當前記錄能看到零散進展。".to_string(),
+                    AppLocale::ZhCn => "当前记录能看到零散进展。".to_string(),
+                }
             }
         }
         AssistantQuestionKind::ProcessRecap => {
             if !session_lines.is_empty() {
-                format!("共 {} 个工作段，时间投入可追溯。", session_lines.len())
+                match locale {
+                    AppLocale::En => format!(
+                        "{} work sessions found, timeline traceable.",
+                        session_lines.len()
+                    ),
+                    AppLocale::ZhTw => {
+                        format!("共 {} 個工作段，時間投入可追溯。", session_lines.len())
+                    }
+                    AppLocale::ZhCn => {
+                        format!("共 {} 个工作段，时间投入可追溯。", session_lines.len())
+                    }
+                }
             } else {
-                "缺少足够的连续工作段来还原过程。".to_string()
+                match locale {
+                    AppLocale::En => {
+                        "Not enough continuous sessions to reconstruct the process.".to_string()
+                    }
+                    AppLocale::ZhTw => "缺少足夠的連續工作段來還原過程。".to_string(),
+                    AppLocale::ZhCn => "缺少足够的连续工作段来还原过程。".to_string(),
+                }
             }
         }
         AssistantQuestionKind::EvidenceQuery => {
             if !reference_lines.is_empty() {
-                format!("找到 {} 条可引用的记录依据。", reference_lines.len())
+                match locale {
+                    AppLocale::En => format!(
+                        "Found {} traceable records as evidence.",
+                        reference_lines.len()
+                    ),
+                    AppLocale::ZhTw => {
+                        format!("找到 {} 條可引用的記錄依據。", reference_lines.len())
+                    }
+                    AppLocale::ZhCn => {
+                        format!("找到 {} 条可引用的记录依据。", reference_lines.len())
+                    }
+                }
             } else {
-                "当前没有检索到可直接引用的记录。".to_string()
+                match locale {
+                    AppLocale::En => "No directly citable records found.".to_string(),
+                    AppLocale::ZhTw => "當前沒有檢索到可直接引用的記錄。".to_string(),
+                    AppLocale::ZhCn => "当前没有检索到可直接引用的记录。".to_string(),
+                }
             }
         }
         AssistantQuestionKind::TimeStat => {
             if !intent_lines.is_empty() {
-                format!("时间主要分布在 {}。", intent_lines.iter().take(2).map(|l| l.split('：').next().unwrap_or(l).trim_start_matches("**").trim_end_matches("**")).collect::<Vec<_>>().join("、"))
+                let top_names: Vec<&str> = intent_lines
+                    .iter()
+                    .take(2)
+                    .map(|l| {
+                        l.split('：')
+                            .next()
+                            .unwrap_or(l)
+                            .trim_start_matches("**")
+                            .trim_end_matches("**")
+                    })
+                    .collect();
+                match locale {
+                    AppLocale::En => {
+                        format!("Time mainly distributed across {}.", top_names.join(", "))
+                    }
+                    AppLocale::ZhTw => format!("時間主要分布在 {}。", top_names.join("、")),
+                    AppLocale::ZhCn => format!("时间主要分布在 {}。", top_names.join("、")),
+                }
             } else {
-                "当前记录不足以统计时间分布。".to_string()
+                match locale {
+                    AppLocale::En => {
+                        "Insufficient records for time distribution statistics.".to_string()
+                    }
+                    AppLocale::ZhTw => "當前記錄不足以統計時間分布。".to_string(),
+                    AppLocale::ZhCn => "当前记录不足以统计时间分布。".to_string(),
+                }
             }
         }
-        AssistantQuestionKind::Comparison => "基于已有数据进行对比分析。".to_string(),
+        AssistantQuestionKind::Comparison => match locale {
+            AppLocale::En => "Comparative analysis based on available data.".to_string(),
+            AppLocale::ZhTw => "基於已有數據進行對比分析。".to_string(),
+            AppLocale::ZhCn => "基于已有数据进行对比分析。".to_string(),
+        },
         AssistantQuestionKind::Listing => {
             let count = session_lines.len() + intent_lines.len();
             if count > 0 {
-                format!("共找到 {count} 条相关记录。")
+                match locale {
+                    AppLocale::En => format!("Found {count} relevant records."),
+                    AppLocale::ZhTw => format!("共找到 {count} 條相關記錄。"),
+                    AppLocale::ZhCn => format!("共找到 {count} 条相关记录。"),
+                }
             } else {
-                "当前记录中没有找到匹配的条目。".to_string()
+                match locale {
+                    AppLocale::En => "No matching items found in current records.".to_string(),
+                    AppLocale::ZhTw => "當前記錄中沒有找到匹配的條目。".to_string(),
+                    AppLocale::ZhCn => "当前记录中没有找到匹配的条目。".to_string(),
+                }
             }
         }
         AssistantQuestionKind::Freeform => {
             if !intent_lines.is_empty() || !session_lines.is_empty() {
-                "基于当前可用记录的回答如下。".to_string()
+                match locale {
+                    AppLocale::En => "Answer based on available records below.".to_string(),
+                    AppLocale::ZhTw => "基於當前可用記錄的回答如下。".to_string(),
+                    AppLocale::ZhCn => "基于当前可用记录的回答如下。".to_string(),
+                }
             } else {
-                "当前记录较为有限。".to_string()
+                match locale {
+                    AppLocale::En => "Current records are limited.".to_string(),
+                    AppLocale::ZhTw => "當前記錄較為有限。".to_string(),
+                    AppLocale::ZhCn => "当前记录较为有限。".to_string(),
+                }
             }
         }
     }
 }
 
 /// 生成带进度条的时间分布
-fn build_time_distribution(intents: &IntentAnalysisResult) -> String {
+fn build_time_distribution(intents: &IntentAnalysisResult, locale: AppLocale) -> String {
     let total: i64 = intents.summary.iter().map(|i| i.duration).sum();
     if total <= 0 {
         return String::new();
@@ -1811,7 +2099,11 @@ fn build_time_distribution(intents: &IntentAnalysisResult) -> String {
         let empty = bar_width - filled;
         let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
         let hours = crate::analysis::format_duration(item.duration);
-        lines.push(format!("{}  {}  {}（{:.0}%）", item.label, bar, hours, pct * 100.0));
+        let pct_str = format!("{:.0}%", pct * 100.0);
+        lines.push(match locale {
+            AppLocale::En => format!("{}  {}  {} ({})", item.label, bar, hours, pct_str),
+            _ => format!("{}  {}  {}（{}）", item.label, bar, hours, pct_str),
+        });
     }
 
     lines.join("\n")
@@ -1823,30 +2115,68 @@ fn build_followup_hints(
     intent_lines: &[String],
     session_lines: &[String],
     todo_lines: &[String],
+    locale: AppLocale,
 ) -> String {
     let mut hints = Vec::new();
 
     match kind {
         AssistantQuestionKind::StageSummary | AssistantQuestionKind::Freeform => {
             if session_lines.len() > 2 {
-                hints.push("想看某个 session 的详细情况？告诉我时间段即可。".to_string());
+                hints.push(match locale {
+                    AppLocale::En => {
+                        "Want details on a specific session? Just tell me the time range."
+                            .to_string()
+                    }
+                    AppLocale::ZhTw => {
+                        "想看某個 session 的詳細情況？告訴我時間段即可。".to_string()
+                    }
+                    AppLocale::ZhCn => {
+                        "想看某个 session 的详细情况？告诉我时间段即可。".to_string()
+                    }
+                });
             }
             if !todo_lines.is_empty() {
-                hints.push("需要我列出待办事项的优先级吗？".to_string());
+                hints.push(match locale {
+                    AppLocale::En => "Need me to prioritize your to-do items?".to_string(),
+                    AppLocale::ZhTw => "需要我列出待辦事項的優先級嗎？".to_string(),
+                    AppLocale::ZhCn => "需要我列出待办事项的优先级吗？".to_string(),
+                });
             }
         }
         AssistantQuestionKind::TimeStat => {
-            hints.push("想看具体某个应用的时间占比？告诉我应用名。".to_string());
-            hints.push("需要对比不同时间段的时间分布吗？".to_string());
+            hints.push(match locale {
+                AppLocale::En => {
+                    "Want time breakdown for a specific app? Tell me the name.".to_string()
+                }
+                AppLocale::ZhTw => "想看具體某個應用的時間佔比？告訴我應用名。".to_string(),
+                AppLocale::ZhCn => "想看具体某个应用的时间占比？告诉我应用名。".to_string(),
+            });
+            hints.push(match locale {
+                AppLocale::En => {
+                    "Need to compare time distribution across different periods?".to_string()
+                }
+                AppLocale::ZhTw => "需要對比不同時間段的時間分布嗎？".to_string(),
+                AppLocale::ZhCn => "需要对比不同时间段的时间分布吗？".to_string(),
+            });
         }
         AssistantQuestionKind::ProcessRecap => {
             if intent_lines.len() > 1 {
-                hints.push("想深入看某个意图下的具体 session？".to_string());
+                hints.push(match locale {
+                    AppLocale::En => {
+                        "Want to drill into specific sessions under an intent?".to_string()
+                    }
+                    AppLocale::ZhTw => "想深入看某個意圖下的具體 session？".to_string(),
+                    AppLocale::ZhCn => "想深入看某个意图下的具体 session？".to_string(),
+                });
             }
         }
         AssistantQuestionKind::OutcomeRecap => {
             if !todo_lines.is_empty() {
-                hints.push("需要我把待办按优先级排序吗？".to_string());
+                hints.push(match locale {
+                    AppLocale::En => "Need me to sort to-dos by priority?".to_string(),
+                    AppLocale::ZhTw => "需要我把待辦按優先級排序嗎？".to_string(),
+                    AppLocale::ZhCn => "需要我把待办按优先级排序吗？".to_string(),
+                });
             }
         }
         _ => {}
@@ -1856,7 +2186,12 @@ fn build_followup_hints(
         return String::new();
     }
 
-    let mut result = String::from("**可以继续追问：**\n");
+    let header = match locale {
+        AppLocale::En => "**You can follow up:**\n",
+        AppLocale::ZhTw => "**可以繼續追問：**\n",
+        AppLocale::ZhCn => "**可以继续追问：**\n",
+    };
+    let mut result = String::from(header);
     for hint in hints.iter().take(2) {
         result.push_str(&format!("- {hint}\n"));
     }
@@ -1872,25 +2207,39 @@ fn build_fallback_assistant_answer(
     review: Option<&WeeklyReviewResult>,
     todos: Option<&TodoExtractionResult>,
     _tool_labels: &[String],
+    locale: AppLocale,
 ) -> String {
     let mut answer = String::new();
-    let intent_lines = collect_intent_lines(intents, 6);
-    let session_lines = collect_session_lines(sessions, 8);
+    let intent_lines = collect_intent_lines(intents, 6, locale);
+    let session_lines = collect_session_lines(sessions, 8, locale);
     let todo_lines = collect_todo_lines(todos, 5);
     let reference_lines = collect_reference_lines(references, 5);
-    let insights = generate_active_insights(intents, review, sessions);
+    let insights = generate_active_insights(intents, review, sessions, locale);
 
     // === 1. 一行摘要：关键指标 ===
-    let summary_line = build_summary_header(review, intents, sessions);
+    let summary_line = build_summary_header(review, intents, sessions, locale);
     if !summary_line.is_empty() {
         answer.push_str(&summary_line);
         answer.push_str("\n\n");
     }
 
     // === 2. 结论：按意图类型给出核心回答 ===
-    let conclusion = build_conclusion_line(question, question_kind, &intent_lines, &session_lines, &todo_lines, &reference_lines, review);
+    let conclusion = build_conclusion_line(
+        question,
+        question_kind,
+        &intent_lines,
+        &session_lines,
+        &todo_lines,
+        &reference_lines,
+        review,
+        locale,
+    );
     if !conclusion.is_empty() {
-        answer.push_str("## 结论\n\n");
+        answer.push_str(match locale {
+            AppLocale::En => "## Conclusion\n\n",
+            AppLocale::ZhTw => "## 結論\n\n",
+            AppLocale::ZhCn => "## 结论\n\n",
+        });
         answer.push_str(&conclusion);
         answer.push_str("\n\n");
     }
@@ -1898,15 +2247,23 @@ fn build_fallback_assistant_answer(
     // === 3. 时间分布：可视化进度条 ===
     if let Some(intents) = intents {
         if !intents.summary.is_empty() {
-            answer.push_str("## 时间分布\n\n");
-            answer.push_str(&build_time_distribution(intents));
+            answer.push_str(match locale {
+                AppLocale::En => "## Time Distribution\n\n",
+                AppLocale::ZhTw => "## 時間分布\n\n",
+                AppLocale::ZhCn => "## 时间分布\n\n",
+            });
+            answer.push_str(&build_time_distribution(intents, locale));
             answer.push_str("\n");
         }
     }
 
     // === 4. 工作段：按时间线列出 ===
     if !session_lines.is_empty() {
-        answer.push_str("## 工作段\n\n");
+        answer.push_str(match locale {
+            AppLocale::En => "## Sessions\n\n",
+            AppLocale::ZhTw => "## 工作段\n\n",
+            AppLocale::ZhCn => "## 工作段\n\n",
+        });
         for line in session_lines.iter().take(6) {
             answer.push_str("- ");
             answer.push_str(line);
@@ -1917,7 +2274,11 @@ fn build_fallback_assistant_answer(
 
     // === 5. 待办/风险 ===
     if !todo_lines.is_empty() {
-        answer.push_str("## 待跟进\n\n");
+        answer.push_str(match locale {
+            AppLocale::En => "## Follow-ups\n\n",
+            AppLocale::ZhTw => "## 待跟進\n\n",
+            AppLocale::ZhCn => "## 待跟进\n\n",
+        });
         for line in todo_lines.iter().take(5) {
             answer.push_str("- ");
             answer.push_str(line);
@@ -1928,7 +2289,11 @@ fn build_fallback_assistant_answer(
 
     // === 6. 主动洞察 ===
     if !insights.is_empty() {
-        answer.push_str("## 主动洞察\n\n");
+        answer.push_str(match locale {
+            AppLocale::En => "## Insights\n\n",
+            AppLocale::ZhTw => "## 主動洞察\n\n",
+            AppLocale::ZhCn => "## 主动洞察\n\n",
+        });
         for insight in insights.iter().take(3) {
             answer.push_str("- ");
             answer.push_str(insight);
@@ -1938,7 +2303,13 @@ fn build_fallback_assistant_answer(
     }
 
     // === 7. 追问引导 ===
-    let hints = build_followup_hints(question_kind, &intent_lines, &session_lines, &todo_lines);
+    let hints = build_followup_hints(
+        question_kind,
+        &intent_lines,
+        &session_lines,
+        &todo_lines,
+        locale,
+    );
     if !hints.is_empty() {
         answer.push_str("---\n\n");
         answer.push_str(&hints);
@@ -1952,20 +2323,37 @@ fn generate_active_insights(
     intents: Option<&IntentAnalysisResult>,
     review: Option<&WeeklyReviewResult>,
     sessions: Option<&[WorkSession]>,
+    locale: AppLocale,
 ) -> Vec<String> {
     let mut insights = Vec::new();
     if let Some(review) = review {
         if review.session_count > 0 {
             let deep_ratio = review.deep_work_sessions as f64 / review.session_count as f64;
             if deep_ratio < 0.2 && review.session_count >= 4 {
-                insights.push(format!(
-                    "深度工作占比偏低（{:.0}%），建议集中时间段处理复杂任务，减少碎片化切换。",
-                    deep_ratio * 100.0
-                ));
+                insights.push(match locale {
+                    AppLocale::En => format!(
+                        "Deep-work ratio is low ({:.0}%). Consider blocking longer focus periods to reduce fragmentation.",
+                        deep_ratio * 100.0
+                    ),
+                    AppLocale::ZhTw => format!(
+                        "深度工作佔比偏低（{:.0}%），建議集中時間段處理複雜任務，減少碎片化切換。",
+                        deep_ratio * 100.0
+                    ),
+                    AppLocale::ZhCn => format!(
+                        "深度工作占比偏低（{:.0}%），建议集中时间段处理复杂任务，减少碎片化切换。",
+                        deep_ratio * 100.0
+                    ),
+                });
             }
         }
         if review.active_days <= 2 && review.total_duration > 7200 {
-            insights.push("工作集中在较少天数，注意避免过度集中导致疲劳。".to_string());
+            insights.push(match locale {
+                AppLocale::En => {
+                    "Work is concentrated in very few days. Watch out for burnout.".to_string()
+                }
+                AppLocale::ZhTw => "工作集中在較少天數，注意避免過度集中導致疲勞。".to_string(),
+                AppLocale::ZhCn => "工作集中在较少天数，注意避免过度集中导致疲劳。".to_string(),
+            });
         }
     }
     if let Some(intents) = intents {
@@ -1974,10 +2362,20 @@ fn generate_active_insights(
             if total > 0 {
                 let top_ratio = top.duration as f64 / total as f64;
                 if top_ratio > 0.7 {
-                    insights.push(format!(
-                        "「{}」占比 {:.0}%，时间投入高度集中，建议检查是否忽略了其他重要事项。",
-                        top.label, top_ratio * 100.0
-                    ));
+                    insights.push(match locale {
+                        AppLocale::En => format!(
+                            "\"{}\" accounts for {:.0}% of time. Check if other priorities are being neglected.",
+                            top.label, top_ratio * 100.0
+                        ),
+                        AppLocale::ZhTw => format!(
+                            "「{}」佔比 {:.0}%，時間投入高度集中，建議檢查是否忽略了其他重要事項。",
+                            top.label, top_ratio * 100.0
+                        ),
+                        AppLocale::ZhCn => format!(
+                            "「{}」占比 {:.0}%，时间投入高度集中，建议检查是否忽略了其他重要事项。",
+                            top.label, top_ratio * 100.0
+                        ),
+                    });
                 }
             }
         }
@@ -1985,10 +2383,20 @@ fn generate_active_insights(
     if let Some(sessions) = sessions {
         let short = sessions.iter().filter(|s| s.duration < 300).count();
         if short > sessions.len() / 2 && sessions.len() >= 4 {
-            insights.push(format!(
-                "超过一半的工作段不足 5 分钟（{}/{}），建议保护专注时间段。",
-                short, sessions.len()
-            ));
+            insights.push(match locale {
+                AppLocale::En => format!(
+                    "Over half of sessions are under 5 minutes ({}/{}). Consider protecting focus blocks.",
+                    short, sessions.len()
+                ),
+                AppLocale::ZhTw => format!(
+                    "超過一半的工作段不足 5 分鐘（{}/{}），建議保護專注時間段。",
+                    short, sessions.len()
+                ),
+                AppLocale::ZhCn => format!(
+                    "超过一半的工作段不足 5 分钟（{}/{}），建议保护专注时间段。",
+                    short, sessions.len()
+                ),
+            });
         }
     }
     insights
@@ -2316,18 +2724,6 @@ fn should_check_for_updates(settings: &UpdateSettings) -> bool {
     elapsed_hours >= interval_hours
 }
 
-fn collect_ignored_apps_for_stats(config: &AppConfig) -> Vec<String> {
-    use crate::config::PrivacyLevel;
-
-    config
-        .privacy
-        .app_rules
-        .iter()
-        .filter(|rule| rule.level == PrivacyLevel::Ignored)
-        .map(|rule| rule.app_name.to_lowercase())
-        .collect()
-}
-
 fn matches_ignored_app(app_name: &str, ignored_apps: &[String]) -> bool {
     let app_lower = app_name.to_lowercase();
     ignored_apps
@@ -2365,9 +2761,59 @@ fn apply_ignored_apps_to_stats(mut stats: DailyStats, ignored_apps: &[String]) -
     stats
 }
 
+fn matches_excluded_domain(target: &str, excluded_domains: &[String]) -> bool {
+    let domain = PrivacyConfig::extract_domain(target);
+    if domain.is_empty() {
+        return false;
+    }
+
+    excluded_domains.iter().any(|excluded| {
+        !excluded.is_empty() && PrivacyConfig::domain_matches(&domain, excluded)
+    })
+}
+
+fn apply_excluded_domains_to_stats(
+    mut stats: DailyStats,
+    excluded_domains: &[String],
+) -> DailyStats {
+    if excluded_domains.is_empty() {
+        return stats;
+    }
+
+    stats
+        .url_usage
+        .retain(|url| !matches_excluded_domain(&url.domain, excluded_domains));
+    stats
+        .domain_usage
+        .retain(|domain| !matches_excluded_domain(&domain.domain, excluded_domains));
+
+    for browser in &mut stats.browser_usage {
+        browser
+            .domains
+            .retain(|domain| !matches_excluded_domain(&domain.domain, excluded_domains));
+        browser.duration = browser.domains.iter().map(|domain| domain.duration).sum();
+    }
+    stats.browser_usage.retain(|browser| browser.duration > 0);
+    stats.browser_usage.sort_by(|left, right| {
+        right
+            .duration
+            .cmp(&left.duration)
+            .then_with(|| left.browser_name.cmp(&right.browser_name))
+    });
+    stats.browser_duration = stats
+        .browser_usage
+        .iter()
+        .map(|browser| browser.duration)
+        .sum();
+
+    stats
+}
+
 fn load_daily_stats_for_overview(state: &AppState, date: &str) -> Result<DailyStats, AppError> {
     let segments = state.config.effective_work_segments();
-    state.database.get_daily_stats_with_segments(date, &segments)
+    state
+        .database
+        .get_daily_stats_with_segments(date, &segments)
 }
 
 fn overview_week_bounds_for_date(anchor: chrono::NaiveDate) -> (String, String) {
@@ -2679,8 +3125,9 @@ pub async fn get_today_stats(
     let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let stats = load_daily_stats_for_overview(&state, &today)?;
-    let ignored_apps = collect_ignored_apps_for_stats(&state.config);
-    Ok(apply_ignored_apps_to_stats(stats, &ignored_apps))
+    let (ignored_apps, excluded_domains) = collect_privacy_filters(&state);
+    let stats = apply_ignored_apps_to_stats(stats, &ignored_apps);
+    Ok(apply_excluded_domains_to_stats(stats, &excluded_domains))
 }
 
 /// 获取概览统计（支持今日 / 指定日期 / 本周）
@@ -2694,7 +3141,7 @@ pub async fn get_overview_stats(
 ) -> Result<DailyStats, AppError> {
     let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
     let normalized_mode = mode.trim().to_lowercase();
-    let ignored_apps = collect_ignored_apps_for_stats(&state.config);
+    let (ignored_apps, excluded_domains) = collect_privacy_filters(&state);
 
     let stats = match normalized_mode.as_str() {
         "date" => {
@@ -2745,7 +3192,8 @@ pub async fn get_overview_stats(
         }
     };
 
-    Ok(apply_ignored_apps_to_stats(stats, &ignored_apps))
+    let stats = apply_ignored_apps_to_stats(stats, &ignored_apps);
+    Ok(apply_excluded_domains_to_stats(stats, &excluded_domains))
 }
 
 /// 获取指定日期的统计
@@ -2756,7 +3204,9 @@ pub async fn get_daily_stats(
 ) -> Result<DailyStats, AppError> {
     let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
     let segments = state.config.effective_work_segments();
-    state.database.get_daily_stats_with_segments(&date, &segments)
+    state
+        .database
+        .get_daily_stats_with_segments(&date, &segments)
 }
 
 /// 获取指定日期的时间线
@@ -2784,39 +3234,9 @@ pub async fn get_timeline(
     Ok(filtered)
 }
 
-/// 从 URL 中提取域名
-fn extract_domain(url: &str) -> String {
-    let without_protocol = url
-        .trim_start_matches("https://")
-        .trim_start_matches("http://");
-    without_protocol
-        .split('/')
-        .next()
-        .unwrap_or("")
-        .to_lowercase()
-}
-
 fn collect_privacy_filters(state: &AppState) -> (Vec<String>, Vec<String>) {
-    use crate::config::PrivacyLevel;
-
-    let ignored_apps = state
-        .config
-        .privacy
-        .app_rules
-        .iter()
-        .filter(|rule| rule.level == PrivacyLevel::Ignored)
-        .map(|rule| rule.app_name.to_lowercase())
-        .collect::<Vec<_>>();
-
-    let excluded_domains = state
-        .config
-        .privacy
-        .excluded_domains
-        .iter()
-        .map(|domain| extract_domain(domain))
-        .filter(|domain| !domain.is_empty())
-        .collect::<Vec<_>>();
-
+    let ignored_apps = state.config.privacy.collect_ignored_app_names();
+    let excluded_domains = state.config.privacy.collect_excluded_domains();
     (ignored_apps, excluded_domains)
 }
 
@@ -2846,10 +3266,10 @@ fn filter_activities_by_privacy(
 
             if !no_domain_filter {
                 if let Some(url) = &activity.browser_url {
-                    let domain = extract_domain(url);
+                    let domain = PrivacyConfig::extract_domain(url);
                     if excluded_domains
                         .iter()
-                        .any(|excluded| domain.contains(excluded) || excluded.contains(&domain))
+                        .any(|excluded| PrivacyConfig::domain_matches(&domain, excluded))
                     {
                         return false;
                     }
@@ -3186,6 +3606,7 @@ pub async fn chat_work_assistant(
             review.as_ref(),
             todos.as_ref(),
             &tool_labels,
+            assistant_locale,
         ),
         references,
         used_ai: false,
@@ -3304,9 +3725,19 @@ pub(crate) async fn generate_report_inner(
 
     let (config, stats, activities, data_dir) = {
         let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-        let stats = state.database.get_daily_stats(&date)?;
+        let segments = state.config.effective_work_segments();
+        let raw_stats = state
+            .database
+            .get_daily_stats_with_segments(&date, &segments)?;
         // 生成日报时获取最多 2000 条记录
-        let activities = state.database.get_timeline(&date, Some(2000), None)?;
+        let raw_activities = state.database.get_timeline(&date, Some(2000), None)?;
+        let (ignored_apps, excluded_domains) = collect_privacy_filters(&state);
+        let stats = apply_excluded_domains_to_stats(
+            apply_ignored_apps_to_stats(raw_stats, &ignored_apps),
+            &excluded_domains,
+        );
+        let activities =
+            filter_activities_by_privacy(raw_activities, &ignored_apps, &excluded_domains);
         (
             state.config.clone(),
             stats,
@@ -3361,11 +3792,33 @@ pub(crate) async fn generate_report_inner(
         report_locale,
     );
 
-    // 生成报告
+    // 生成报告（spawn 隔离 panic，防止内部错误杀死整个 tokio 线程）
     let screenshots_dir = data_dir.join("screenshots");
-    let report_result = analyzer
-        .generate_report(&date, &stats, &activities, &screenshots_dir, report_locale)
-        .await;
+    let date_gen = date.clone();
+    let report_result = match tokio::spawn(async move {
+        analyzer
+            .generate_report(
+                &date_gen,
+                &stats,
+                &activities,
+                &screenshots_dir,
+                report_locale,
+            )
+            .await
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => Err(work_review_core::error::AppError::Analysis(
+            match report_locale {
+                AppLocale::ZhCn => "日报生成过程中发生内部错误，请重试".to_string(),
+                AppLocale::ZhTw => "日報生成過程中發生內部錯誤，請重試".to_string(),
+                AppLocale::En => {
+                    "Internal error during report generation, please retry".to_string()
+                }
+            },
+        )),
+    };
 
     let avatar_finish_state = {
         let mut state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
@@ -3446,7 +3899,22 @@ pub async fn generate_report(
     app: AppHandle,
     state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<String, AppError> {
-    generate_report_inner(date, force, locale, &app, state.inner()).await
+    {
+        let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+        if s.generating_report {
+            return Err(AppError::Unknown("日报正在生成中，请稍候".to_string()));
+        }
+    }
+    {
+        let mut s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+        s.generating_report = true;
+    }
+    let result = generate_report_inner(date, force, locale, &app, state.inner()).await;
+    {
+        let mut s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+        s.generating_report = false;
+    }
+    result
 }
 
 /// 获取已保存的日报
@@ -3955,35 +4423,65 @@ fn openai_connection_test_max_tokens() -> u32 {
     16
 }
 
+fn openai_compatible_chat_completion_urls(endpoint: &str) -> Vec<String> {
+    let base = endpoint.trim().trim_end_matches('/');
+    if base.is_empty() {
+        return Vec::new();
+    }
+
+    let mut urls = vec![format!("{base}/chat/completions")];
+    if !base.ends_with("/v1") {
+        urls.push(format!("{base}/v1/chat/completions"));
+    }
+    urls.dedup();
+    urls
+}
+
 async fn test_openai(
     client: &reqwest::Client,
     config: &AiProviderConfig,
 ) -> Result<String, String> {
     let api_key = config.api_key.as_ref().ok_or("未配置 API Key")?;
 
-    let response = client
-        .post(format!("{}/chat/completions", config.endpoint))
-        .header("Authorization", format!("Bearer {api_key}"))
-        .json(&serde_json::json!({
-            "model": config.model,
-            "messages": [{"role": "user", "content": "Hello"}],
-            "max_tokens": openai_connection_test_max_tokens(),
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("请求失败: {e}"))?;
+    let payload = serde_json::json!({
+        "model": config.model,
+        "messages": [{"role": "user", "content": "Hello"}],
+        "max_tokens": openai_connection_test_max_tokens(),
+    });
 
-    if response.status().is_success() {
-        let data: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| format!("解析响应失败: {e}"))?;
-        let model_used = data["model"].as_str().unwrap_or(&config.model);
-        Ok(format!("模型 {model_used} 响应正常"))
-    } else {
+    let mut last_error = None;
+
+    for url in openai_compatible_chat_completion_urls(&config.endpoint) {
+        let response = client
+            .post(&url)
+            .header("Authorization", format!("Bearer {api_key}"))
+            .json(&payload)
+            .send()
+            .await;
+
+        let response = match response {
+            Ok(response) => response,
+            Err(error) => {
+                last_error = Some(format!("{url} 请求失败: {error}"));
+                continue;
+            }
+        };
+
+        if response.status().is_success() {
+            let data: serde_json::Value = response
+                .json()
+                .await
+                .map_err(|e| format!("解析响应失败: {e}"))?;
+            let model_used = data["model"].as_str().unwrap_or(&config.model);
+            return Ok(format!("模型 {model_used} 响应正常"));
+        }
+
+        let status = response.status();
         let error_text = response.text().await.unwrap_or_default();
-        Err(format!("API 错误: {error_text}"))
+        last_error = Some(format!("{url} API 错误 ({status}): {error_text}"));
     }
+
+    Err(last_error.unwrap_or_else(|| "API 请求失败：未生成可用请求地址".to_string()))
 }
 
 /// 测试 Google Gemini 连接
@@ -4464,7 +4962,7 @@ pub async fn get_ai_providers() -> Result<Vec<serde_json::Value>, AppError> {
             "name": "OpenAI / 兼容API",
             "description": "支持 OpenAI 官方及兼容 API（Azure、Cloudflare 等）",
             "default_endpoint": "https://api.openai.com/v1",
-            "default_model": "gpt-5.4",
+            "default_model": "gpt-5.1",
             "requires_api_key": true,
             "supports_vision": false,
         }),
@@ -4482,7 +4980,7 @@ pub async fn get_ai_providers() -> Result<Vec<serde_json::Value>, AppError> {
             "name": "DeepSeek",
             "description": "国产开源模型，性能强劲，兼容 OpenAI 格式",
             "default_endpoint": "https://api.deepseek.com",
-            "default_model": "deepseek-chat",
+            "default_model": "deepseek-v4-flash",
             "requires_api_key": true,
             "supports_vision": false,
         }),
@@ -4500,7 +4998,7 @@ pub async fn get_ai_providers() -> Result<Vec<serde_json::Value>, AppError> {
             "name": "智谱 ChatGLM",
             "description": "智谱 AI 大模型",
             "default_endpoint": "https://open.bigmodel.cn/api/paas/v4",
-            "default_model": "glm-5-turbo",
+            "default_model": "glm-4.6",
             "requires_api_key": true,
             "supports_vision": false,
         }),
@@ -4536,7 +5034,7 @@ pub async fn get_ai_providers() -> Result<Vec<serde_json::Value>, AppError> {
             "name": "Google Gemini",
             "description": "Google 的 Gemini 系列模型",
             "default_endpoint": "https://generativelanguage.googleapis.com/v1",
-            "default_model": "gemini-3-flash",
+            "default_model": "gemini-2.5-flash",
             "requires_api_key": true,
             "supports_vision": false,
         }),
@@ -4545,7 +5043,7 @@ pub async fn get_ai_providers() -> Result<Vec<serde_json::Value>, AppError> {
             "name": "Anthropic Claude",
             "description": "Anthropic 的 Claude 系列模型",
             "default_endpoint": "https://api.anthropic.com/v1",
-            "default_model": "claude-sonnet-4-6",
+            "default_model": "claude-3-7-sonnet-latest",
             "requires_api_key": true,
             "supports_vision": false,
         }),
@@ -5824,8 +6322,10 @@ fn reclassify_domain_history_in_state(
     let semantic_category = semantic_category.trim();
 
     for activity in &activities {
-        let next_base_category =
-            crate::monitor::semantic_category_to_base_category(semantic_category, &activity.category);
+        let next_base_category = crate::monitor::semantic_category_to_base_category(
+            semantic_category,
+            &activity.category,
+        );
         state.database.update_activity_classification(
             activity.id.expect("活动记录应包含主键"),
             &next_base_category,
@@ -7618,16 +8118,18 @@ async fn get_app_icon_impl(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_daily_report_export_path, build_fallback_assistant_answer,
-        build_updater_manifest_candidates, build_windows_icon_cache_key,
-        detect_assistant_question_kind, detect_assistant_question_kind_with_mode,
-        export_daily_report_markdown, format_browser_url_for_display, macos_score_app_bundle_name,
+        apply_excluded_domains_to_stats, build_daily_report_export_path,
+        build_fallback_assistant_answer, build_updater_manifest_candidates,
+        build_windows_icon_cache_key, detect_assistant_question_kind,
+        detect_assistant_question_kind_with_mode, export_daily_report_markdown,
+        format_browser_url_for_display, macos_score_app_bundle_name,
         merge_windows_icon_lookup_candidates, normalize_macos_app_lookup_name,
         normalize_saved_report_ai_mode, ollama_model_names_match, ollama_model_should_be_listed,
-        ollama_show_response_supports_completion, openai_connection_test_max_tokens,
-        overview_week_bounds_for_date, parse_ollama_model_names, resolve_saved_report_metadata,
-        sum_daily_stats, AssistantChatMessage, AssistantQuestionKind, AssistantReasoningMode,
-        UPDATER_JSON_ENDPOINTS, UPDATE_CONNECT_TIMEOUT_SECS, UPDATE_REQUEST_TIMEOUT_SECS,
+        ollama_show_response_supports_completion, openai_compatible_chat_completion_urls,
+        openai_connection_test_max_tokens, overview_week_bounds_for_date, parse_ollama_model_names,
+        resolve_saved_report_metadata, sum_daily_stats, AppLocale, AssistantChatMessage,
+        AssistantQuestionKind, AssistantReasoningMode, UPDATER_JSON_ENDPOINTS,
+        UPDATE_CONNECT_TIMEOUT_SECS, UPDATE_REQUEST_TIMEOUT_SECS,
     };
     use crate::config::AiMode;
     use crate::database::{
@@ -7749,6 +8251,21 @@ mod tests {
     #[test]
     fn openai兼容探测请求的输出上限不应低于十六() {
         assert_eq!(openai_connection_test_max_tokens(), 16);
+    }
+
+    #[test]
+    fn openai兼容端点应自动补齐_chat_completions_并支持_v1_回退() {
+        assert_eq!(
+            openai_compatible_chat_completion_urls("https://api.deepseek.com"),
+            vec![
+                "https://api.deepseek.com/chat/completions".to_string(),
+                "https://api.deepseek.com/v1/chat/completions".to_string()
+            ]
+        );
+        assert_eq!(
+            openai_compatible_chat_completion_urls("https://api.openai.com/v1"),
+            vec!["https://api.openai.com/v1/chat/completions".to_string()]
+        );
     }
 
     #[test]
@@ -7918,6 +8435,110 @@ mod tests {
         assert_eq!(merged.domain_usage[0].duration, 90);
         assert_eq!(merged.url_usage[0].url, "https://news.example.com/b");
         assert_eq!(merged.url_usage[0].duration, 90);
+    }
+
+    #[test]
+    fn 概览统计应过滤排除域名并重算浏览器时长() {
+        let stats = DailyStats {
+            total_duration: 360,
+            screenshot_count: 6,
+            app_usage: vec![],
+            category_usage: vec![],
+            browser_duration: 210,
+            url_usage: vec![
+                UrlUsage {
+                    url: "https://linux.do/latest".to_string(),
+                    domain: "linux.do".to_string(),
+                    duration: 120,
+                },
+                UrlUsage {
+                    url: "linux.dolatest".to_string(),
+                    domain: "linux.dolatest".to_string(),
+                    duration: 30,
+                },
+                UrlUsage {
+                    url: "https://github.com/issues".to_string(),
+                    domain: "github.com".to_string(),
+                    duration: 60,
+                },
+            ],
+            domain_usage: vec![
+                DomainUsage {
+                    domain: "linux.do".to_string(),
+                    duration: 120,
+                    semantic_category: Some("资料阅读".to_string()),
+                    urls: vec![UrlDetail {
+                        url: "https://linux.do/latest".to_string(),
+                        duration: 120,
+                    }],
+                },
+                DomainUsage {
+                    domain: "linux.dolatest".to_string(),
+                    duration: 30,
+                    semantic_category: Some("资料阅读".to_string()),
+                    urls: vec![UrlDetail {
+                        url: "linux.dolatest".to_string(),
+                        duration: 30,
+                    }],
+                },
+                DomainUsage {
+                    domain: "github.com".to_string(),
+                    duration: 60,
+                    semantic_category: Some("编码开发".to_string()),
+                    urls: vec![UrlDetail {
+                        url: "https://github.com/issues".to_string(),
+                        duration: 60,
+                    }],
+                },
+            ],
+            browser_usage: vec![BrowserUsage {
+                browser_name: "Google Chrome".to_string(),
+                duration: 210,
+                executable_path: Some("/Applications/Google Chrome.app".to_string()),
+                domains: vec![
+                    DomainUsage {
+                        domain: "linux.do".to_string(),
+                        duration: 120,
+                        semantic_category: Some("资料阅读".to_string()),
+                        urls: vec![UrlDetail {
+                            url: "https://linux.do/latest".to_string(),
+                            duration: 120,
+                        }],
+                    },
+                    DomainUsage {
+                        domain: "linux.dolatest".to_string(),
+                        duration: 30,
+                        semantic_category: Some("资料阅读".to_string()),
+                        urls: vec![UrlDetail {
+                            url: "linux.dolatest".to_string(),
+                            duration: 30,
+                        }],
+                    },
+                    DomainUsage {
+                        domain: "github.com".to_string(),
+                        duration: 60,
+                        semantic_category: Some("编码开发".to_string()),
+                        urls: vec![UrlDetail {
+                            url: "https://github.com/issues".to_string(),
+                            duration: 60,
+                        }],
+                    },
+                ],
+            }],
+            work_time_duration: 0,
+            hourly_activity_distribution: vec![],
+        };
+
+        let filtered = apply_excluded_domains_to_stats(stats, &["linux.do".to_string()]);
+
+        assert_eq!(filtered.browser_duration, 60);
+        assert_eq!(filtered.browser_usage.len(), 1);
+        assert_eq!(filtered.browser_usage[0].domains.len(), 1);
+        assert_eq!(filtered.browser_usage[0].domains[0].domain, "github.com");
+        assert_eq!(filtered.url_usage.len(), 1);
+        assert_eq!(filtered.url_usage[0].domain, "github.com");
+        assert_eq!(filtered.domain_usage.len(), 1);
+        assert_eq!(filtered.domain_usage[0].domain, "github.com");
     }
 
     fn sample_noisy_references() -> Vec<MemorySearchItem> {
@@ -8332,13 +8953,13 @@ mod tests {
             Some(&sample_review()),
             None,
             &["周报复盘".to_string()],
+            AppLocale::ZhCn,
         );
 
         assert!(answer.contains("## 结论"));
-        assert!(answer.contains("## 结果概览"));
-        assert!(answer.contains("## 过程分析"));
-        assert!(answer.contains("## 依据补充"));
-        assert!(answer.contains("## 复盘总结"));
+        assert!(answer.contains("## 时间分布"));
+        assert!(answer.contains("## 工作段"));
+        assert!(answer.contains("可以继续追问"));
     }
 
     #[test]
@@ -8352,11 +8973,11 @@ mod tests {
             Some(&sample_review()),
             None,
             &["周报复盘".to_string()],
+            AppLocale::ZhCn,
         );
 
         assert!(!answer.contains("../Pycharm_Project/Work_Review/src-tauri"));
         assert!(!answer.contains("无标题 - Google Chrome - momoi"));
-        assert!(answer.contains("直接命中的原始记录区分度不高"));
     }
 }
 
