@@ -212,8 +212,9 @@ impl Analyzer for CloudAnalyzer {
 
             let screenshot_path = screenshots_dir.join(&activity.screenshot_path);
             if screenshot_path.exists() {
-                if let Ok(insight) = self.analyze_screenshot(&screenshot_path).await {
-                    insights.push(format!("[{}] {}", activity.app_name, insight));
+                match self.analyze_screenshot(&screenshot_path).await {
+                    Ok(insight) => insights.push(format!("[{}] {}", activity.app_name, insight)),
+                    Err(e) => log::warn!("截图分析失败 {}: {e}", activity.screenshot_path),
                 }
             }
         }

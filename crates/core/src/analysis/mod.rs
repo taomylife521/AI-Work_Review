@@ -109,6 +109,14 @@ pub fn create_analyzer(
     custom_prompt: &str,
     locale: AppLocale,
 ) -> Box<dyn Analyzer + Send + Sync> {
+    log::info!(
+        "create_analyzer: mode={:?}, provider={:?}, endpoint={}, model={}, has_api_key={}",
+        mode,
+        provider,
+        endpoint,
+        model,
+        api_key.is_some()
+    );
     match mode {
         AiMode::Local => Box::new(local::LocalAnalyzer::new(
             endpoint,
@@ -432,18 +440,23 @@ pub fn generate_stats_summary_for_locale(stats: &DailyStats, locale: AppLocale) 
     summary
 }
 
-/// 生成活动时间线文本（用于日报）
+/// 生成活动时间线文本（用于日报，默认折叠）
 /// 显示按时间排序的应用使用路径
-pub fn generate_activity_timeline(activities: &[crate::database::Activity], locale: AppLocale) -> String {
+pub fn generate_activity_timeline(
+    activities: &[crate::database::Activity],
+    locale: AppLocale,
+) -> String {
     if activities.is_empty() {
         return String::new();
     }
 
-    let header = match locale {
-        AppLocale::ZhCn => "### 活动时间线\n\n",
-        AppLocale::ZhTw => "### 活動時間線\n\n",
-        AppLocale::En => "### Activity Timeline\n\n",
+    let summary_label = match locale {
+        AppLocale::ZhCn => "活动时间线",
+        AppLocale::ZhTw => "活動時間線",
+        AppLocale::En => "Activity Timeline",
     };
+
+    let count = activities.len();
 
     let mut lines = Vec::new();
 
@@ -462,9 +475,9 @@ pub fn generate_activity_timeline(activities: &[crate::database::Activity], loca
         let duration_str = format_duration_for_locale(act.duration, locale);
         let app_name = crate::categorize::normalize_display_app_name(&act.app_name);
 
-        // 截断过长的窗口标题
-        let title = if act.window_title.len() > 60 {
-            format!("{}…", &act.window_title[..57])
+        let title = if act.window_title.chars().count() > 60 {
+            let truncated: String = act.window_title.chars().take(57).collect();
+            format!("{truncated}…")
         } else {
             act.window_title.clone()
         };
@@ -478,10 +491,18 @@ pub fn generate_activity_timeline(activities: &[crate::database::Activity], loca
     let col_header = match locale {
         AppLocale::ZhCn => "| 时间段 | 时长 | 应用 | 窗口 |\n|--------|------|------|------|\n",
         AppLocale::ZhTw => "| 時間段 | 時長 | 應用 | 視窗 |\n|--------|------|------|------|\n",
-        AppLocale::En => "| Period | Duration | App | Window |\n|--------|----------|-----|--------|\n",
+        AppLocale::En => {
+            "| Period | Duration | App | Window |\n|--------|----------|-----|--------|\n"
+        }
     };
 
-    format!("{}{}{}", header, col_header, lines.join("\n"))
+    format!(
+        "<details>\n<summary>{}（{}条记录）</summary>\n\n{}{}</details>",
+        summary_label,
+        count,
+        col_header,
+        lines.join("\n")
+    )
 }
 
 #[cfg(test)]

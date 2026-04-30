@@ -1,9 +1,9 @@
 use crate::config::{ScreenshotDisplayMode, ScreenshotWidthMode, StorageConfig};
 use crate::error::{AppError, Result};
-#[cfg(any(target_os = "linux", test))]
-use crate::linux_session::{LinuxDesktopEnvironment, LinuxDesktopSession};
 #[cfg(target_os = "linux")]
 use crate::linux_session::{current_linux_desktop_environment, current_linux_desktop_session};
+#[cfg(any(target_os = "linux", test))]
+use crate::linux_session::{LinuxDesktopEnvironment, LinuxDesktopSession};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use image::DynamicImage;
@@ -287,7 +287,9 @@ impl ScreenshotService {
             }
             Err(e) => {
                 log::warn!("Windows Graphics Capture 也失败: {e}");
-                return Err(AppError::Screenshot(format!("截图失败（GDI 和 WGC 均不可用）: {e}")));
+                return Err(AppError::Screenshot(format!(
+                    "截图失败（GDI 和 WGC 均不可用）: {e}"
+                )));
             }
         }
     }
@@ -1303,7 +1305,9 @@ fn is_linux_command_available(command: &str) -> bool {
 
     std::env::var_os("PATH")
         .into_iter()
-        .flat_map(|unparsed: std::ffi::OsString| std::env::split_paths(&unparsed).collect::<Vec<_>>())
+        .flat_map(|unparsed: std::ffi::OsString| {
+            std::env::split_paths(&unparsed).collect::<Vec<_>>()
+        })
         .map(|dir| dir.join(command))
         .any(|path| {
             std::fs::metadata(&path)
@@ -1514,7 +1518,7 @@ fn prepare_archive_image_with_config(
 
     if width > max_width {
         let scale = max_width as f32 / width as f32;
-        let new_height = (height as f32 * scale) as u32;
+        let new_height = (height as f32 * scale).max(1.0) as u32;
         dynamic_image.resize(max_width, new_height, FilterType::Lanczos3)
     } else {
         dynamic_image
@@ -1886,7 +1890,8 @@ Monitors: 2
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let data_dir = std::env::temp_dir().join(format!("work-review-full-shot-test-{unique_suffix}"));
+        let data_dir =
+            std::env::temp_dir().join(format!("work-review-full-shot-test-{unique_suffix}"));
         let screenshots_dir = data_dir.join("screenshots").join("2026-04-17");
         fs::create_dir_all(&screenshots_dir).unwrap();
 

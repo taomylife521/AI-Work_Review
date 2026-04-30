@@ -1000,6 +1000,18 @@ impl Database {
 
     /// 清理当天的重复活动记录
     /// 对于每个应用（非浏览器），合并同名记录
+    /// 删除指定日期之前的所有活动记录
+    pub fn delete_activities_before_date(&self, before_date: &str) -> Result<usize> {
+        let conn = self.conn.lock().map_err(|e| {
+            crate::error::AppError::Unknown(format!("数据库锁获取失败: {e}"))
+        })?;
+        let count = conn.execute(
+            "DELETE FROM activities WHERE date(timestamp, 'unixepoch', 'localtime') < ?1",
+            rusqlite::params![before_date],
+        )?;
+        Ok(count)
+    }
+
     /// 对于浏览器，按 URL 合并记录
     /// 将重复记录的 duration 累加到保留记录后再删除重复项
     /// 返回删除的记录数和截图路径
@@ -1007,6 +1019,8 @@ impl Database {
         let conn = self.conn.lock().map_err(|e| {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
+
+        let tx = conn.unchecked_transaction()?;
 
         // 获取当天的时间戳范围
         let date_parsed = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
@@ -1094,6 +1108,8 @@ impl Database {
         }
 
         log::info!("清理重复记录: 删除 {total_deleted} 条，时长已合并到保留记录");
+
+        tx.commit()?;
 
         Ok((total_deleted, all_paths))
     }

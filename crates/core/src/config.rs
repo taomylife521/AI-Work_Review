@@ -346,12 +346,12 @@ impl Default for PrivacyConfig {
 impl PrivacyConfig {
     /// 获取应用的隐私级别
     pub fn get_app_privacy_level(&self, app_name: &str) -> PrivacyLevel {
-        let app_lower = app_name.to_lowercase();
-        // 先检查新的规则（使用包含匹配，更宽容）
+        let normalized = crate::categorize::normalize_display_app_name(app_name).to_lowercase();
+        // 先检查新的规则（规范化后精确匹配 + 包含匹配）
         for rule in &self.app_rules {
-            let rule_lower = rule.app_name.to_lowercase();
-            // 支持双向包含匹配：规则包含应用名 或 应用名包含规则
-            if app_lower.contains(&rule_lower) || rule_lower.contains(&app_lower) {
+            let rule_normalized = crate::categorize::normalize_display_app_name(&rule.app_name).to_lowercase();
+            // 精确匹配或包含匹配（应用名包含规则名，处理 "Google Chrome" 包含 "Chrome" 的情况）
+            if normalized == rule_normalized || normalized.contains(&rule_normalized) {
                 log::debug!(
                     "应用 {} 匹配规则 {}, 级别: {:?}",
                     app_name,
@@ -363,8 +363,8 @@ impl PrivacyConfig {
         }
         // 兼容旧版 excluded_apps（视为 Ignored）
         for excluded in &self.excluded_apps {
-            let excluded_lower = excluded.to_lowercase();
-            if app_lower.contains(&excluded_lower) || excluded_lower.contains(&app_lower) {
+            let excluded_normalized = crate::categorize::normalize_display_app_name(excluded).to_lowercase();
+            if normalized.contains(&excluded_normalized) {
                 return PrivacyLevel::Ignored;
             }
         }

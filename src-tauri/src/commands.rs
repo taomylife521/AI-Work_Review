@@ -3793,7 +3793,7 @@ pub(crate) async fn generate_report_inner(
     );
 
     // 生成报告（spawn 隔离 panic，防止内部错误杀死整个 tokio 线程）
-    let screenshots_dir = data_dir.join("screenshots");
+    let screenshots_dir = data_dir.clone();
     let date_gen = date.clone();
     let report_result = match tokio::spawn(async move {
         analyzer
@@ -3900,13 +3900,10 @@ pub async fn generate_report(
     state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<String, AppError> {
     {
-        let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+        let mut s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
         if s.generating_report {
             return Err(AppError::Unknown("日报正在生成中，请稍候".to_string()));
         }
-    }
-    {
-        let mut s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
         s.generating_report = true;
     }
     let result = generate_report_inner(date, force, locale, &app, state.inner()).await;
@@ -6931,7 +6928,11 @@ pub async fn clear_old_activities(
                     // 保留今天和昨天的目录
                     if name != today && name != yesterday && entry.path().is_dir() {
                         if let Ok(dir_entries) = std::fs::read_dir(entry.path()) {
-                            deleted_screenshots += dir_entries.count();
+                            for file_entry in dir_entries.flatten() {
+                                if file_entry.path().is_file() {
+                                    deleted_screenshots += 1;
+                                }
+                            }
                         }
                         let _ = std::fs::remove_dir_all(entry.path());
                     }
@@ -6940,13 +6941,18 @@ pub async fn clear_old_activities(
         }
     }
 
-    // 注意：不删除数据库记录，只删除截图文件
-    // OCR 文本保留在数据库中供日报分析使用
+    // 同步清理数据库中对应的旧记录
+    {
+        let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+        if let Err(e) = state.database.delete_activities_before_date(&today) {
+            log::warn!("清理旧活动记录失败: {e}");
+        }
+    }
 
     Ok(serde_json::json!({
         "deleted_screenshots": deleted_screenshots,
         "kept_dates": [today, yesterday],
-        "message": format!("已清理 {} 张旧截图，保留今天和昨天的数据", deleted_screenshots)
+        "message": format!("已清理 {} 张旧截图和对应活动记录，保留今天和昨天的数据", deleted_screenshots)
     }))
 }
 

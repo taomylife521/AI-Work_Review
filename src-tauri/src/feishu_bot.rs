@@ -148,19 +148,17 @@ async fn get_tenant_token(client: &Client, app_id: &str, app_secret: &str) -> Op
     let data: serde_json::Value = resp.json().await.ok()?;
     let token = data.get("tenant_access_token")?.as_str()?.to_string();
     let expire = data.get("expire").and_then(|v| v.as_u64()).unwrap_or(7200);
-    // Cache with 60s safety margin
+    let cache_ttl = expire.saturating_sub(60);
     if let Ok(mut cache) = TOKEN_CACHE.lock() {
-        *cache = Some((token.clone(), Instant::now() + Duration::from_secs(expire - 60)));
+        *cache = Some((
+            token.clone(),
+            Instant::now() + Duration::from_secs(cache_ttl.max(60)),
+        ));
     }
     Some(token)
 }
 
-async fn reply_message(
-    client: &Client,
-    token: &str,
-    message_id: &str,
-    text: &str,
-) -> Option<()> {
+async fn reply_message(client: &Client, token: &str, message_id: &str, text: &str) -> Option<()> {
     let url = format!(
         "https://open.feishu.cn/open-apis/im/v1/messages/{}/reply",
         message_id
@@ -193,11 +191,9 @@ fn resolve_date(input: Option<&str>) -> String {
     let s = input.unwrap_or("today").to_lowercase();
     match s.as_str() {
         "today" | "今天" => chrono::Local::now().format("%Y-%m-%d").to_string(),
-        "yesterday" | "昨天" => {
-            (chrono::Local::now() - chrono::Duration::days(1))
-                .format("%Y-%m-%d")
-                .to_string()
-        }
+        "yesterday" | "昨天" => (chrono::Local::now() - chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string(),
         _ => s,
     }
 }
@@ -283,14 +279,14 @@ fn normalize_report_for_chat(content: &str) -> String {
                 table_headers = cells;
                 continue;
             }
-            let row = if table_headers.first().is_some_and(|h| h.contains("序号")) && cells.len() >= 3
-            {
-                format!("- {}. {}（{}）", cells[0], cells[1], cells[2])
-            } else if cells.len() >= 2 {
-                format!("- {}：{}", cells[0], cells[1..].join(" / "))
-            } else {
-                format!("- {}", cells.join(" / "))
-            };
+            let row =
+                if table_headers.first().is_some_and(|h| h.contains("序号")) && cells.len() >= 3 {
+                    format!("- {}. {}（{}）", cells[0], cells[1], cells[2])
+                } else if cells.len() >= 2 {
+                    format!("- {}：{}", cells[0], cells[1..].join(" / "))
+                } else {
+                    format!("- {}", cells.join(" / "))
+                };
             if row != last_non_empty {
                 last_non_empty = row.clone();
                 lines.push(row);
@@ -325,11 +321,7 @@ fn normalize_report_for_chat(content: &str) -> String {
     lines.join("\n")
 }
 
-async fn handle_cmd(
-    client: &Client,
-    devices: &[DeviceEndpoint],
-    text: &str,
-) -> Option<String> {
+async fn handle_cmd(client: &Client, devices: &[DeviceEndpoint], text: &str) -> Option<String> {
     let parts: Vec<&str> = text.split_whitespace().collect();
     let cmd = normalize_command(parts.first().copied().unwrap_or(""));
     if cmd.is_empty() {
@@ -365,7 +357,8 @@ async fn handle_cmd(
             };
             let url = format!("{}/v1/device?token={}", device.url, device.token);
             match api_get(client, &url).await {
-                Some(data) => Some(format!(
+                Some(data) => {
+                    Some(format!(
                     "🖥 设备状态\n{OUTPUT_DIVIDER}\n设备：{}\nID：{}\n名称：{}\n平台：{}\n录制：{}",
                     device.name,
                     data.get("deviceId").and_then(|v| v.as_str()).unwrap_or("-"),
@@ -376,7 +369,8 @@ async fn handle_cmd(
                     } else {
                         "否"
                     },
-                )),
+                ))
+                }
                 None => Some(connection_failed_reply(&device.name)),
             }
         }
@@ -521,11 +515,7 @@ pub async fn handle_feishu_webhook(
         None => return FeishuResponse::error(400, "missing header"),
     };
 
-    if header
-        .get("event_type")
-        .and_then(|v| v.as_str())
-        != Some("im.message.receive_v1")
-    {
+    if header.get("event_type").and_then(|v| v.as_str()) != Some("im.message.receive_v1") {
         return FeishuResponse::json(
             200,
             &status_payload("ignored", "event_type_not_supported", None),
@@ -558,7 +548,10 @@ pub async fn handle_feishu_webhook(
     };
 
     // Only handle text messages
-    let msg_type = message.get("message_type").and_then(|v| v.as_str()).unwrap_or("");
+    let msg_type = message
+        .get("message_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     if msg_type != "text" {
         let reply = NON_TEXT_REPLY.to_string();
         let app_id = match config.feishu_app_id.as_deref() {
@@ -575,7 +568,11 @@ pub async fn handle_feishu_webhook(
             _ => {
                 return FeishuResponse::json(
                     200,
-                    &status_payload("ignored", "non_text_message", Some("feishu_app_secret 未配置")),
+                    &status_payload(
+                        "ignored",
+                        "non_text_message",
+                        Some("feishu_app_secret 未配置"),
+                    ),
                 )
             }
         };
@@ -592,9 +589,16 @@ pub async fn handle_feishu_webhook(
         );
     }
 
-    let content_str = message.get("content").and_then(|v| v.as_str()).unwrap_or("{}");
+    let content_str = message
+        .get("content")
+        .and_then(|v| v.as_str())
+        .unwrap_or("{}");
     let content: serde_json::Value = serde_json::from_str(content_str).unwrap_or_default();
-    let text = content.get("text").and_then(|v| v.as_str()).unwrap_or("").trim();
+    let text = content
+        .get("text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
 
     if text.is_empty() {
         return FeishuResponse::json(200, &status_payload("ignored", "empty_text", None));
