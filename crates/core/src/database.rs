@@ -684,44 +684,6 @@ impl Database {
         }
     }
 
-    /// 获取指定 URL 最近24小时内的最新一条活动记录
-    pub fn get_last_activity_by_url(&self, url: &str) -> Result<Option<Activity>> {
-        let conn = self.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
-
-        // 回溯24小时
-        let start_ts = chrono::Local::now().timestamp() - 86400;
-
-        let mut stmt = conn.prepare(
-            "SELECT id, timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url, executable_path, semantic_category, semantic_confidence
-             FROM activities
-             WHERE browser_url = ?1 AND timestamp >= ?2
-             ORDER BY id DESC
-             LIMIT 1"
-        )?;
-
-        let mut rows = stmt.query(params![url, start_ts])?;
-        if let Some(row) = rows.next()? {
-            Ok(Some(Activity {
-                id: Some(row.get(0)?),
-                timestamp: row.get(1)?,
-                app_name: row.get(2)?,
-                window_title: row.get(3)?,
-                screenshot_path: row.get(4)?,
-                ocr_text: row.get(5)?,
-                category: row.get(6)?,
-                duration: row.get(7)?,
-                browser_url: row.get(8)?,
-                executable_path: row.get(9)?,
-                semantic_category: row.get(10)?,
-                semantic_confidence: row.get(11)?,
-            }))
-        } else {
-            Ok(None)
-        }
-    }
-
     /// 获取指定应用今天的最近一条活动记录（用于合并判断）
     pub fn get_latest_activity_by_app(&self, app_name: &str) -> Result<Option<Activity>> {
         let conn = self.conn.lock().map_err(|e| {
@@ -1113,20 +1075,6 @@ impl Database {
         tx.commit()?;
 
         Ok((total_deleted, all_paths))
-    }
-
-    /// 删除指定时间之前的所有活动记录
-    pub fn delete_activities_before(&self, before_timestamp: i64) -> Result<usize> {
-        let conn = self.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
-
-        let deleted = conn.execute(
-            "DELETE FROM activities WHERE timestamp < ?1",
-            params![before_timestamp],
-        )?;
-
-        Ok(deleted)
     }
 
     /// 获取指定日期的统计数据
@@ -1751,31 +1699,6 @@ impl Database {
         Ok(dates)
     }
 
-    /// 获取指定日期的所有截图路径
-    pub fn get_screenshots(&self, date: &str) -> Result<Vec<String>> {
-        let conn = self.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
-
-        let start_ts = {
-            let date_parsed = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
-                .map_err(|e| AppError::Config(e.to_string()))?;
-            safe_local_timestamp(date_parsed.and_hms_opt(0, 0, 0).unwrap())
-        };
-        let end_ts = start_ts + 86400;
-
-        let mut stmt = conn.prepare(
-            "SELECT screenshot_path FROM activities WHERE timestamp >= ?1 AND timestamp < ?2 ORDER BY timestamp ASC"
-        )?;
-
-        let paths: Vec<String> = stmt
-            .query_map(params![start_ts, end_ts], |row| row.get(0))?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        Ok(paths)
-    }
-
     /// 保存小时摘要
     pub fn save_hourly_summary(&self, summary: &HourlySummary) -> Result<i64> {
         let conn = self.conn.lock().map_err(|e| {
@@ -2386,7 +2309,7 @@ impl Database {
             report_date_to.as_deref(),
             fetch_limit,
         ) {
-            for (date, content, ai_mode, model_name, created_at, _rank) in fts_rows {
+            for (date, content, _ai_mode, _model_name, created_at, _rank) in fts_rows {
                 items.push(MemorySearchItem {
                     source_type: "daily_report".to_string(),
                     source_id: None,

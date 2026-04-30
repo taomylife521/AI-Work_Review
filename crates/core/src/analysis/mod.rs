@@ -72,11 +72,6 @@ pub fn normalize_custom_prompt(custom_prompt: &str) -> Option<String> {
     }
 }
 
-#[allow(dead_code)]
-pub fn append_custom_prompt(base_prompt: String, custom_prompt: &str) -> String {
-    append_custom_prompt_for_locale(base_prompt, custom_prompt, AppLocale::ZhCn)
-}
-
 pub fn append_custom_prompt_for_locale(
     base_prompt: String,
     custom_prompt: &str,
@@ -293,11 +288,6 @@ fn wrap_with_range_label(range: String, duration: String, locale: AppLocale) -> 
     }
 }
 
-#[allow(dead_code)]
-pub fn generate_hourly_activity_summary(stats: &DailyStats) -> Option<String> {
-    generate_hourly_activity_summary_for_locale(stats, AppLocale::ZhCn)
-}
-
 pub fn generate_hourly_activity_summary_for_locale(
     stats: &DailyStats,
     locale: AppLocale,
@@ -360,11 +350,6 @@ pub fn generate_hourly_activity_summary_for_locale(
 }
 
 /// 生成统计摘要
-#[allow(dead_code)]
-pub fn generate_stats_summary(stats: &DailyStats) -> String {
-    generate_stats_summary_for_locale(stats, AppLocale::ZhCn)
-}
-
 pub fn generate_stats_summary_for_locale(stats: &DailyStats, locale: AppLocale) -> String {
     let mut summary = String::new();
 
@@ -577,9 +562,8 @@ fn format_hhmm(timestamp: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        append_custom_prompt, append_custom_prompt_for_locale, generate_stats_summary,
-        generate_stats_summary_for_locale, normalize_custom_prompt,
-        translate_semantic_category_name, AppLocale,
+        append_custom_prompt_for_locale, generate_stats_summary_for_locale,
+        normalize_custom_prompt, translate_semantic_category_name, AppLocale,
     };
     use crate::database::{DailyStats, HourlyActivityBucket};
 
@@ -590,7 +574,7 @@ mod tests {
 
     #[test]
     fn 应将附加提示词追加到基础提示词末尾() {
-        let prompt = append_custom_prompt("基础提示".to_string(), "输出偏正式一些");
+        let prompt = append_custom_prompt_for_locale("基础提示".to_string(), "输出偏正式一些", AppLocale::ZhCn);
 
         assert!(prompt.contains("基础提示"));
         assert!(prompt.contains("额外要求"));
@@ -627,7 +611,7 @@ mod tests {
             ..Default::default()
         };
 
-        let summary = generate_stats_summary(&stats);
+        let summary = generate_stats_summary_for_locale(&stats, AppLocale::ZhCn);
         let english_summary = generate_stats_summary_for_locale(&stats, AppLocale::En);
 
         assert!(summary.contains("按小时活跃度"));

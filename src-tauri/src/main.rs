@@ -561,7 +561,9 @@ impl BreakReminderRuntime {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BreakReminderSignal {
     TickMillis(u64),
+    #[allow(dead_code)]
     TickMinutes(u64),
+    #[allow(dead_code)]
     Dismiss,
 }
 
@@ -1137,6 +1139,7 @@ fn avatar_monitor_poll_interval_ms_for_platform(is_macos: bool, active: bool) ->
     }
 }
 
+#[allow(dead_code)]
 fn avatar_monitor_poll_interval_ms() -> u64 {
     avatar_monitor_poll_interval_ms_for_platform(cfg!(target_os = "macos"), true)
 }
@@ -1378,7 +1381,7 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
             Err(_) => continue,
         };
 
-        let app_category_rules = {
+        {
             let mut state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
             state_guard.cached_active_window = Some((sampled_at, active_window.clone()));
             let rules = &state_guard.config.app_category_rules;

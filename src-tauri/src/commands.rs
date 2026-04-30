@@ -243,6 +243,7 @@ fn resolve_saved_report_metadata(
     }
 }
 
+#[allow(dead_code)]
 fn normalize_saved_report_ai_mode(value: &str) -> String {
     value.trim().to_lowercase()
 }
@@ -1234,6 +1235,7 @@ fn detect_assistant_question_kind_with_mode(
     current_kind
 }
 
+#[allow(dead_code)]
 fn detect_assistant_question_kind(
     question: &str,
     history: &[AssistantChatMessage],
@@ -1692,6 +1694,7 @@ fn build_reference_line(item: &MemorySearchItem) -> String {
     line
 }
 
+#[allow(dead_code)]
 fn push_markdown_section(answer: &mut String, title: &str, lines: Vec<String>, empty_text: &str) {
     if lines.is_empty() && empty_text.is_empty() {
         return;
@@ -4630,6 +4633,7 @@ fn ollama_model_should_be_listed(
     }
 }
 
+#[allow(dead_code)]
 fn parse_ollama_model_names(data: &serde_json::Value) -> Result<Vec<String>, AppError> {
     let models = data["models"]
         .as_array()

@@ -1,9 +1,5 @@
-use crate::config::{
-    normalize_category_key_private, AppCategoryRule, CustomCategory, WebsiteSemanticRule,
-};
 use once_cell::sync::Lazy;
 use regex::Regex;
-use std::collections::HashMap;
 
 static URL_LIKE_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
@@ -701,19 +697,5 @@ pub fn get_category_name(category: &str) -> &str {
         "design" => "设计工具",
         "entertainment" => "娱乐",
         _ => "其他",
-    }
-}
-
-/// 获取分类的图标
-#[allow(dead_code)]
-pub fn get_category_icon(category: &str) -> &str {
-    match category {
-        "development" => "💻",
-        "browser" => "🌐",
-        "communication" => "💬",
-        "office" => "📄",
-        "design" => "🎨",
-        "entertainment" => "🎵",
-        _ => "📦",
     }
 }

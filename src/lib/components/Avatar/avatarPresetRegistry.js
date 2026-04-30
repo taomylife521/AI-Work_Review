@@ -1,5 +1,4 @@
 import mouseBg from './assets/bongocat/mouse-bg.png';
-import standardBg from './assets/bongocat/standard-bg.png';
 import modelStandardBackground from './assets/bongocat/model-standard/background.png';
 import modelStandardCover from './assets/bongocat/model-standard/cover.png';
 import modelGamepadBackground from './assets/bongocat/model-gamepad/background.png';
@@ -297,6 +296,40 @@ export const AVATAR_PRESET_OPTIONS = [
     titleKey: 'settingsAppearance.avatarPresetOriginalTitle',
     descriptionKey: 'settingsAppearance.avatarPresetOriginalDesc',
     previewMotionBeat: 18,
+    previewInputActivity: {
+      keyboardActive: true,
+      mouseActive: true,
+      keyboardGroup: 'key-q',
+      keyboardVisualKey: 'KeyQ',
+      mouseGroup: 'mouse-left',
+      cursorRatioX: 0.36,
+      cursorRatioY: 0.62,
+      lastKeyboardInputAtMs: 0,
+      lastMouseInputAtMs: 0,
+    },
+  },
+  {
+    id: 'keyboard-focus',
+    titleKey: 'settingsAppearance.avatarPresetKeyboardFocusTitle',
+    descriptionKey: 'settingsAppearance.avatarPresetKeyboardFocusDesc',
+    previewMotionBeat: 22,
+    previewInputActivity: {
+      keyboardActive: true,
+      mouseActive: false,
+      keyboardGroup: 'key-q',
+      keyboardVisualKey: 'KeyQ',
+      mouseGroup: null,
+      cursorRatioX: 0.5,
+      cursorRatioY: 0.5,
+      lastKeyboardInputAtMs: 0,
+      lastMouseInputAtMs: 0,
+    },
+  },
+  {
+    id: 'minimal-office',
+    titleKey: 'settingsAppearance.avatarPresetMinimalOfficeTitle',
+    descriptionKey: 'settingsAppearance.avatarPresetMinimalOfficeDesc',
+    previewMotionBeat: 15,
     previewInputActivity: {
       keyboardActive: true,
       mouseActive: true,

@@ -1,4 +1,4 @@
-use crate::model::{SkillCategory, SkillId, SkillPackage};
+use crate::model::{SkillId, SkillPackage};
 use crate::state::SkillState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -25,20 +25,9 @@ impl SkillRegistry {
         self.packages.insert(id, package);
     }
 
-    /// 注销技能
-    pub fn unregister(&mut self, id: &str) -> Option<SkillPackage> {
-        self.states.remove(id);
-        self.packages.remove(id)
-    }
-
     /// 获取技能包
     pub fn get_package(&self, id: &str) -> Option<&SkillPackage> {
         self.packages.get(id)
-    }
-
-    /// 获取技能包（可变）
-    pub fn get_package_mut(&mut self, id: &str) -> Option<&mut SkillPackage> {
-        self.packages.get_mut(id)
     }
 
     /// 获取技能状态
@@ -56,50 +45,7 @@ impl SkillRegistry {
         self.packages.values().collect()
     }
 
-    /// 列出已启用的技能
-    pub fn list_enabled(&self) -> Vec<&SkillPackage> {
-        self.packages.values().filter(|p| p.enabled).collect()
-    }
-
-    /// 按分类列出
-    pub fn list_by_category(&self, category: &SkillCategory) -> Vec<&SkillPackage> {
-        self.packages
-            .values()
-            .filter(|p| &p.category == category)
-            .collect()
-    }
-
-    /// 启用技能
-    pub fn enable(&mut self, id: &str) -> bool {
-        if let Some(pkg) = self.packages.get_mut(id) {
-            pkg.enabled = true;
-            true
-        } else {
-            false
-        }
-    }
-
-    /// 禁用技能
-    pub fn disable(&mut self, id: &str) -> bool {
-        if let Some(pkg) = self.packages.get_mut(id) {
-            pkg.enabled = false;
-            true
-        } else {
-            false
-        }
-    }
-
-    /// 从 JSON 加载注册表
-    pub fn load_from_json(json: &str) -> anyhow::Result<Self> {
-        Ok(serde_json::from_str(json)?)
-    }
-
-    /// 导出为 JSON
-    pub fn save_to_json(&self) -> anyhow::Result<String> {
-        Ok(serde_json::to_string_pretty(self)?)
-    }
-
-    /// 获取技能执行日志（从 state 中提取）
+    /// 获取技能执行统计
     pub fn get_execution_stats(&self, id: &str) -> Option<&crate::state::SkillStats> {
         self.states.get(id).map(|s| &s.stats)
     }

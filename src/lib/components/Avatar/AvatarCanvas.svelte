@@ -193,17 +193,6 @@
     };
   }
 
-  function getStaticCoverTransform(
-    presetId,
-    keyboardActive,
-    mouseActive,
-    keyboardGroup,
-    mouseGroup,
-    frameIndex
-  ) {
-    return '';
-  }
-
   function deriveKeyboardGroupFromVisualKey(baseGroup, visualKey) {
     if (baseGroup && baseGroup !== 'idle') {
       return baseGroup;
@@ -345,14 +334,7 @@
   $: sceneSrc = preset.sceneSrc;
   $: contentTransform = preset.contentTransform ?? '';
   $: staticCoverSrc = preset.staticCoverSrc ?? null;
-  $: staticCoverTransform = getStaticCoverTransform(
-    preset.id,
-    keyboardActive,
-    mouseActive,
-    keyboardGroup,
-    mouseGroup,
-    frameIndex
-  );
+  $: staticCoverTransform = '';
   $: sceneAlt = `${state.appName || 'Work Review'} 桌宠`;
   $: frameIndex = Math.floor(motionBeat / 2);
   $: useSourceKeyboardMode = renderMode === 'source-keyboard';

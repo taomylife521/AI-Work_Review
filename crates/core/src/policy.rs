@@ -1,7 +1,4 @@
 use crate::config::AppConfig;
-use crate::database::Database;
-use crate::error::Result;
-use crate::privacy::PrivacyFilter;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -160,24 +157,10 @@ impl PolicyEnforcer {
         decision
     }
 
-    /// 检查权限（无审计记录）
-    pub fn check_permission_no_log(
-        &self,
-        source: &CallSource,
-        permission: Permission,
-    ) -> PolicyDecision {
-        self.evaluate(source, permission).0
-    }
-
     /// 注册 Skill 权限
     pub fn register_skill_permissions(&mut self, skill_id: &str, permissions: Vec<Permission>) {
         self.skill_permissions
             .insert(skill_id.to_string(), permissions);
-    }
-
-    /// 获取审计日志
-    pub fn get_audit_log(&self, limit: usize) -> Vec<&AuditEntry> {
-        self.audit_log.iter().rev().take(limit).collect()
     }
 
     /// 获取统计：按来源分组的调用次数
@@ -258,27 +241,6 @@ impl PolicyEnforcer {
         if self.audit_log.len() > self.max_audit_entries {
             self.audit_log
                 .drain(0..self.audit_log.len() - self.max_audit_entries);
-        }
-    }
-
-    /// 脱敏活动数据（移除截图路径、OCR 文本中的敏感信息）
-    pub fn sanitize_activity_data(
-        &self,
-        data: &mut serde_json::Value,
-        privacy_filter: &PrivacyFilter,
-    ) {
-        if let Some(arr) = data.as_array_mut() {
-            for item in arr.iter_mut() {
-                // 移除截图路径
-                if let Some(obj) = item.as_object_mut() {
-                    obj.remove("screenshot_path");
-                    // 脱敏 OCR 文本
-                    if let Some(ocr) = obj.get("ocr_text").and_then(|v| v.as_str()) {
-                        let filtered = privacy_filter.filter_text(ocr);
-                        obj.insert("ocr_text".to_string(), serde_json::Value::String(filtered));
-                    }
-                }
-            }
         }
     }
 }

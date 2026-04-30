@@ -196,7 +196,3 @@ export function preloadAppIcons(entries, invoke, options = {}) {
     queueEntries.forEach((entry) => loadAppIcon(entry, invoke, options));
 }
 
-// 获取已缓存的图标（同步）
-export function getIcon(entry) {
-    return _iconCache[getIconCacheKey(entry)] || null;
-}

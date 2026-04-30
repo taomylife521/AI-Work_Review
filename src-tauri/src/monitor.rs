@@ -3086,6 +3086,7 @@ fn get_browser_url_linux(app_name: &str, window_title: &str) -> Option<String> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux", test))]
+#[allow(dead_code)]
 fn matches_firefox_family_browser(app_lower: &str) -> bool {
     app_lower.contains("firefox")
         || app_lower.contains("zen")
@@ -4317,6 +4318,7 @@ pub fn normalize_category_key(category: &str) -> String {
 }
 
 /// 检查分类 key 是否有效（预设 + 自定义）
+#[allow(dead_code)]
 pub fn is_valid_category_key(
     category: &str,
     custom_categories: &[crate::config::CustomCategory],
@@ -4373,6 +4375,7 @@ pub fn categorize_app_with_rules(
 }
 
 /// 获取分类的中文名称
+#[allow(dead_code)]
 pub fn get_category_name(category: &str) -> &str {
     match category {
         "development" => "开发工具",

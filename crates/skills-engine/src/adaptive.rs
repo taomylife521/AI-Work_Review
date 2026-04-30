@@ -1,4 +1,4 @@
-use crate::model::{AdaptiveConfig, LearningStrategy, SignalSource, SkillPackage};
+use crate::model::{LearningStrategy, SignalSource, SkillPackage};
 use crate::state::SkillState;
 use std::collections::HashMap;
 
