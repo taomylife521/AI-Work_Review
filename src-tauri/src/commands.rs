@@ -4171,6 +4171,7 @@ fn refresh_avatar_state_for_current_window(app: &AppHandle, state: &Arc<Mutex<Ap
         let next_state = crate::avatar_engine::apply_avatar_visual_settings(
             crate::avatar_engine::derive_avatar_state_with_rules(
                 &state_guard.config.app_category_rules,
+                &state_guard.config.custom_categories,
                 &active_window.app_name,
                 &active_window.window_title,
                 active_window.browser_url.as_deref(),

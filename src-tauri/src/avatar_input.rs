@@ -809,7 +809,10 @@ unsafe extern "system" fn windows_keyboard_hook_proc(
         if let Some(key_code) = windows_virtual_key_to_avatar_key_code(keyboard_info.vkCode) {
             match w_param as u32 {
                 WM_KEYDOWN | WM_SYSKEYDOWN => {
-                    record_keyboard_input(standard_keyboard_group_from_key_code(key_code), key_code);
+                    record_keyboard_input(
+                        standard_keyboard_group_from_key_code(key_code),
+                        key_code,
+                    );
                 }
                 WM_KEYUP | WM_SYSKEYUP => {
                     release_keyboard_input(key_code);
@@ -915,8 +918,8 @@ pub(crate) fn build_avatar_input_payload(now_ms: u64) -> AvatarInputPayload {
     let keyboard_groups = normalize_keyboard_groups(&keyboard_key_codes);
     let keyboard_visual_keys = normalize_keyboard_visual_keys(&keyboard_key_codes);
     let keyboard_is_pressed = !keyboard_key_codes.is_empty();
-    let keyboard_active =
-        keyboard_is_pressed || is_input_still_active(last_keyboard_input_at_ms, now_ms, KEYBOARD_ACTIVE_WINDOW_MS);
+    let keyboard_active = keyboard_is_pressed
+        || is_input_still_active(last_keyboard_input_at_ms, now_ms, KEYBOARD_ACTIVE_WINDOW_MS);
     let primary_keyboard_group = keyboard_groups
         .first()
         .cloned()
@@ -945,7 +948,9 @@ pub(crate) fn record_keyboard_input(group_code: u8, key_code: u16) {
     let pressed_at_ms = now_ms();
     {
         let mut state = KEYBOARD_STATE.lock().unwrap_or_else(|e| e.into_inner());
-        state.pressed_keys.retain(|existing| existing.key_code != key_code);
+        state
+            .pressed_keys
+            .retain(|existing| existing.key_code != key_code);
         state.pressed_keys.push(PressedKeyState {
             key_code,
             pressed_at_ms,
@@ -959,7 +964,9 @@ pub(crate) fn record_keyboard_input(group_code: u8, key_code: u16) {
 pub(crate) fn release_keyboard_input(key_code: u16) {
     let next_primary = {
         let mut state = KEYBOARD_STATE.lock().unwrap_or_else(|e| e.into_inner());
-        state.pressed_keys.retain(|existing| existing.key_code != key_code);
+        state
+            .pressed_keys
+            .retain(|existing| existing.key_code != key_code);
         state.pressed_keys.last().copied()
     };
 
@@ -1165,6 +1172,7 @@ pub fn start_avatar_input_monitor(app: &AppHandle) {
             ];
 
             if keyboard_monitor == nil || mouse_monitor == nil {
+                INPUT_MONITOR_STARTED.store(false, Ordering::SeqCst);
                 log::warn!("桌宠输入联动注册失败：系统未返回有效的全局监听句柄");
                 return;
             }

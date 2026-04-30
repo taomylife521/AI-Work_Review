@@ -88,10 +88,11 @@
   }
 
   $: activeStates = navItems.reduce((acc, item) => {
+    const loc = $location || '/';
     if (item.path === '/') {
-      acc[item.path] = $location === '/';
+      acc[item.path] = loc === '/';
     } else {
-      acc[item.path] = $location === item.path || $location.startsWith(item.path + '/');
+      acc[item.path] = loc === item.path || loc.startsWith(item.path + '/');
     }
     return acc;
   }, {});

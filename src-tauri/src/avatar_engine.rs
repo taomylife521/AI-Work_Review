@@ -142,6 +142,7 @@ pub fn derive_avatar_state(
 ) -> AvatarStatePayload {
     derive_avatar_state_with_rules(
         &[],
+        &[],
         app_name,
         window_title,
         browser_url,
@@ -152,6 +153,7 @@ pub fn derive_avatar_state(
 
 pub fn derive_avatar_state_with_rules(
     rules: &[crate::config::AppCategoryRule],
+    custom_categories: &[crate::config::CustomCategory],
     app_name: &str,
     window_title: &str,
     browser_url: Option<&str>,
@@ -161,9 +163,10 @@ pub fn derive_avatar_state_with_rules(
     let app_name = normalize_app_name(app_name);
     let title_lower = window_title.trim().to_lowercase();
     let url_lower = browser_url.unwrap_or_default().trim().to_lowercase();
-    let manual_base_category = crate::monitor::find_category_override(rules, app_name.as_str(), &[]);
+    let manual_base_category =
+        crate::monitor::find_category_override(rules, app_name.as_str(), custom_categories);
     let base_category =
-        crate::monitor::categorize_app_with_rules(rules, app_name.as_str(), window_title, &[]);
+        crate::monitor::categorize_app_with_rules(rules, app_name.as_str(), window_title, custom_categories);
     let classification = crate::activity_classifier::classify_activity_with_base_category(
         app_name.as_str(),
         window_title,
@@ -458,13 +461,8 @@ fn clamp_window_within_current_monitor(window: &WebviewWindow, scale: f64, expan
         height: work_area.size.height as i32,
     };
     let (window_width, window_height) = avatar_window_size(scale, expanded);
-    let (clamped_x, clamped_y) = clamp_avatar_position_with_size(
-        bounds,
-        current.x,
-        current.y,
-        window_width,
-        window_height,
-    );
+    let (clamped_x, clamped_y) =
+        clamp_avatar_position_with_size(bounds, current.x, current.y, window_width, window_height);
     if (clamped_x, clamped_y) != (current.x, current.y) {
         let _ = window.set_position(Position::Physical(PhysicalPosition::new(
             clamped_x, clamped_y,
@@ -857,6 +855,7 @@ mod tests {
                 app_name: "Steam".to_string(),
                 category: "design".to_string(),
             }],
+            &[],
             "Steam",
             "首页",
             None,
@@ -1001,18 +1000,10 @@ mod tests {
         let compact_y = 720 - compact_h as i32;
 
         let (expanded_w, expanded_h) = avatar_window_size(0.9, true);
-        let (x, y) = clamp_avatar_position_with_size(
-            bounds,
-            compact_x,
-            compact_y,
-            expanded_w,
-            expanded_h,
-        );
+        let (x, y) =
+            clamp_avatar_position_with_size(bounds, compact_x, compact_y, expanded_w, expanded_h);
 
-        assert_eq!(
-            (x, y),
-            (1280 - expanded_w as i32, 720 - expanded_h as i32)
-        );
+        assert_eq!((x, y), (1280 - expanded_w as i32, 720 - expanded_h as i32));
         assert!(x < compact_x);
         assert!(y < compact_y);
     }

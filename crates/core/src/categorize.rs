@@ -1,5 +1,5 @@
 use crate::config::{
-    AppCategoryRule, CustomCategory, WebsiteSemanticRule, normalize_category_key_private,
+    normalize_category_key_private, AppCategoryRule, CustomCategory, WebsiteSemanticRule,
 };
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -313,14 +313,63 @@ fn extract_url_from_text(text: &str) -> Option<String> {
         .next()
 }
 
+/// 检测是否为可疑的 host-only 域名（可能由 OCR 丢失斜杠导致域名+路径合并）
+/// 例如 `linux.do/latest` → OCR 丢失 `/` → `linux.dolatest`
+pub fn is_merged_domain(url: &str) -> bool {
+    let without_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
+
+    let (host, rest) = split_host_and_rest(without_scheme);
+    if !rest.is_empty() {
+        return false;
+    }
+
+    let host = split_host_port(host).0.trim_end_matches('.');
+    if host.is_empty() || host == "localhost" {
+        return false;
+    }
+
+    let labels: Vec<&str> = host.split('.').collect();
+    if labels.len() != 2 {
+        return false;
+    }
+
+    let tld = labels[1].to_lowercase();
+    // 只检查较长（>6字符）且以已知 ccTLD 前缀开头的假 TLD
+    if tld.len() <= 6 || !tld.chars().all(|c| c.is_ascii_alphabetic()) {
+        return false;
+    }
+
+    let prefix = &tld[..2];
+    matches!(
+        prefix,
+        "ai" | "cc"
+            | "cn"
+            | "de"
+            | "do"
+            | "fr"
+            | "hk"
+            | "id"
+            | "in"
+            | "io"
+            | "jp"
+            | "kr"
+            | "me"
+            | "ru"
+            | "sg"
+            | "tv"
+            | "uk"
+            | "us"
+    )
+}
+
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub fn infer_browser_page_hint(window_title: &str) -> Option<String> {
-    extract_url_from_title(window_title)
+    extract_url_from_title(window_title).filter(|url| !is_merged_domain(url))
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub fn infer_browser_page_hint_from_text(text: &str) -> Option<String> {
-    extract_url_from_text(text)
+    extract_url_from_text(text).filter(|url| !is_merged_domain(url))
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -586,11 +635,20 @@ pub fn normalize_category_key(category: &str) -> String {
 }
 
 /// 检查分类 key 是否有效（预设 + 自定义）
-pub fn is_valid_category_key(category: &str, custom_categories: &[crate::config::CustomCategory]) -> bool {
+pub fn is_valid_category_key(
+    category: &str,
+    custom_categories: &[crate::config::CustomCategory],
+) -> bool {
     let lowered = category.trim().to_lowercase();
-    matches!(lowered.as_str(),
-        "development" | "browser" | "communication" | "office"
-        | "design" | "entertainment" | "other"
+    matches!(
+        lowered.as_str(),
+        "development"
+            | "browser"
+            | "communication"
+            | "office"
+            | "design"
+            | "entertainment"
+            | "other"
     ) || custom_categories.iter().any(|c| c.key == lowered)
 }
 
@@ -608,11 +666,15 @@ pub fn find_category_override(
 
     rules.iter().find_map(|rule| {
         let normalized_rule = normalized_app_rule_key(&rule.app_name);
-        if normalized_app_name == normalized_rule
-            || normalized_app_name.contains(&normalized_rule)
-            || normalized_rule.contains(&normalized_app_name)
+        let exact = normalized_app_name == normalized_rule;
+        let app_contains_rule = normalized_rule.len() >= 3 && normalized_app_name.contains(&normalized_rule);
+        let rule_contains_app = normalized_app_name.len() >= 3 && normalized_rule.contains(&normalized_app_name);
+        if exact || app_contains_rule || rule_contains_app
         {
-            Some(crate::config::normalize_category_key_private(&rule.category, &custom_keys))
+            Some(crate::config::normalize_category_key_private(
+                &rule.category,
+                &custom_keys,
+            ))
         } else {
             None
         }
