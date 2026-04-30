@@ -429,6 +429,10 @@ mod tests {
     use crate::monitor::ActiveWindow;
     use crate::work_intelligence::build_work_sessions;
     use chrono::TimeZone;
+    use once_cell::sync::Lazy;
+    use std::sync::Mutex;
+
+    static FOLLOWUP_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     fn sample_activity(
         timestamp: i64,
@@ -565,6 +569,7 @@ mod tests {
 
     #[test]
     fn 稍后提醒动作应阻止短时间重复触发() {
+        let _guard = FOLLOWUP_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         reset_followup_runtime();
         let project_key = "cursor::github-com::支付回调修复";
         assert!(should_emit_followup(project_key, 10_000));
@@ -574,6 +579,7 @@ mod tests {
 
     #[test]
     fn 开始专注动作应在专注时段内阻止重复提醒() {
+        let _guard = FOLLOWUP_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         reset_followup_runtime();
         let project_key = "cursor::github-com::支付回调修复";
         assert!(should_emit_followup(project_key, 20_000));

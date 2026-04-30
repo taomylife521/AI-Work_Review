@@ -555,7 +555,7 @@ const MESSAGES = {
       permissionsAfterOpenHint: '授权后点击”重新检查”刷新状态。',
       permissionsScreenCaptureGuide: '开启屏幕录制权限。若已授权仍异常，尝试移除后重新勾选并重启。',
       permissionsAccessibilityGuide: '开启辅助功能权限。若已有旧条目，移除后重新添加并重启。',
-      permissionsInputMonitoringGuide: '若已开启，先删除旧条目再重新添加，然后重启应用。',
+      permissionsInputMonitoringGuide: '如果权限已开启，先删除旧条目再重新添加，然后重启应用。',
       permissionsWindowsScreenshotHint: '取决于截图链是否可用，无需额外授权。',
       permissionsWindowsInputHint: '依赖系统输入 Hook，无需额外授权。',
       permissionsLinuxScreenshotHint: '取决于桌面会话和可用截图 provider。',

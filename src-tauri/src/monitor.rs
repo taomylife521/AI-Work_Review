@@ -2049,7 +2049,7 @@ Path=Profiles/wkm9x2lf.Default (release)
 
         let window = parse_gnome_focused_window_dbus_output(output).expect("应解析成功");
 
-        assert_eq!(window.window_title, "OpenAI Docs - Firefox");
+        assert_eq!(window.window_title, "OpenAI Docs");
         assert_eq!(window.app_name, "Firefox");
         assert_eq!(window.browser_url, None);
         assert_eq!(

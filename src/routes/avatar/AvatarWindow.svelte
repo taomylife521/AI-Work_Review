@@ -635,7 +635,6 @@
   }
 
   onMount(() => {
-    // Try loading Live2D component asynchronously
     let unlistenState = () => {};
     let unlistenBubble = () => {};
     let unlistenFollowup = () => {};

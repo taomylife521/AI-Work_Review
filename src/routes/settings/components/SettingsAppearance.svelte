@@ -333,6 +333,7 @@
           <div class="settings-text">{t('settingsAppearance.avatar')}</div>
         </div>
         <div class="settings-muted mt-0.5">{t('settingsAppearance.avatarDesc')}</div>
+        <div class="settings-muted mt-0.5">{t('settingsAppearance.avatarBetaHint')}</div>
       </div>
       <button
         type="button"
@@ -379,6 +380,7 @@
       <div class="flex items-center justify-between gap-3">
         <div>
           <div class="settings-text">{t('settingsAppearance.avatarOpacity')}</div>
+          <div class="settings-muted mt-0.5">{t('settingsAppearance.avatarOpacityHint')}</div>
         </div>
         <div class="text-sm font-semibold text-slate-700 dark:text-slate-200">
           {avatarOpacityLabel}
@@ -478,6 +480,7 @@
     <div class="flex items-center justify-between gap-4">
       <div>
         <div class="settings-text">{t('settingsAppearance.breakReminder')}</div>
+        <div class="settings-muted mt-1 text-[12px]">{t('settingsAppearance.breakReminderDescription')}</div>
         {#if !config.avatar_enabled}
           <div class="settings-muted mt-1 text-[12px]">{t('settingsAppearance.breakReminderRequiresAvatar')}</div>
         {/if}

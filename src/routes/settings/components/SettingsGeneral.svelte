@@ -337,7 +337,10 @@
       </div>
 
       <div class="settings-row">
-        <span class="settings-text">{t('settingsGeneral.lightweightMode')}</span>
+        <div>
+          <span class="settings-text">{t('settingsGeneral.lightweightMode')}</span>
+          <p class="settings-muted mt-0.5">{t('settingsGeneral.lightweightModeDescription')}</p>
+        </div>
         <button
           on:click={toggleLightweightMode}
           class="switch-track {config.lightweight_mode ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'}"

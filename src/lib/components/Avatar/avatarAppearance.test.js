@@ -1,19 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
 
-import { getAvatarAppearance } from './avatarAppearance.js';
+test('旧的手绘外观调色辅助应移除，桌宠外观改由预设资源和状态元信息驱动', () => {
+  assert.equal(existsSync(new URL('./avatarAppearance.js', import.meta.url)), false);
 
-test('工作状态应返回蓝色系外观', () => {
-  const appearance = getAvatarAppearance('working');
+  const canvasSource = readFileSync(new URL('./AvatarCanvas.svelte', import.meta.url), 'utf8');
+  const registrySource = readFileSync(new URL('./avatarPresetRegistry.js', import.meta.url), 'utf8');
+  const stateMetaSource = readFileSync(new URL('./avatarStateMeta.js', import.meta.url), 'utf8');
 
-  assert.match(appearance.accent, /sky/);
-  assert.match(appearance.desk, /sky|cyan/);
-  assert.match(appearance.accent, /sky/);
-});
-
-test('未知状态应回退到 idle 外观', () => {
-  const appearance = getAvatarAppearance('unknown');
-
-  assert.match(appearance.fur, /stone|slate/);
-  assert.match(appearance.accent, /slate/);
+  assert.doesNotMatch(canvasSource, /getAvatarAppearance/);
+  assert.match(canvasSource, /getAvatarPresetDefinition/);
+  assert.match(canvasSource, /getAvatarModeMeta/);
+  assert.match(registrySource, /AVATAR_PRESET_REGISTRY/);
+  assert.match(stateMetaSource, /getAvatarModeMeta/);
 });

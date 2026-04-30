@@ -31,6 +31,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_updater::UpdaterExt;
+use work_review_core::categorize::is_merged_domain;
 
 const GITHUB_LATEST_RELEASE_API: &str =
     "https://api.github.com/repos/wm94i/Work_Review/releases/latest";
@@ -2186,7 +2187,14 @@ fn build_followup_hints(
     }
 
     if hints.is_empty() {
-        return String::new();
+        hints.push(match locale {
+            AppLocale::En => {
+                "Ask about a date, time range, app, or specific session for more detail."
+                    .to_string()
+            }
+            AppLocale::ZhTw => "也可以指定日期、時間範圍、應用或具體工作段繼續追問。".to_string(),
+            AppLocale::ZhCn => "也可以指定日期、时间范围、应用或具体工作段继续追问。".to_string(),
+        });
     }
 
     let header = match locale {
@@ -2771,8 +2779,28 @@ fn matches_excluded_domain(target: &str, excluded_domains: &[String]) -> bool {
     }
 
     excluded_domains.iter().any(|excluded| {
-        !excluded.is_empty() && PrivacyConfig::domain_matches(&domain, excluded)
+        let excluded_domain = PrivacyConfig::extract_domain(excluded);
+        !excluded_domain.is_empty()
+            && (PrivacyConfig::domain_matches(&domain, &excluded_domain)
+                || merged_domain_matches_excluded(&domain, &excluded_domain))
     })
+}
+
+fn merged_domain_matches_excluded(domain: &str, excluded_domain: &str) -> bool {
+    if !is_merged_domain(domain) {
+        return false;
+    }
+
+    let domain = domain.trim_end_matches('.').to_lowercase();
+    let excluded_domain = excluded_domain.trim_end_matches('.').to_lowercase();
+    let domain_labels: Vec<&str> = domain.split('.').collect();
+    let excluded_labels: Vec<&str> = excluded_domain.split('.').collect();
+
+    domain_labels.len() == 2
+        && excluded_labels.len() == 2
+        && domain_labels[0] == excluded_labels[0]
+        && domain_labels[1].starts_with(excluded_labels[1])
+        && domain_labels[1].len() > excluded_labels[1].len()
 }
 
 fn apply_excluded_domains_to_stats(

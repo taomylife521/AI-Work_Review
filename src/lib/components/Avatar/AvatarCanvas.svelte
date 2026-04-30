@@ -334,7 +334,6 @@
   $: sceneSrc = preset.sceneSrc;
   $: contentTransform = preset.contentTransform ?? '';
   $: staticCoverSrc = preset.staticCoverSrc ?? null;
-  $: staticCoverTransform = '';
   $: sceneAlt = `${state.appName || 'Work Review'} 桌宠`;
   $: frameIndex = Math.floor(motionBeat / 2);
   $: useSourceKeyboardMode = renderMode === 'source-keyboard';
@@ -563,7 +562,6 @@
               width={SCENE_WIDTH}
               height={SCENE_HEIGHT}
               class="static-cover-layer"
-              transform={staticCoverTransform || undefined}
             />
           {/if}
 

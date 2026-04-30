@@ -212,7 +212,10 @@
   
   <div class="settings-section">
     <div class="settings-row">
-      <span class="settings-text">{t('settingsStorage.screenshotsEnabled')}</span>
+      <div>
+        <span class="settings-text">{t('settingsStorage.screenshotsEnabled')}</span>
+        <p class="settings-muted mt-0.5">{t('settingsStorage.screenshotsEnabledHint')}</p>
+      </div>
       <button
         type="button"
         on:click={() => {
