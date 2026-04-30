@@ -563,7 +563,9 @@
   }
 
   // 查看活动详情
+  let viewActivityRequestId = 0;
   async function viewActivity(activity) {
+    const requestId = ++viewActivityRequestId;
     const previewThumbnail = getTimelineThumbnail(activity);
     selectedActivity = {
       ...activity,
@@ -582,6 +584,8 @@
       : Promise.resolve(previewThumbnail);
 
     const [freshActivity, thumbnail] = await Promise.all([freshActivityPromise, fullImagePromise]);
+    if (requestId !== viewActivityRequestId) return;
+
     const resolvedActivity = freshActivity || activity;
 
     selectedActivity = {

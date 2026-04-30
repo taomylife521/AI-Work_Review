@@ -28,7 +28,10 @@ pub enum Permission {
 #[serde(rename_all = "snake_case")]
 pub enum CallSource {
     /// MCP Tool 调用
-    McpTool { tool_name: String, client_id: Option<String> },
+    McpTool {
+        tool_name: String,
+        client_id: Option<String>,
+    },
     /// Skill 执行
     SkillExecution { skill_id: String },
     /// Tauri 前端调用
@@ -158,13 +161,18 @@ impl PolicyEnforcer {
     }
 
     /// 检查权限（无审计记录）
-    pub fn check_permission_no_log(&self, source: &CallSource, permission: Permission) -> PolicyDecision {
+    pub fn check_permission_no_log(
+        &self,
+        source: &CallSource,
+        permission: Permission,
+    ) -> PolicyDecision {
         self.evaluate(source, permission).0
     }
 
     /// 注册 Skill 权限
     pub fn register_skill_permissions(&mut self, skill_id: &str, permissions: Vec<Permission>) {
-        self.skill_permissions.insert(skill_id.to_string(), permissions);
+        self.skill_permissions
+            .insert(skill_id.to_string(), permissions);
     }
 
     /// 获取审计日志
@@ -179,7 +187,9 @@ impl PolicyEnforcer {
             let key = match &entry.source {
                 CallSource::McpTool { tool_name, .. } => format!("mcp:{tool_name}"),
                 CallSource::SkillExecution { skill_id } => format!("skill:{skill_id}"),
-                CallSource::Frontend { route, .. } => format!("frontend:{}", route.as_deref().unwrap_or("unknown")),
+                CallSource::Frontend { route, .. } => {
+                    format!("frontend:{}", route.as_deref().unwrap_or("unknown"))
+                }
                 CallSource::LocalhostApi { endpoint } => format!("api:{endpoint}"),
             };
             *stats.entry(key).or_insert(0) += 1;
@@ -187,13 +197,20 @@ impl PolicyEnforcer {
         stats
     }
 
-    fn evaluate(&self, source: &CallSource, permission: Permission) -> (PolicyDecision, Option<String>) {
+    fn evaluate(
+        &self,
+        source: &CallSource,
+        permission: Permission,
+    ) -> (PolicyDecision, Option<String>) {
         match source {
             CallSource::McpTool { .. } => {
                 if self.mcp_permissions.contains(&permission) {
                     (PolicyDecision::Allow, None)
                 } else {
-                    (PolicyDecision::Deny, Some(format!("MCP 客户端无 {:?} 权限", permission)))
+                    (
+                        PolicyDecision::Deny,
+                        Some(format!("MCP 客户端无 {:?} 权限", permission)),
+                    )
                 }
             }
             CallSource::SkillExecution { skill_id } => {
@@ -201,7 +218,10 @@ impl PolicyEnforcer {
                     if perms.contains(&permission) {
                         (PolicyDecision::Allow, None)
                     } else {
-                        (PolicyDecision::Deny, Some(format!("技能 {} 无 {:?} 权限", skill_id, permission)))
+                        (
+                            PolicyDecision::Deny,
+                            Some(format!("技能 {} 无 {:?} 权限", skill_id, permission)),
+                        )
                     }
                 } else {
                     // 未注册权限的技能，只允许读操作
@@ -212,7 +232,10 @@ impl PolicyEnforcer {
                         | Permission::ReadSessions
                         | Permission::ReadConfig
                         | Permission::ReadDeviceStatus => (PolicyDecision::Allow, None),
-                        _ => (PolicyDecision::Deny, Some(format!("技能 {} 未注册 {:?} 权限", skill_id, permission))),
+                        _ => (
+                            PolicyDecision::Deny,
+                            Some(format!("技能 {} 未注册 {:?} 权限", skill_id, permission)),
+                        ),
                     }
                 }
             }
@@ -221,7 +244,10 @@ impl PolicyEnforcer {
                 if self.localhost_permissions.contains(&permission) {
                     (PolicyDecision::Allow, None)
                 } else {
-                    (PolicyDecision::Deny, Some(format!("Localhost API 无 {:?} 权限", permission)))
+                    (
+                        PolicyDecision::Deny,
+                        Some(format!("Localhost API 无 {:?} 权限", permission)),
+                    )
                 }
             }
         }
@@ -230,7 +256,8 @@ impl PolicyEnforcer {
     fn record_audit(&mut self, entry: AuditEntry) {
         self.audit_log.push(entry);
         if self.audit_log.len() > self.max_audit_entries {
-            self.audit_log.drain(0..self.audit_log.len() - self.max_audit_entries);
+            self.audit_log
+                .drain(0..self.audit_log.len() - self.max_audit_entries);
         }
     }
 
@@ -248,10 +275,7 @@ impl PolicyEnforcer {
                     // 脱敏 OCR 文本
                     if let Some(ocr) = obj.get("ocr_text").and_then(|v| v.as_str()) {
                         let filtered = privacy_filter.filter_text(ocr);
-                        obj.insert(
-                            "ocr_text".to_string(),
-                            serde_json::Value::String(filtered),
-                        );
+                        obj.insert("ocr_text".to_string(), serde_json::Value::String(filtered));
                     }
                 }
             }

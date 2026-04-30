@@ -541,20 +541,28 @@ async fn read_request(stream: &mut TcpStream) -> Result<Option<ParsedRequest>> {
 fn handle_device_info(state: &Arc<Mutex<AppState>>) -> Result<HttpResponse> {
     let (is_recording, is_paused, config_host, config_port) = {
         let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-        (s.is_recording, s.is_paused, s.config.localhost_api_host.clone(), s.config.localhost_api_port)
+        (
+            s.is_recording,
+            s.is_paused,
+            s.config.localhost_api_host.clone(),
+            s.config.localhost_api_port,
+        )
     };
     let node_status = crate::node_gateway::get_node_gateway_status(state)?;
     let host = effective_api_host(config_host.as_deref());
-    Ok(HttpResponse::json(200, &serde_json::json!({
-        "deviceId": node_status.device_id,
-        "deviceName": node_status.device_name,
-        "platform": runtime_platform(),
-        "appVersion": env!("CARGO_PKG_VERSION"),
-        "protocolVersion": node_status.protocol_version,
-        "recording": is_recording,
-        "paused": is_paused,
-        "apiEndpoint": format!("http://{host}:{config_port}"),
-    })))
+    Ok(HttpResponse::json(
+        200,
+        &serde_json::json!({
+            "deviceId": node_status.device_id,
+            "deviceName": node_status.device_name,
+            "platform": runtime_platform(),
+            "appVersion": env!("CARGO_PKG_VERSION"),
+            "protocolVersion": node_status.protocol_version,
+            "recording": is_recording,
+            "paused": is_paused,
+            "apiEndpoint": format!("http://{host}:{config_port}"),
+        }),
+    ))
 }
 
 async fn route_request(
@@ -634,24 +642,26 @@ async fn route_request(
                 .min(100);
             let guard = state.lock().map_err(|e| AppError::Unknown(e.to_string()));
             match guard {
-                Ok(s) => s.database.list_report_dates(limit).map(|dates| {
-                    HttpResponse::json(200, &serde_json::json!({ "dates": dates }))
-                }),
+                Ok(s) => s
+                    .database
+                    .list_report_dates(limit)
+                    .map(|dates| HttpResponse::json(200, &serde_json::json!({ "dates": dates }))),
                 Err(e) => Err(e),
             }
         }
-        ("GET", "/v1/device") => {
-            handle_device_info(state)
-        }
+        ("GET", "/v1/device") => handle_device_info(state),
         ("GET", "/health") => {
             let guard = state.lock().map_err(|e| AppError::Unknown(e.to_string()));
             match guard {
-                Ok(s) => Ok(HttpResponse::json(200, &serde_json::json!({
-                    "status": "ok",
-                    "recording": s.is_recording,
-                    "paused": s.is_paused,
-                    "version": env!("CARGO_PKG_VERSION"),
-                }))),
+                Ok(s) => Ok(HttpResponse::json(
+                    200,
+                    &serde_json::json!({
+                        "status": "ok",
+                        "recording": s.is_recording,
+                        "paused": s.is_paused,
+                        "version": env!("CARGO_PKG_VERSION"),
+                    }),
+                )),
                 Err(e) => Err(e),
             }
         }
@@ -667,10 +677,8 @@ async fn route_request(
                 return HttpResponse::error(404, "飞书 Bot 未启用");
             }
             let body_str = String::from_utf8_lossy(&request.body);
-            let resp = crate::feishu_bot::handle_feishu_webhook(
-                &body_str, &config, &data_dir,
-            )
-            .await;
+            let resp =
+                crate::feishu_bot::handle_feishu_webhook(&body_str, &config, &data_dir).await;
             Ok(HttpResponse {
                 status: resp.status,
                 reason: reason_phrase(resp.status),
@@ -737,7 +745,9 @@ fn authorize_request(request: &ParsedRequest, state: &Arc<Mutex<AppState>>) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_bearer_token, mask_localhost_api_token, request_auth_mode, RequestAuthMode};
+    use super::{
+        extract_bearer_token, mask_localhost_api_token, request_auth_mode, RequestAuthMode,
+    };
 
     #[test]
     fn bearer_token解析应忽略前后空白() {
@@ -756,10 +766,7 @@ mod tests {
 
     #[test]
     fn 鉴权模式应将健康检查标记为免鉴权() {
-        assert_eq!(
-            request_auth_mode("GET", "/health"),
-            RequestAuthMode::None
-        );
+        assert_eq!(request_auth_mode("GET", "/health"), RequestAuthMode::None);
     }
 
     #[test]

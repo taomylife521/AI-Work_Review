@@ -440,7 +440,7 @@ pub fn generate_stats_summary_for_locale(stats: &DailyStats, locale: AppLocale) 
     summary
 }
 
-/// 生成活动时间线文本（用于日报，默认折叠）
+/// 生成活动时间线文本（用于日报正文，默认折叠）
 /// 显示按时间排序的应用使用路径
 pub fn generate_activity_timeline(
     activities: &[crate::database::Activity],
@@ -503,6 +503,75 @@ pub fn generate_activity_timeline(
         col_header,
         lines.join("\n")
     )
+}
+
+/// 将活动按时间连续性聚合成工作段，生成紧凑的文本摘要供 AI prompt 使用。
+/// 每段输出一行：`09:00-09:45 (45分) 编码开发 | VS Code, Chrome | api.rs, github.com`
+/// 0 信息丢失，条目数通常 5-20 段，prompt 大小 2-5KB。
+pub fn generate_session_timeline(
+    activities: &[crate::database::Activity],
+    locale: AppLocale,
+) -> String {
+    if activities.is_empty() {
+        return String::new();
+    }
+
+    let mut sessions = crate::work_intelligence::build_work_sessions(activities);
+    if sessions.is_empty() {
+        return String::new();
+    }
+
+    // 按时间正序排列（build_work_sessions 默认倒序）
+    sessions.sort_by_key(|s| s.start_timestamp);
+
+    let header_label = match locale {
+        AppLocale::ZhCn => format!("### 工作段（{}段）", sessions.len()),
+        AppLocale::ZhTw => format!("### 工作段（{}段）", sessions.len()),
+        AppLocale::En => format!("### Work Sessions ({})", sessions.len()),
+    };
+
+    let mut lines = vec![header_label];
+
+    for session in &sessions {
+        let start = format_hhmm(session.start_timestamp);
+        let end = format_hhmm(session.end_timestamp);
+        let dur = format_duration_for_locale(session.duration, locale);
+
+        let apps: String = session
+            .top_apps
+            .iter()
+            .take(3)
+            .map(|a| crate::categorize::normalize_display_app_name(&a.name))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let mut context_parts: Vec<String> = Vec::new();
+        if !session.title.is_empty() {
+            let truncated: String = session.title.chars().take(50).collect();
+            context_parts.push(truncated);
+        }
+        for domain in session.browser_domains.iter().take(3) {
+            context_parts.push(domain.clone());
+        }
+        let context = if context_parts.is_empty() {
+            "-".to_string()
+        } else {
+            context_parts.join(", ")
+        };
+
+        lines.push(format!(
+            "{}-{} ({}) {} | {} | {}",
+            start, end, dur, session.intent_label, apps, context
+        ));
+    }
+
+    lines.join("\n")
+}
+
+fn format_hhmm(timestamp: i64) -> String {
+    chrono::DateTime::from_timestamp(timestamp, 0)
+        .map(|dt| dt.with_timezone(&chrono::Local).format("%H:%M").to_string())
+        .unwrap_or_else(|| "??".to_string())
 }
 
 #[cfg(test)]

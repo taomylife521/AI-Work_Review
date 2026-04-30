@@ -115,23 +115,23 @@ impl SkillExecutor {
         }
 
         // Step 3: Output
-        let (output, content_type) = match Self::execute_output(&package.pipeline.output, &data, ctx)
-        {
-            Ok(result) => result,
-            Err(e) => {
-                if let Some(state) = registry.get_state_mut(skill_id) {
-                    state.record_execution(false, start.elapsed().as_millis() as u64);
+        let (output, content_type) =
+            match Self::execute_output(&package.pipeline.output, &data, ctx) {
+                Ok(result) => result,
+                Err(e) => {
+                    if let Some(state) = registry.get_state_mut(skill_id) {
+                        state.record_execution(false, start.elapsed().as_millis() as u64);
+                    }
+                    return ExecutionResult {
+                        skill_id: skill_id.to_string(),
+                        output: String::new(),
+                        content_type: OutputContentType::Text,
+                        duration_ms: start.elapsed().as_millis() as u64,
+                        success: false,
+                        error: Some(format!("输出失败: {e}")),
+                    };
                 }
-                return ExecutionResult {
-                    skill_id: skill_id.to_string(),
-                    output: String::new(),
-                    content_type: OutputContentType::Text,
-                    duration_ms: start.elapsed().as_millis() as u64,
-                    success: false,
-                    error: Some(format!("输出失败: {e}")),
-                };
-            }
-        };
+            };
 
         let duration_ms = start.elapsed().as_millis() as u64;
         if let Some(state) = registry.get_state_mut(skill_id) {
@@ -218,7 +218,10 @@ impl SkillExecutor {
                     .iter()
                     .map(|(k, v)| {
                         if let Value::String(s) = v {
-                            (k.clone(), Value::String(Self::resolve_template(s, &ctx.params)))
+                            (
+                                k.clone(),
+                                Value::String(Self::resolve_template(s, &ctx.params)),
+                            )
                         } else {
                             (k.clone(), v.clone())
                         }
@@ -335,9 +338,18 @@ impl SkillExecutor {
             }
         }
         // 替换 {{data}} 为完整 JSON
-        result = result.replace("{{data}}", &serde_json::to_string_pretty(data).unwrap_or_default());
-        result = result.replace("{{ai_result}}", &serde_json::to_string_pretty(data).unwrap_or_default());
-        result = result.replace("{{weekly_data}}", &serde_json::to_string_pretty(data).unwrap_or_default());
+        result = result.replace(
+            "{{data}}",
+            &serde_json::to_string_pretty(data).unwrap_or_default(),
+        );
+        result = result.replace(
+            "{{ai_result}}",
+            &serde_json::to_string_pretty(data).unwrap_or_default(),
+        );
+        result = result.replace(
+            "{{weekly_data}}",
+            &serde_json::to_string_pretty(data).unwrap_or_default(),
+        );
         result
     }
 }

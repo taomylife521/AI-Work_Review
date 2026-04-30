@@ -40,24 +40,31 @@ pub fn fix_wayland_env_if_sudo() {
     let user_env = read_user_process_env(uid_trimmed);
 
     let mut fixed = 0;
+
+    // 第一轮：恢复可从 user_env 读到的变量，以及 XDG_RUNTIME_DIR 的回退
+    // （XDG_RUNTIME_DIR 必须先于 WAYLAND_DISPLAY 恢复，后者依赖前者）
     for var in &missing {
         if let Some(val) = user_env.get(*var) {
             std::env::set_var(var, val);
             fixed += 1;
             continue;
         }
-
-        // 回退：根据已知路径推断
-        match *var {
-            "XDG_RUNTIME_DIR" => {
-                let runtime_dir = format!("/run/user/{uid_trimmed}");
-                if std::path::Path::new(&runtime_dir).is_dir() {
-                    std::env::set_var("XDG_RUNTIME_DIR", &runtime_dir);
-                    fixed += 1;
-                }
+        if *var == "XDG_RUNTIME_DIR" {
+            let runtime_dir = format!("/run/user/{uid_trimmed}");
+            if std::path::Path::new(&runtime_dir).is_dir() {
+                std::env::set_var("XDG_RUNTIME_DIR", &runtime_dir);
+                fixed += 1;
             }
+        }
+    }
+
+    // 第二轮：恢复依赖第一轮结果的变量
+    for var in &missing {
+        if std::env::var(var).is_ok() {
+            continue; // 已在第一轮恢复
+        }
+        match *var {
             "WAYLAND_DISPLAY" => {
-                // 检查 XDG_RUNTIME_DIR 是否已恢复（可能刚在上方设置）
                 if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
                     for name in &["wayland-0", "wayland-1"] {
                         let socket = std::path::Path::new(&runtime_dir).join(name);
@@ -77,7 +84,6 @@ pub fn fix_wayland_env_if_sudo() {
                 }
             }
             "XDG_SESSION_TYPE" => {
-                // 如果已经恢复 WAYLAND_DISPLAY，说明是 Wayland 会话
                 if std::env::var("WAYLAND_DISPLAY").is_ok() {
                     std::env::set_var("XDG_SESSION_TYPE", "wayland");
                     fixed += 1;
@@ -88,9 +94,7 @@ pub fn fix_wayland_env_if_sudo() {
     }
 
     if fixed > 0 {
-        log::info!(
-            "sudo 环境修复：已恢复 {fixed} 个 Wayland/DBus 环境变量 (uid={uid_trimmed})"
-        );
+        log::info!("sudo 环境修复：已恢复 {fixed} 个 Wayland/DBus 环境变量 (uid={uid_trimmed})");
     }
 }
 

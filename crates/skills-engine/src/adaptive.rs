@@ -33,22 +33,33 @@ impl AdaptiveEngine {
                 .unwrap_or(serde_json::Value::Null);
 
             let new_value = match field.strategy {
-                LearningStrategy::Frequency => {
-                    Self::frequency_update(&current_value, context, field_path, config.max_change_rate)
-                }
-                LearningStrategy::WeightedAverage => {
-                    Self::weighted_avg_update(&current_value, context, field_path, config.max_change_rate)
-                }
-                LearningStrategy::ThresholdTuning => {
-                    Self::threshold_update(&current_value, context, field_path, config.max_change_rate, signal.clone())
-                }
+                LearningStrategy::Frequency => Self::frequency_update(
+                    &current_value,
+                    context,
+                    field_path,
+                    config.max_change_rate,
+                ),
+                LearningStrategy::WeightedAverage => Self::weighted_avg_update(
+                    &current_value,
+                    context,
+                    field_path,
+                    config.max_change_rate,
+                ),
+                LearningStrategy::ThresholdTuning => Self::threshold_update(
+                    &current_value,
+                    context,
+                    field_path,
+                    config.max_change_rate,
+                    signal.clone(),
+                ),
                 LearningStrategy::RankPreference => {
                     Self::rank_update(&current_value, context, field_path, signal.clone())
                 }
             };
 
             if let Some(nv) = new_value {
-                let confidence = Self::compute_confidence(&current_value, &nv, config.max_change_rate);
+                let confidence =
+                    Self::compute_confidence(&current_value, &nv, config.max_change_rate);
                 state.record_learning(
                     signal.clone(),
                     field_path.clone(),

@@ -1,7 +1,8 @@
 use crate::analysis::{
     append_custom_prompt_for_locale, format_duration_for_locale, generate_activity_timeline,
-    generate_hourly_activity_summary_for_locale, translate_category_name,
-    translate_semantic_category_name, Analyzer, AppLocale, GeneratedReport,
+    generate_hourly_activity_summary_for_locale, generate_session_timeline,
+    translate_category_name, translate_semantic_category_name, Analyzer, AppLocale,
+    GeneratedReport,
 };
 use crate::config::AiProvider;
 use crate::database::{Activity, DailyStats};
@@ -414,7 +415,7 @@ impl SummaryAnalyzer {
                 AppLocale::En => "No hourly activity data available".to_string(),
             });
 
-        let timeline = generate_activity_timeline(activities, self.locale);
+        let timeline = generate_session_timeline(activities, self.locale);
 
         let base_prompt = match self.locale {
             AppLocale::ZhCn => format!(

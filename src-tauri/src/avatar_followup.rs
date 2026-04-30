@@ -53,7 +53,11 @@ static FOLLOWUP_RUNTIME: Lazy<Mutex<AvatarFollowupRuntime>> =
     Lazy::new(|| Mutex::new(AvatarFollowupRuntime::default()));
 
 pub fn emit_followup_suggestion(app: &AppHandle, payload: &AvatarFollowupSuggestionPayload) {
-    let _ = app.emit_to(crate::avatar_engine::AVATAR_WINDOW_LABEL, AVATAR_FOLLOWUP_EVENT, payload);
+    let _ = app.emit_to(
+        crate::avatar_engine::AVATAR_WINDOW_LABEL,
+        AVATAR_FOLLOWUP_EVENT,
+        payload,
+    );
 }
 
 pub fn should_emit_followup(project_key: &str, now_ms: u64) -> bool {
@@ -96,10 +100,9 @@ pub fn apply_followup_action(project_key: &str, action: AvatarFollowupAction, pe
     runtime
         .snoozed_until_by_project_key
         .retain(|_, until| *until > now_ms);
-    runtime.snoozed_until_by_project_key.insert(
-        project_key.to_string(),
-        now_ms.saturating_add(cooldown_ms),
-    );
+    runtime
+        .snoozed_until_by_project_key
+        .insert(project_key.to_string(), now_ms.saturating_add(cooldown_ms));
     runtime.last_emitted_project_key = Some(project_key.to_string());
     runtime.last_emitted_at_ms = now_ms;
 }
@@ -143,8 +146,7 @@ pub fn find_followup_suggestion(
         let replace = best
             .as_ref()
             .map(|(best_score, best_payload)| {
-                score > *best_score
-                    || (score == *best_score && payload.date >= best_payload.date)
+                score > *best_score || (score == *best_score && payload.date >= best_payload.date)
             })
             .unwrap_or(true);
 
@@ -358,7 +360,10 @@ fn normalize_match_text(value: &str) -> String {
     value
         .trim()
         .to_lowercase()
-        .replace(|ch: char| !ch.is_ascii_alphanumeric() && !('\u{4e00}'..='\u{9fff}').contains(&ch), " ")
+        .replace(
+            |ch: char| !ch.is_ascii_alphanumeric() && !('\u{4e00}'..='\u{9fff}').contains(&ch),
+            " ",
+        )
         .split_whitespace()
         .collect::<Vec<_>>()
         .join("-")
@@ -380,9 +385,29 @@ fn significant_tokens(value: &str) -> Vec<String> {
         Regex::new(r"[A-Za-z0-9]+|[\u4e00-\u9fff]{2,}").expect("token regex should compile")
     });
     let stop_words = [
-        "google", "chrome", "mozilla", "firefox", "safari", "edge", "cursor", "code",
-        "visual", "studio", "work", "review", "文档", "页面", "项目", "任务", "工作",
-        "窗口", "编辑器", "today", "issue", "pull", "request",
+        "google",
+        "chrome",
+        "mozilla",
+        "firefox",
+        "safari",
+        "edge",
+        "cursor",
+        "code",
+        "visual",
+        "studio",
+        "work",
+        "review",
+        "文档",
+        "页面",
+        "项目",
+        "任务",
+        "工作",
+        "窗口",
+        "编辑器",
+        "today",
+        "issue",
+        "pull",
+        "request",
     ];
 
     regex
@@ -402,8 +427,8 @@ mod tests {
     use crate::config::AvatarFollowupItem;
     use crate::database::Activity;
     use crate::monitor::ActiveWindow;
-    use chrono::TimeZone;
     use crate::work_intelligence::build_work_sessions;
+    use chrono::TimeZone;
 
     fn sample_activity(
         timestamp: i64,
@@ -450,15 +475,13 @@ mod tests {
 
     #[test]
     fn 会话项目key应稳定包含应用和域名() {
-        let sessions = build_work_sessions(&[
-            sample_activity(
-                1_710_000_000,
-                "Google Chrome",
-                "PR #128 · 支付回调修复",
-                Some("https://github.com/wm94i/Work_Review/pull/128"),
-                900,
-            ),
-        ]);
+        let sessions = build_work_sessions(&[sample_activity(
+            1_710_000_000,
+            "Google Chrome",
+            "PR #128 · 支付回调修复",
+            Some("https://github.com/wm94i/Work_Review/pull/128"),
+            900,
+        )]);
 
         let key = session_project_key(&sessions[0]);
         assert!(key.contains("google-chrome"));
@@ -475,13 +498,7 @@ mod tests {
                 Some("https://github.com/wm94i/Work_Review/pull/128"),
                 1200,
             ),
-            sample_activity(
-                1_710_000_100,
-                "Cursor",
-                "payments.ts",
-                None,
-                900,
-            ),
+            sample_activity(1_710_000_100, "Cursor", "payments.ts", None, 900),
         ];
         let active_window = ActiveWindow {
             app_name: "Google Chrome".to_string(),
@@ -496,7 +513,9 @@ mod tests {
             find_followup_suggestion(&activities, &active_window, "assistant", &[], 1_710_020_000)
                 .expect("should match");
 
-        let expected_date = chrono::Local.timestamp_opt(1_710_000_000, 0).earliest()
+        let expected_date = chrono::Local
+            .timestamp_opt(1_710_000_000, 0)
+            .earliest()
             .map(|dt| dt.format("%Y-%m-%d").to_string())
             .unwrap_or_default();
         assert_eq!(suggestion.date, expected_date);

@@ -36,7 +36,10 @@ pub fn classify_activity_with_base_category(
 
     let mut add = |label: &str, score: i32, reason: &str| {
         *scores.entry(label.to_string()).or_insert(0) += score;
-        evidence.entry(label.to_string()).or_default().push(reason.to_string());
+        evidence
+            .entry(label.to_string())
+            .or_default()
+            .push(reason.to_string());
     };
 
     match base_category.as_str() {
@@ -528,7 +531,11 @@ pub fn classify_activity_with_base_category(
     }
 
     let confidence = ((top_score + score_gap).clamp(55, 98)) as u8;
-    let top_label_owned = ranked.into_iter().next().map(|(l, _)| l).unwrap_or_default();
+    let top_label_owned = ranked
+        .into_iter()
+        .next()
+        .map(|(l, _)| l)
+        .unwrap_or_default();
 
     ActivityClassification {
         base_category: base_category.to_string(),

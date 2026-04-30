@@ -1,7 +1,7 @@
 use crate::adaptive::AdaptiveEngine;
 use crate::executor::{ExecutionContext, ExecutionResult, SkillExecutor};
 use crate::model::{SignalSource, SkillPackage};
-use crate::registry::{SkillRegistry, builtin_skills};
+use crate::registry::{builtin_skills, SkillRegistry};
 use crate::state::SkillState;
 use anyhow::Result;
 use std::collections::HashMap;

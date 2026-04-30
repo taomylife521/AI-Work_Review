@@ -1,6 +1,6 @@
 use crate::analysis::{
-    append_custom_prompt_for_locale, format_duration_for_locale,
-    generate_activity_timeline, generate_hourly_activity_summary_for_locale,
+    append_custom_prompt_for_locale, format_duration_for_locale, generate_activity_timeline,
+    generate_hourly_activity_summary_for_locale, generate_session_timeline,
     translate_category_name, translate_semantic_category_name, Analyzer, AppLocale,
     GeneratedReport,
 };
@@ -97,14 +97,17 @@ impl LocalAnalyzer {
             .filter_map(|activity| activity.ocr_text.as_ref())
             .flat_map(|text| {
                 text.split(|c: char| !c.is_alphanumeric() && c != '-')
-                    .filter(|word| word.len() > 3)
+                    .filter(|word| {
+                        let len = word.chars().count();
+                        len >= 2 && len <= 20
+                    })
                     .take(3)
                     .map(|item| item.to_string())
             })
             .take(20)
             .collect::<Vec<_>>();
 
-        let timeline = generate_activity_timeline(activities, self.locale);
+        let timeline = generate_session_timeline(activities, self.locale);
 
         let base_prompt = match self.locale {
             AppLocale::ZhCn => format!(
@@ -443,7 +446,10 @@ impl Analyzer for LocalAnalyzer {
                 fallback_reason = Some(match locale {
                     AppLocale::ZhCn => "请求失败，已回退到基础模板".to_string(),
                     AppLocale::ZhTw => "請求失敗，已回退到基礎模板".to_string(),
-                    AppLocale::En => "the AI request failed, so the report fell back to the base template".to_string(),
+                    AppLocale::En => {
+                        "the AI request failed, so the report fell back to the base template"
+                            .to_string()
+                    }
                 });
                 let apps_list = join_list(
                     locale,

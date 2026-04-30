@@ -3793,9 +3793,10 @@ pub(crate) async fn generate_report_inner(
     );
 
     // 生成报告（spawn 隔离 panic，防止内部错误杀死整个 tokio 线程）
+    // 外层加 300 秒总超时，防止 AI 调用卡死后前端永远等待
     let screenshots_dir = data_dir.clone();
     let date_gen = date.clone();
-    let report_result = match tokio::spawn(async move {
+    let spawn_result = tokio::spawn(async move {
         analyzer
             .generate_report(
                 &date_gen,
@@ -3805,17 +3806,29 @@ pub(crate) async fn generate_report_inner(
                 report_locale,
             )
             .await
-    })
+    });
+
+    let report_result = match tokio::time::timeout(
+        std::time::Duration::from_secs(300),
+        spawn_result,
+    )
     .await
     {
-        Ok(result) => result,
-        Err(_) => Err(work_review_core::error::AppError::Analysis(
+        Ok(Ok(result)) => result,
+        Ok(Err(_)) => Err(work_review_core::error::AppError::Analysis(
             match report_locale {
                 AppLocale::ZhCn => "日报生成过程中发生内部错误，请重试".to_string(),
                 AppLocale::ZhTw => "日報生成過程中發生內部錯誤，請重試".to_string(),
                 AppLocale::En => {
                     "Internal error during report generation, please retry".to_string()
                 }
+            },
+        )),
+        Err(_) => Err(work_review_core::error::AppError::Analysis(
+            match report_locale {
+                AppLocale::ZhCn => "日报生成超时，请稍后重试".to_string(),
+                AppLocale::ZhTw => "日報生成逾時，請稍後重試".to_string(),
+                AppLocale::En => "Report generation timed out, please try again later".to_string(),
             },
         )),
     };

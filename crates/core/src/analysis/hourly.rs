@@ -101,7 +101,10 @@ impl HourlyStats {
                 // 提取有意义的词（长度 > 3 的中英文词）
                 for word in ocr_text.split(|c: char| !c.is_alphanumeric() && c != '-') {
                     let word = word.trim();
-                    if word.len() > 3 && !seen_keywords.contains(word) {
+                    if word.chars().count() >= 2
+                        && word.chars().count() <= 20
+                        && !seen_keywords.contains(word)
+                    {
                         // 只保留中文或英文词
                         if word.chars().all(|c| c.is_alphabetic() || c >= '\u{4e00}') {
                             seen_keywords.insert(word.to_string());

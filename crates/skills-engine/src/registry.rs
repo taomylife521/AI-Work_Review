@@ -211,10 +211,7 @@ fn project_time_audit_skill() -> SkillPackage {
         },
         adaptive: AdaptiveConfig::default(),
         enabled: true,
-        required_permissions: vec![
-            Permission::ReadActivities,
-            Permission::ReadStats,
-        ],
+        required_permissions: vec![Permission::ReadActivities, Permission::ReadStats],
     }
 }
 
@@ -242,7 +239,10 @@ fn work_pattern_analysis_skill() -> SkillPackage {
             learnable_fields: vec![LearnableField {
                 field_path: "pipeline.output.prompt_template".into(),
                 strategy: LearningStrategy::Frequency,
-                signal_sources: vec![SignalSource::AcceptSuggestion, SignalSource::IgnoreSuggestion],
+                signal_sources: vec![
+                    SignalSource::AcceptSuggestion,
+                    SignalSource::IgnoreSuggestion,
+                ],
             }],
             ..Default::default()
         },

@@ -15,6 +15,7 @@
   let config = null;
   let loading = true;
   let saving = false;
+  let dirty = false;
   let error = null;
   let success = false;
   let providers = [];
@@ -201,6 +202,7 @@
       delete config.privacy?.sensitive_keywords;
       await invoke('save_config', { config });
       success = true;
+      dirty = false;
       cache.setConfig(config);
       showToast(t('settings.saveSuccessToast'), 'success');
       
@@ -247,8 +249,9 @@
   onMount(() => {
     const unsubscribeCache = cache.subscribe((state) => {
       if (!state.config) return;
-      // 用户正在保存时不覆盖（saveConfig 本身会更新 cache）
+      // 保存中或用户已编辑配置时，不覆盖（避免丢弃未保存的修改）
       if (saving) return;
+      if (config && dirty) return;
       config = state.config;
     });
 
@@ -354,23 +357,23 @@
 
         <div class="settings-stage-shell">
         {#if activeTab === 'general'}
-          <SettingsGeneral bind:config on:change={() => {}} />
+          <SettingsGeneral bind:config on:change={() => dirty = true} />
         {:else if activeTab === 'node'}
-          <SettingsNodeGateway bind:config {dataDir} on:change={() => {}} />
+          <SettingsNodeGateway bind:config {dataDir} on:change={() => dirty = true} />
         {:else if activeTab === 'ai'}
           <div class="settings-card settings-ai-shell">
             <h3 class="settings-card-title">{t('settings.aiCardTitle')}</h3>
             <p class="settings-card-desc">{t('settings.aiCardDescription')}</p>
-            <SettingsAI bind:config {providers} on:change={() => {}} />
+            <SettingsAI bind:config {providers} on:change={() => dirty = true} />
           </div>
         {:else if activeTab === 'avatar'}
-          <SettingsAvatar bind:config on:change={() => {}} />
+          <SettingsAvatar bind:config on:change={() => dirty = true} />
         {:else if activeTab === 'privacy'}
           <SettingsPrivacy
             bind:config
             {runningApps}
             {recentApps}
-            on:change={() => {}}
+            on:change={() => dirty = true}
           />
         {:else if activeTab === 'storage'}
           <SettingsStorage
@@ -378,7 +381,7 @@
             {storageStats}
             {dataDir}
             {defaultDataDir}
-            on:change={() => {}}
+            on:change={() => dirty = true}
             on:clearCache={handleClearCache}
             on:dataDirChanged={handleDataDirChanged}
           />

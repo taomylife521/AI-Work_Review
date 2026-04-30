@@ -284,6 +284,12 @@
     return formatDurationLocalized(seconds);
   }
 
+  const UNRESOLVED_BROWSER_DOMAIN_LABEL = '未识别页面';
+
+  function isUnresolvedBrowserDomain(domain) {
+    return domain?.domain === UNRESOLVED_BROWSER_DOMAIN_LABEL;
+  }
+
   function getAppIconSrc(appName, executablePath = null) {
     return resolveAppIconSrc(
       appName,
@@ -967,26 +973,32 @@
               </span>
             </div>
             <div class="flex items-center gap-2">
-              <span class="text-xs px-2 py-1 rounded-full bg-primary-50 text-primary-700 dark:bg-primary-900/20 dark:text-primary-300">
-                {t('overview.currentCategory', { label: getDomainSemanticLabel(domain) })}
-              </span>
-              <button
-                class="text-xs px-2 py-1 rounded-full border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:border-primary-300 hover:text-primary-600 transition-colors"
-                on:click={() => {
-                  if (editingDomainKey === domain.domain) {
-                    cancelDomainSemanticEdit();
-                  } else {
-                    startDomainSemanticEdit(domain);
-                  }
-                }}
-              >
-                {t('overview.changeCategory')}
-              </button>
+              {#if isUnresolvedBrowserDomain(domain)}
+                <span class="text-xs px-2 py-1 rounded-full bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                  未识别网页
+                </span>
+              {:else}
+                <span class="text-xs px-2 py-1 rounded-full bg-primary-50 text-primary-700 dark:bg-primary-900/20 dark:text-primary-300">
+                  {t('overview.currentCategory', { label: getDomainSemanticLabel(domain) })}
+                </span>
+                <button
+                  class="text-xs px-2 py-1 rounded-full border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:border-primary-300 hover:text-primary-600 transition-colors"
+                  on:click={() => {
+                    if (editingDomainKey === domain.domain) {
+                      cancelDomainSemanticEdit();
+                    } else {
+                      startDomainSemanticEdit(domain);
+                    }
+                  }}
+                >
+                  {t('overview.changeCategory')}
+                </button>
+              {/if}
               <span class="text-sm font-medium text-slate-600 dark:text-slate-300">{formatDuration(domain.duration)}</span>
             </div>
           </div>
 
-          {#if editingDomainKey === domain.domain}
+          {#if !isUnresolvedBrowserDomain(domain) && editingDomainKey === domain.domain}
             <div class="px-3 py-3 border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 space-y-2">
               <label
                 for={`semantic-category-${domain.domain}`}

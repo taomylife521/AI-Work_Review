@@ -1109,7 +1109,7 @@ impl ScreenshotService {
         let mut hash: u64 = 0;
         for (i, pixel) in small.pixels().enumerate() {
             if pixel.0[0] as u32 > avg {
-                hash |= 1 << i;
+                hash |= 1u64 << i;
             }
         }
 

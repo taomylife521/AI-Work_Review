@@ -246,7 +246,12 @@
     });
 
     let disposed = false;
-    let cleanup = () => {};
+    const pendingCleanup = [];
+
+    // 同步注册的 locale subscription 立即可清理
+    pendingCleanup.push(() => unsubscribeLocale());
+    pendingCleanup.push(() => window.removeEventListener('dragover', preventFileDrop));
+    pendingCleanup.push(() => window.removeEventListener('drop', preventFileDrop));
 
     (async () => {
       // 获取平台信息
@@ -256,6 +261,7 @@
       } catch (e) {
         console.error('获取平台信息失败:', e);
       }
+      if (disposed) return;
 
       // 加载配置并应用主题
       let config;
@@ -270,6 +276,7 @@
         config = { work_end_hour: 18 };
         runtimeConfig = config;
       }
+      if (disposed) return;
 
       // 加载背景图
       loadBackground();
@@ -281,12 +288,14 @@
       } catch (e) {
         console.error('获取录制状态失败:', e);
       }
+      if (disposed) return;
 
       const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
       const handleSystemThemeChange = () => {
         if (theme === 'system') applyTheme('system');
       };
       mediaQuery.addEventListener('change', handleSystemThemeChange);
+      pendingCleanup.push(() => mediaQuery.removeEventListener('change', handleSystemThemeChange));
 
       const unsubscribeCache = cache.subscribe((state) => {
         if (!state.config) return;
@@ -296,16 +305,21 @@
           applyTheme(state.config.theme);
         }
       });
+      pendingCleanup.push(unsubscribeCache);
 
       const unlistenRecordingState = await listen('recording-state-changed', (event) => {
         isRecording = event.payload.isRecording;
         isPaused = event.payload.isPaused;
       });
+      if (disposed) return;
+      pendingCleanup.push(unlistenRecordingState);
 
       const unlistenConfigChanged = await listen('config-changed', (event) => {
         runtimeConfig = event.payload;
         cache.setConfig(event.payload);
       });
+      if (disposed) return;
+      pendingCleanup.push(unlistenConfigChanged);
 
       const unlistenAvatarTimeline = await listen('avatar-open-timeline', async (event) => {
         const payload = event.payload ?? {};
@@ -326,10 +340,13 @@
           console.error('桌宠跳转时间线失败:', e);
         }
       });
+      if (disposed) return;
+      pendingCleanup.push(unlistenAvatarTimeline);
 
       // 监听背景图更新事件（来自设置页，实时预览）
       const handleBgChange = (e) => handleBackgroundChanged(e);
       window.addEventListener('background-changed', handleBgChange);
+      pendingCleanup.push(() => window.removeEventListener('background-changed', handleBgChange));
 
       // 启动预加载
       preloadApp();
@@ -349,6 +366,7 @@
           console.warn('自动检查更新失败:', e);
         }
       }, 2000);
+      pendingCleanup.push(() => clearTimeout(autoUpdateTimer));
 
       // 日报自动生成检测：每分钟检查一次
       let lastAutoGenDate = null;  // 防止同一天重复触发
@@ -356,16 +374,16 @@
       const autoReportTimer = setInterval(async () => {
         if (autoGenRunning) return;  // 上一轮还没完成，跳过
         const now = new Date();
-        const currentHour = now.getHours();
-        const currentMinute = now.getMinutes();
+        const currentTotalMinutes = now.getHours() * 60 + now.getMinutes();
         const today = getLocalDate();
 
-        // 检查是否达到工作结束时间
+        // 检查是否达到或已过工作结束时间
         const { hour: workEndHour, minute: workEndMinute } =
           resolveAutoReportWorkEnd(runtimeConfig);
+        const workEndTotalMinutes = workEndHour * 60 + workEndMinute;
 
-        // 条件：当前小时等于工作结束时间，当前分钟 >= 结束分钟，且今天未自动生成过
-        if (currentHour === workEndHour && currentMinute >= workEndMinute && lastAutoGenDate !== today) {
+        // 条件：当前时间 >= 工作结束时间，且今天未自动生成过
+        if (currentTotalMinutes >= workEndTotalMinutes && lastAutoGenDate !== today) {
           try {
             // 检查今日是否已有日报
             const existingReport = await invoke('get_saved_report', { date: today });
@@ -388,6 +406,7 @@
           }
         }
       }, 60000);  // 每分钟检查一次
+      pendingCleanup.push(() => clearInterval(autoReportTimer));
 
       const unlisten = await listen('screenshot-taken', (event) => {
         console.log('截屏完成:', event.payload);
@@ -411,30 +430,13 @@
           { priority: Boolean(event.payload?.browser_url) }
         );
       });
-
-      cleanup = () => {
-        unlisten();
-        unlistenRecordingState();
-        unlistenConfigChanged();
-        unlistenAvatarTimeline();
-        unsubscribeLocale();
-        unsubscribeCache();
-        clearTimeout(autoUpdateTimer);
-        clearInterval(autoReportTimer);
-        mediaQuery.removeEventListener('change', handleSystemThemeChange);
-        window.removeEventListener('background-changed', handleBgChange);
-        window.removeEventListener('dragover', preventFileDrop);
-        window.removeEventListener('drop', preventFileDrop);
-      };
-
-      if (disposed) {
-        cleanup();
-      }
+      if (disposed) return;
+      pendingCleanup.push(unlisten);
     })();
 
     return () => {
       disposed = true;
-      cleanup();
+      pendingCleanup.forEach(fn => { try { fn(); } catch {} });
     };
   });
 </script>

@@ -389,9 +389,11 @@ fn handle_tool_call(name: &str, args: &Value, state: &Arc<Mutex<AppState>>) -> V
         }),
         "generate_report" => with_policy_check(state, name, Permission::WriteReport, |s| {
             let date = args["date"].as_str().unwrap_or("");
-            match s.db.get_daily_stats(date) {
+            let locale = work_review_core::analysis::AppLocale::from_option(args["locale"].as_str());
+            let segments = work_review_core::config::AppConfig::default().effective_work_segments();
+            match s.db.get_daily_stats_with_segments(date, &segments) {
                 Ok(stats) => {
-                    let summary = work_review_core::analysis::generate_stats_summary(&stats);
+                    let summary = work_review_core::analysis::generate_stats_summary_for_locale(&stats, locale);
                     json!({
                         "content": [{ "type": "text", "text": format!("工作日报 - {}\n\n{}", date, summary) }]
                     })

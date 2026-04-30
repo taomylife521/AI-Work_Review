@@ -77,9 +77,7 @@ pub enum QueryStep {
         limit: Option<u32>,
     },
     /// 查询每日统计
-    DailyStats {
-        date: String,
-    },
+    DailyStats { date: String },
     /// 搜索活动
     SearchActivities {
         query: String,
@@ -91,9 +89,7 @@ pub enum QueryStep {
         limit: usize,
     },
     /// 获取工作会话
-    WorkSessions {
-        date: String,
-    },
+    WorkSessions { date: String },
     /// 获取报告
     Report {
         date: String,
@@ -101,9 +97,7 @@ pub enum QueryStep {
         locale: Option<String>,
     },
     /// 意图分析
-    AnalyzeIntents {
-        date: String,
-    },
+    AnalyzeIntents { date: String },
     /// 获取设备状态
     DeviceStatus {},
     /// 自定义参数映射
@@ -138,9 +132,7 @@ pub enum TransformStep {
         metric: AggregateMetric,
     },
     /// 限制数量
-    Limit {
-        count: usize,
-    },
+    Limit { count: usize },
     /// AI 处理
     AiTransform {
         prompt_template: String,
@@ -148,10 +140,7 @@ pub enum TransformStep {
         model: Option<String>,
     },
     /// 自定义脚本（预留）
-    Script {
-        language: String,
-        code: String,
-    },
+    Script { language: String, code: String },
 }
 
 fn default_descending() -> SortOrder {
@@ -195,17 +184,11 @@ pub enum AggregateMetric {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OutputStep {
     /// 文本输出
-    Text {
-        template: String,
-    },
+    Text { template: String },
     /// Markdown 输出
-    Markdown {
-        template: String,
-    },
+    Markdown { template: String },
     /// JSON 输出
-    Json {
-        schema: Option<serde_json::Value>,
-    },
+    Json { schema: Option<serde_json::Value> },
     /// AI 生成输出
     AiGenerate {
         prompt_template: String,

@@ -1,5 +1,5 @@
 use crate::analysis::{
-    append_custom_prompt_for_locale, generate_activity_timeline, generate_stats_summary_for_locale,
+    append_custom_prompt_for_locale, generate_session_timeline, generate_stats_summary_for_locale,
     Analyzer, AppLocale, GeneratedReport,
 };
 use crate::database::{Activity, DailyStats};
@@ -117,7 +117,7 @@ impl CloudAnalyzer {
         insights: &[String],
     ) -> Result<String> {
         let stats_summary = generate_stats_summary_for_locale(stats, self.locale);
-        let timeline = generate_activity_timeline(activities, self.locale);
+        let timeline = generate_session_timeline(activities, self.locale);
         let insights_text = insights
             .iter()
             .enumerate()

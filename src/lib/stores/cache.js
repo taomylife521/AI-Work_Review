@@ -95,11 +95,14 @@ function createCache() {
     // 设置配置
     setConfig: (data) => update(c => ({ ...c, config: data })),
 
-    // 添加新活动到时间线缓存（增量更新）
+    // 添加新活动到时间线缓存（增量更新，按 id 去重）
     addActivity: (activity) => update(c => {
       const today = getLocalDateString();
       if (c.timeline[today]) {
         const existing = c.timeline[today].data || [];
+        if (activity.id != null && existing.some(a => a.id === activity.id)) {
+          return c;
+        }
         return {
           ...c,
           timeline: {

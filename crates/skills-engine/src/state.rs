@@ -1,4 +1,4 @@
-use crate::model::{SkillId, SignalSource};
+use crate::model::{SignalSource, SkillId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -103,7 +103,8 @@ impl SkillState {
         };
         self.learning_history.push(record);
         if self.learning_history.len() > max_history {
-            self.learning_history.drain(0..self.learning_history.len() - max_history);
+            self.learning_history
+                .drain(0..self.learning_history.len() - max_history);
         }
         self.last_learning_at = Some(Self::now_secs());
         self.updated_at = Self::now_secs();
@@ -118,8 +119,7 @@ impl SkillState {
             self.stats.failure_count += 1;
         }
         let total = self.stats.total_executions;
-        self.stats.avg_duration_ms = self.stats.avg_duration_ms
-            * (total - 1) as f64 / total as f64
+        self.stats.avg_duration_ms = self.stats.avg_duration_ms * (total - 1) as f64 / total as f64
             + duration_ms as f64 / total as f64;
         self.stats.last_executed_at = Some(Self::now_secs());
         self.updated_at = Self::now_secs();

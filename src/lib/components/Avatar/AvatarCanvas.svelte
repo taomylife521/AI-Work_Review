@@ -395,7 +395,7 @@
   $: mouseDeviceX = mouseGeometry.mouseX;
   $: mouseDeviceY = mouseGeometry.mouseY;
   $: keyboardHotspots = keyboardActive && sceneInteractionLayout
-    ? keyboardGroups.flatMap((groupName) => sceneInteractionLayout.keyboardHotspots?.[groupName] ?? [])
+    ? [keyboardGroup].flatMap((groupName) => sceneInteractionLayout.keyboardHotspots?.[groupName] ?? [])
     : [];
   $: mouseHotspots = mouseActive && sceneInteractionLayout && !mouseVisualSrc && !preset.mouseMotionModel
     ? sceneInteractionLayout.mouseHotspots?.[mouseGroup] ?? []
