@@ -620,11 +620,9 @@ pub async fn handle_feishu_webhook(
     };
 
     let command = normalize_command(text.split_whitespace().next().unwrap_or(""));
-    let mut tenant_token_cache: Option<String> = None;
     if let Some(progress) = progress_text_for_command(&command) {
         if let Some(token) = get_tenant_token(&client, app_id, app_secret).await {
             let _ = reply_message(&client, &token, message_id, progress).await;
-            tenant_token_cache = Some(token);
         }
     }
 
@@ -632,13 +630,10 @@ pub async fn handle_feishu_webhook(
         .await
         .unwrap_or_else(|| UNKNOWN_CMD_REPLY.to_string());
 
-    let tenant_token = if let Some(cached) = tenant_token_cache {
-        cached
-    } else {
-        match get_tenant_token(&client, app_id, app_secret).await {
-            Some(t) => t,
-            None => return FeishuResponse::error(500, "failed to get tenant_access_token"),
-        }
+    // 始终重新获取 token，避免 handle_cmd 执行过程中旧 token 过期
+    let tenant_token = match get_tenant_token(&client, app_id, app_secret).await {
+        Some(t) => t,
+        None => return FeishuResponse::error(500, "failed to get tenant_access_token"),
     };
 
     match reply_message(&client, &tenant_token, message_id, &reply).await {

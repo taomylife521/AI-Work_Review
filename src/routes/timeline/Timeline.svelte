@@ -461,10 +461,14 @@
     return featuredIds;
   }
 
+  let loadTimelineRequestId = 0;
+
   // 加载时间线数据（重置）
   async function loadTimeline() {
     // 禁用缓存：每次都从后端加载最新数据，确保数据一致性
     // 后端已实现 GROUP BY 聚合，无需前端缓存旧数据
+
+    const requestId = ++loadTimelineRequestId;
 
     // 2. 缓存未命中，请求后端
     loading = true;
@@ -473,17 +477,21 @@
     hasMore = true;
     // 日期切换时释放旧图片缓存，防止内存无限增长
     clearImageCaches();
-    
+
     try {
       const [activitiesData, summariesData] = await Promise.all([
         invoke('get_timeline', { date: selectedDate, limit: PAGE_SIZE, offset: 0 }),
         invoke('get_hourly_summaries', { date: selectedDate }),
       ]);
 
+      if (requestId !== loadTimelineRequestId) return;
+
       const preparedActivities = prepareTimelineActivities(activitiesData);
       await preloadTimelineLeadThumbnails(preparedActivities);
+      if (requestId !== loadTimelineRequestId) return;
+
       activities = preparedActivities;
-      
+
       hourlySummaries = summariesData;
       offset = activities.length;
       hasMore = activitiesData.length >= PAGE_SIZE;
@@ -528,7 +536,8 @@
       });
 
       if (moreActivities.length > 0) {
-        activities = [...activities, ...moreActivities];
+        const prepared = prepareTimelineActivities(moreActivities);
+        activities = [...activities, ...prepared];
         offset += moreActivities.length;
         // 预加载新图片
         moreActivities.forEach(a => loadThumbnail(a.screenshot_path));
@@ -776,7 +785,7 @@
         <div class="timeline-summary-copy">
           <span>{t('timeline.recordSummary', { dateLabel: isToday ? t('timeline.todayLabel') : selectedDate, count: activities.length })}</span>
           <span class="timeline-summary-divider">|</span>
-          <span>00:00 - {formatTime(activities[0].timestamp)}</span>
+          <span>00:00 - {activities[0] ? formatTime(activities[0].timestamp) : '--:--'}</span>
         </div>
 
         <a

@@ -106,7 +106,9 @@ fn write_node_identity_to_path(path: &Path, identity: &NodeIdentity) -> Result<(
         std::fs::create_dir_all(parent)?;
     }
     let content = serde_json::to_string_pretty(identity)?;
-    std::fs::write(path, content)?;
+    let temp_path = path.with_extension("tmp");
+    std::fs::write(&temp_path, &content)?;
+    std::fs::rename(&temp_path, path)?;
     Ok(())
 }
 
@@ -159,9 +161,7 @@ mod tests {
 
     fn temp_identity_path(label: &str) -> PathBuf {
         let unique = format!("work-review-node-gateway-{label}-{}", uuid::Uuid::new_v4());
-        std::env::temp_dir()
-            .join(unique)
-            .join("node_identity.json")
+        std::env::temp_dir().join(unique).join("node_identity.json")
     }
 
     #[test]
