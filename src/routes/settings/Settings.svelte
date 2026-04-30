@@ -247,6 +247,8 @@
   onMount(() => {
     const unsubscribeCache = cache.subscribe((state) => {
       if (!state.config) return;
+      // 用户正在保存时不覆盖（saveConfig 本身会更新 cache）
+      if (saving) return;
       config = state.config;
     });
 

@@ -168,6 +168,7 @@
     '主要意图', '主要工作', '待跟进事项', '代表性 Session',
     '相关记录依据',
   ]);
+  const renderedMarkdownCache = new Map();
 
   function normalizeAssistantContent(content) {
     const text = (content || '').replace(/\r\n/g, '\n').trim();
@@ -243,7 +244,22 @@
   }
 
   function renderMarkdown(content) {
-    return marked.parse(normalizeAssistantContent(content));
+    const normalized = normalizeAssistantContent(content);
+    if (!normalized) return '';
+
+    const cached = renderedMarkdownCache.get(normalized);
+    if (cached) return cached;
+
+    const html = marked.parse(normalized);
+    renderedMarkdownCache.set(normalized, html);
+
+    // 控制缓存上限，避免长会话内存持续增长
+    if (renderedMarkdownCache.size > 120) {
+      const oldestKey = renderedMarkdownCache.keys().next().value;
+      renderedMarkdownCache.delete(oldestKey);
+    }
+
+    return html;
   }
 
   function resizeComposer() {
@@ -305,6 +321,16 @@
     composer?.focus();
   }
 
+  const ASK_TIMEOUT_MS = 120_000;
+
+  function withTimeout(promise, ms) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(t('ask.timeoutError'))), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  }
+
   async function submitQuestion(question = input) {
     const trimmed = question.trim();
     if (!trimmed || sending) return;
@@ -325,12 +351,15 @@
     await scrollToBottom('auto', 2);
 
     try {
-      const answer = await invoke('chat_work_assistant', {
-        question: trimmed,
-        history,
-        modelConfig: getSelectedModelConfig(),
-        locale: currentLocale,
-      });
+      const answer = await withTimeout(
+        invoke('chat_work_assistant', {
+          question: trimmed,
+          history,
+          modelConfig: getSelectedModelConfig(),
+          locale: currentLocale,
+        }),
+        ASK_TIMEOUT_MS
+      );
 
       // 写入全局 store（即使组件已销毁也安全）
       assistantStore.appendMessage({
@@ -391,14 +420,14 @@
       {:else}
         <div class="ask-thread-shell mx-auto flex min-h-full max-w-4xl flex-col gap-10">
           {#each messages as message}
-            <div class={message.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+            <div class={message.role === 'user' ? 'flex w-full min-w-0 justify-end' : 'flex w-full min-w-0 justify-start'}>
               <div
                 class={message.role === 'user'
-                  ? 'ask-message-card ask-message-card-user max-w-[78%] rounded-[28px] rounded-br-lg bg-gradient-to-br from-slate-100 to-slate-50 px-5 py-4 text-slate-800 ring-1 ring-inset ring-slate-200/60 shadow-sm dark:from-slate-800 dark:to-slate-900 dark:text-slate-100 dark:ring-slate-700/60'
-                  : 'ask-message-card ask-message-card-assistant w-full max-w-[90%] px-1 py-1 text-slate-800 dark:text-slate-100'}
+                  ? 'ask-message-card ask-message-card-user min-w-0 max-w-[78%] rounded-[28px] rounded-br-lg bg-gradient-to-br from-slate-100 to-slate-50 px-5 py-4 text-slate-800 ring-1 ring-inset ring-slate-200/60 shadow-sm dark:from-slate-800 dark:to-slate-900 dark:text-slate-100 dark:ring-slate-700/60'
+                  : 'ask-message-card ask-message-card-assistant min-w-0 w-full max-w-[90%] px-1 py-1 text-slate-800 dark:text-slate-100'}
               >
                 {#if message.role === 'assistant'}
-                  <div class="markdown-body assistant-markdown max-w-none">
+                  <div class="markdown-body assistant-markdown min-w-0 max-w-none">
                     {@html renderMarkdown(message.content)}
                   </div>
 
@@ -431,7 +460,7 @@
                     </details>
                   {/if}
                 {:else}
-                  <p class="whitespace-pre-wrap text-[16px] font-medium leading-7 tracking-[0.01em]">{message.content}</p>
+                  <p class="whitespace-pre-wrap break-words text-[16px] font-medium leading-7 tracking-[0.01em]">{message.content}</p>
                 {/if}
               </div>
             </div>

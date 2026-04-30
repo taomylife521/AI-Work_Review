@@ -214,8 +214,12 @@ pub fn sync_telegram_bot_runtime(state: &Arc<Mutex<AppState>>) -> Result<(), App
         return Ok(());
     }
 
-    s.telegram_bot_runtime.start(bot_token.unwrap(), devices, proxy);
-    log::info!("Telegram Bot 已启动 ({} 台设备)", s.config.node_devices.len() + 1);
+    s.telegram_bot_runtime
+        .start(bot_token.unwrap(), devices, proxy);
+    log::info!(
+        "Telegram Bot 已启动 ({} 台设备)",
+        s.config.node_devices.len() + 1
+    );
     Ok(())
 }
 
@@ -229,7 +233,9 @@ async fn run(
     if let Some(p) = proxy {
         if !p.trim().is_empty() {
             match reqwest::Proxy::all(p.trim()) {
-                Ok(px) => { builder = builder.proxy(px); }
+                Ok(px) => {
+                    builder = builder.proxy(px);
+                }
                 Err(e) => {
                     let msg = format!("代理配置无效: {e}");
                     log::error!("Telegram Bot {msg}");
@@ -358,7 +364,8 @@ async fn run(
                                                 "typing",
                                             )
                                             .await;
-                                            send_text(&client, bot_token, msg.chat.id, progress).await;
+                                            send_text(&client, bot_token, msg.chat.id, progress)
+                                                .await;
                                         }
                                         handle_cmd(&client, &devices, text).await
                                     } else {
@@ -398,10 +405,8 @@ async fn run(
                     log::error!("Telegram Bot 连续 {consecutive_errors} 次失败，停止轮询");
                     return;
                 }
-                tokio::time::sleep(std::time::Duration::from_secs(
-                    TELEGRAM_POLL_RETRY_SECONDS,
-                ))
-                .await;
+                tokio::time::sleep(std::time::Duration::from_secs(TELEGRAM_POLL_RETRY_SECONDS))
+                    .await;
             }
         }
     }
@@ -409,9 +414,8 @@ async fn run(
 
 async fn consume_pending_updates(client: &Client, bot_token: &str) -> Result<i64, String> {
     // 启动时丢弃历史积压更新，避免重启后重复回复旧消息。
-    let url = format!(
-        "https://api.telegram.org/bot{bot_token}/getUpdates?offset=-1&limit=1&timeout=0"
-    );
+    let url =
+        format!("https://api.telegram.org/bot{bot_token}/getUpdates?offset=-1&limit=1&timeout=0");
     let resp = client
         .get(&url)
         .timeout(std::time::Duration::from_secs(10))
@@ -468,11 +472,7 @@ fn progress_text_for_command(cmd: &str) -> Option<&'static str> {
     }
 }
 
-async fn handle_cmd(
-    client: &Client,
-    devices: &[DeviceEndpoint],
-    text: &str,
-) -> Option<String> {
+async fn handle_cmd(client: &Client, devices: &[DeviceEndpoint], text: &str) -> Option<String> {
     let parts: Vec<&str> = text.split_whitespace().collect();
     let cmd = normalize_command(parts.first().copied().unwrap_or(""));
     if cmd.is_empty() {
@@ -548,14 +548,21 @@ async fn handle_cmd(
                             err.as_str().unwrap_or("未知错误")
                         ));
                     }
-                    let content = data.get("content")?.as_str()?.to_string();
-                    let content = normalize_report_for_chat(&content);
-                    Some(format!(
-                        "📄 日报详情\n{OUTPUT_DIVIDER}\n设备：{}\n日期：{}\n\n{}",
-                        device.name,
-                        date,
-                        truncate(&content, 3900)
-                    ))
+                    match data.get("content").and_then(|v| v.as_str()) {
+                        Some(content) => {
+                            let content = normalize_report_for_chat(content);
+                            Some(format!(
+                                "📄 日报详情\n{OUTPUT_DIVIDER}\n设备：{}\n日期：{}\n\n{}",
+                                device.name,
+                                date,
+                                truncate(&content, 3900)
+                            ))
+                        }
+                        None => Some(format!(
+                            "❌ 设备返回数据格式异常\n设备：{}\n日期：{}",
+                            device.name, date
+                        )),
+                    }
                 }
                 None => Some(connection_failed_reply(&device.name)),
             }
@@ -577,7 +584,13 @@ async fn handle_cmd(
                 .await
             {
                 Ok(r) => {
-                    let data: serde_json::Value = r.json().await.ok()?;
+                    let data: serde_json::Value = match r.json().await {
+                        Ok(d) => d,
+                        Err(e) => return Some(format!(
+                            "❌ 解析设备响应失败\n设备：{}\n日期：{}\n原因：{e}",
+                            device.name, date
+                        )),
+                    };
                     if let Some(err) = data.get("error") {
                         return Some(format!(
                             "❌ 生成失败\n设备：{}\n日期：{}\n原因：{}",
@@ -586,14 +599,21 @@ async fn handle_cmd(
                             err.as_str().unwrap_or("未知错误")
                         ));
                     }
-                    let content = data.get("content")?.as_str()?.to_string();
-                    let content = normalize_report_for_chat(&content);
-                    Some(format!(
-                        "✅ 生成完成\n{OUTPUT_DIVIDER}\n设备：{}\n日期：{}\n\n{}",
-                        device.name,
-                        date,
-                        truncate(&content, 3800)
-                    ))
+                    match data.get("content").and_then(|v| v.as_str()) {
+                        Some(content) => {
+                            let content = normalize_report_for_chat(content);
+                            Some(format!(
+                                "✅ 生成完成\n{OUTPUT_DIVIDER}\n设备：{}\n日期：{}\n\n{}",
+                                device.name,
+                                date,
+                                truncate(&content, 3800)
+                            ))
+                        }
+                        None => Some(format!(
+                            "❌ 设备返回数据格式异常\n设备：{}\n日期：{}",
+                            device.name, date
+                        )),
+                    }
                 }
                 Err(e) => Some(format!(
                     "❌ 生成失败\n设备：{}\n日期：{}\n原因：{}",
@@ -610,7 +630,8 @@ async fn handle_cmd(
             };
             let url = format!("{}/v1/device?token={}", device.url, device.token);
             match api_get(client, &url).await {
-                Some(data) => Some(format!(
+                Some(data) => {
+                    Some(format!(
                     "🖥 设备状态\n{OUTPUT_DIVIDER}\n设备：{}\nID：{}\n名称：{}\n平台：{}\n录制：{}",
                     device.name,
                     data.get("deviceId").and_then(|v| v.as_str()).unwrap_or("-"),
@@ -621,7 +642,8 @@ async fn handle_cmd(
                     } else {
                         "否"
                     },
-                )),
+                ))
+                }
                 None => Some(connection_failed_reply(&device.name)),
             }
         }
@@ -675,11 +697,9 @@ fn resolve_date(input: Option<&str>) -> String {
     let s = input.unwrap_or("today").to_lowercase();
     match s.as_str() {
         "today" | "今天" => chrono::Local::now().format("%Y-%m-%d").to_string(),
-        "yesterday" | "昨天" => {
-            (chrono::Local::now() - chrono::Duration::days(1))
-                .format("%Y-%m-%d")
-                .to_string()
-        }
+        "yesterday" | "昨天" => (chrono::Local::now() - chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string(),
         _ => s,
     }
 }
@@ -749,14 +769,14 @@ fn normalize_report_for_chat(content: &str) -> String {
                 table_headers = cells;
                 continue;
             }
-            let row = if table_headers.first().is_some_and(|h| h.contains("序号")) && cells.len() >= 3
-            {
-                format!("- {}. {}（{}）", cells[0], cells[1], cells[2])
-            } else if cells.len() >= 2 {
-                format!("- {}：{}", cells[0], cells[1..].join(" / "))
-            } else {
-                format!("- {}", cells.join(" / "))
-            };
+            let row =
+                if table_headers.first().is_some_and(|h| h.contains("序号")) && cells.len() >= 3 {
+                    format!("- {}. {}（{}）", cells[0], cells[1], cells[2])
+                } else if cells.len() >= 2 {
+                    format!("- {}：{}", cells[0], cells[1..].join(" / "))
+                } else {
+                    format!("- {}", cells.join(" / "))
+                };
             if row != last_non_empty {
                 last_non_empty = row.clone();
                 lines.push(row);
@@ -795,7 +815,11 @@ fn normalize_command(raw: &str) -> &str {
     raw.split('@').next().unwrap_or(raw)
 }
 
-fn should_abort_polling(status: StatusCode, error_code: Option<i64>, consecutive_errors: u32) -> bool {
+fn should_abort_polling(
+    status: StatusCode,
+    error_code: Option<i64>,
+    consecutive_errors: u32,
+) -> bool {
     if matches!(
         status,
         StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN | StatusCode::CONFLICT
@@ -808,7 +832,11 @@ fn should_abort_polling(status: StatusCode, error_code: Option<i64>, consecutive
     consecutive_errors >= TELEGRAM_POLL_MAX_ERRORS
 }
 
-fn format_telegram_http_error(action: &str, status: StatusCode, description: Option<&str>) -> String {
+fn format_telegram_http_error(
+    action: &str,
+    status: StatusCode,
+    description: Option<&str>,
+) -> String {
     let mut message = format!("{action} (HTTP {status})");
     if let Some(desc) = description.map(str::trim).filter(|d| !d.is_empty()) {
         message.push_str(": ");

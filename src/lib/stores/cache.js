@@ -99,13 +99,14 @@ function createCache() {
     addActivity: (activity) => update(c => {
       const today = getLocalDateString();
       if (c.timeline[today]) {
+        const existing = c.timeline[today].data || [];
         return {
           ...c,
           timeline: {
             ...c.timeline,
             [today]: {
               ...c.timeline[today],
-              data: [activity, ...c.timeline[today].data],
+              data: [activity, ...existing],
               timestamp: Date.now(),
             }
           }

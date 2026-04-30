@@ -60,7 +60,8 @@ fn log_browser_url_once(log_key: &str, message: &str, url: &str) {
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     if remember_browser_url_log(&mut cache, log_key, url) {
-        log::info!("{message}: {}", &url[..url.len().min(50)]);
+        let truncated: String = url.chars().take(50).collect();
+        log::info!("{message}: {truncated}");
     }
 }
 
@@ -371,6 +372,54 @@ fn is_probable_host(value: &str) -> bool {
         || is_probable_ipv4(host_without_port)
 }
 
+/// Detect host-only domains that are likely OCR slash-loss artifacts
+/// e.g. `linux.do/latest` → OCR loses `/` → `linux.dolatest`
+fn is_merged_domain(url: &str) -> bool {
+    let without_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
+
+    let (host, rest) = split_host_and_rest(without_scheme);
+    if !rest.is_empty() {
+        return false;
+    }
+
+    let host = split_host_port(host).0.trim_end_matches('.');
+    if host.is_empty() || host == "localhost" {
+        return false;
+    }
+
+    let labels: Vec<&str> = host.split('.').collect();
+    if labels.len() != 2 {
+        return false;
+    }
+
+    let tld = labels[1].to_lowercase();
+    if tld.len() <= 6 || !tld.chars().all(|c| c.is_ascii_alphabetic()) {
+        return false;
+    }
+
+    let prefix = &tld[..2];
+    matches!(
+        prefix,
+        "ai" | "cc"
+            | "cn"
+            | "de"
+            | "do"
+            | "fr"
+            | "hk"
+            | "id"
+            | "in"
+            | "io"
+            | "jp"
+            | "kr"
+            | "me"
+            | "ru"
+            | "sg"
+            | "tv"
+            | "uk"
+            | "us"
+    )
+}
+
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn normalize_possible_url(value: &str) -> Option<String> {
     let candidate = trim_url_candidate(value)
@@ -401,17 +450,29 @@ fn normalize_possible_url(value: &str) -> Option<String> {
 
     let (host, _) = split_host_and_rest(candidate);
     if is_probable_host(host) {
-        let host_lower = split_host_port(host).0.to_lowercase();
-        let scheme = if host_lower == "localhost" || is_probable_ipv4(split_host_port(host).0) {
-            "http://"
-        } else {
-            "https://"
-        };
-        return Some(format!("{}{}", scheme, candidate.trim_end_matches('/')));
+        let result = format!(
+            "{}{}",
+            if split_host_port(host).0.to_lowercase() == "localhost"
+                || is_probable_ipv4(split_host_port(host).0)
+            {
+                "http://"
+            } else {
+                "https://"
+            },
+            candidate.trim_end_matches('/')
+        );
+        if is_merged_domain(&result) {
+            return None;
+        }
+        return Some(result);
     }
 
     if is_probable_domain(candidate) {
-        return Some(format!("https://{}", candidate.trim_end_matches('/')));
+        let result = format!("https://{}", candidate.trim_end_matches('/'));
+        if is_merged_domain(&result) {
+            return None;
+        }
+        return Some(result);
     }
 
     None
@@ -491,7 +552,9 @@ pub fn semantic_category_to_base_category(
         "设计创作" => Some("design"),
         "编码开发" => Some("development"),
         "内容撰写" => Some("office"),
-        "资料阅读" | "资料调研" | "任务规划" | "AI 协作" | "未知活动" => Some("browser"),
+        "资料阅读" | "资料调研" | "任务规划" | "AI 协作" | "未知活动" => {
+            Some("browser")
+        }
         _ => None,
     };
 
@@ -1419,9 +1482,9 @@ mod tests {
         extract_active_tab_url_from_session_store_value, extract_url_from_title,
         find_focused_sway_node, firefox_family_profile_dir_from_ini, is_browser_app,
         is_probable_domain, normalize_display_app_name, normalize_macos_frontmost_app_name,
-        normalize_possible_url, parse_macos_window_bounds_fields,
-        parse_gnome_focused_window_dbus_output, parse_hyprland_window_bounds,
-        parse_kdotool_geometry_output, parse_xdotool_geometry_shell_output,
+        normalize_possible_url, parse_gnome_focused_window_dbus_output,
+        parse_hyprland_window_bounds, parse_kdotool_geometry_output,
+        parse_macos_window_bounds_fields, parse_xdotool_geometry_shell_output,
         remember_browser_url_log, resolve_browser_url_for_window_linux,
         semantic_category_to_base_category, WindowBounds,
     };
@@ -1457,12 +1520,7 @@ mod tests {
     #[test]
     fn macos前台窗口坐标字段应解析为窗口边界() {
         assert_eq!(
-            parse_macos_window_bounds_fields(
-                Some("1512"),
-                Some("64"),
-                Some("1512"),
-                Some("982"),
-            ),
+            parse_macos_window_bounds_fields(Some("1512"), Some("64"), Some("1512"), Some("982"),),
             Some(WindowBounds {
                 x: 1512,
                 y: 64,
@@ -1524,7 +1582,10 @@ mod tests {
         assert_eq!(normalize_display_app_name("discover"), "Discover");
         assert_eq!(normalize_display_app_name("mail"), "Mail");
         assert_eq!(normalize_display_app_name("邮件"), "Mail");
-        assert_eq!(normalize_display_app_name("coreautha"), "System Authentication");
+        assert_eq!(
+            normalize_display_app_name("coreautha"),
+            "System Authentication"
+        );
         assert_eq!(
             normalize_display_app_name("Work_Review.v1.0.35_x64-setup"),
             "Work Review Setup"
@@ -4256,11 +4317,20 @@ pub fn normalize_category_key(category: &str) -> String {
 }
 
 /// 检查分类 key 是否有效（预设 + 自定义）
-pub fn is_valid_category_key(category: &str, custom_categories: &[crate::config::CustomCategory]) -> bool {
+pub fn is_valid_category_key(
+    category: &str,
+    custom_categories: &[crate::config::CustomCategory],
+) -> bool {
     let lowered = category.trim().to_lowercase();
-    matches!(lowered.as_str(),
-        "development" | "browser" | "communication" | "office"
-        | "design" | "entertainment" | "other"
+    matches!(
+        lowered.as_str(),
+        "development"
+            | "browser"
+            | "communication"
+            | "office"
+            | "design"
+            | "entertainment"
+            | "other"
     ) || custom_categories.iter().any(|c| c.key == lowered)
 }
 
@@ -4282,7 +4352,10 @@ pub fn find_category_override(
             || normalized_app_name.contains(&normalized_rule)
             || normalized_rule.contains(&normalized_app_name)
         {
-            Some(crate::config::normalize_category_key_private(&rule.category, &custom_keys))
+            Some(crate::config::normalize_category_key_private(
+                &rule.category,
+                &custom_keys,
+            ))
         } else {
             None
         }
