@@ -25,9 +25,16 @@
   const isAvatarWindow = currentWindowLabel === 'avatar';
 
   // 視窗拖拽（Linux WebKitGTK 不支援 -webkit-app-region: drag，改用 Tauri API）
+  let lastDragClick = 0;
   async function startDrag(e) {
-    // 只處理左鍵，且排除按鈕點擊
     if (e.button !== 0 || e.target.closest('button')) return;
+    const now = Date.now();
+    if (now - lastDragClick < 350) {
+      lastDragClick = 0;
+      await maximizeWindow();
+      return;
+    }
+    lastDragClick = now;
     await appWindow.startDragging();
   }
 
@@ -89,7 +96,7 @@
       ]).then(([activities, summaries]) => cache.setTimeline(today, activities, summaries)),
       // 3. 日报 (今天) - 检查是否已存在
       invoke('get_saved_report', { date: today }).then(report => {
-        if (report) cache.setReport(today, report);
+        if (report) cache.setReport(`${today}:${$locale}`, report);
       })
     ]).then(() => {
       console.log('预加载完成');
@@ -367,7 +374,7 @@
               autoGenRunning = true;
               try {
                 await invoke('generate_report', { date: today, force: false, locale: currentLocale });
-                cache.invalidate('report', today);
+                cache.invalidate('report', `${today}:${currentLocale}`);
                 lastAutoGenDate = today;
                 console.log('日报自动生成完成');
               } finally {

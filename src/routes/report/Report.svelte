@@ -31,6 +31,7 @@
   let isYesterdayReport = false; // 标记是否显示的是昨日日报
   let config = null; // 当前配置
   let lastLoadedDate = '';
+  let reportRequestId = 0;
   let exportInProgress = false;
   let promptSaving = false;
   $: currentLocale = $locale;
@@ -60,6 +61,8 @@
   }
 
   async function loadReport(previousReport = null) {
+    const requestId = ++reportRequestId;
+
     // 乐观更新：先显示缓存数据
     let cacheData;
     const unsubscribe = cache.subscribe(c => { cacheData = c; });
@@ -71,13 +74,14 @@
       loading = false;
       
       // 缓存有效则直接返回
-      if (cache.isValid(cacheData.reports[currentReportCacheKey])) {
+      if (cache.isValid(cacheData.reports[currentReportCacheKey], 'reports')) {
         return;
       }
       
       // 后台静默刷新
       try {
         const savedReport = await invoke('get_saved_report', { date: selectedDate, locale: currentLocale });
+        if (requestId !== reportRequestId) return;
         if (savedReport) {
           report = savedReport;
           cache.setReport(currentReportCacheKey, savedReport);
@@ -91,6 +95,7 @@
       error = null;
       try {
         const savedReport = await invoke('get_saved_report', { date: selectedDate, locale: currentLocale });
+        if (requestId !== reportRequestId) return;
         if (savedReport) {
           report = savedReport;
           isYesterdayReport = false;

@@ -158,6 +158,7 @@
         config.storage.screenshot_width_mode = 'auto';
       }
       if (!config.app_category_rules) config.app_category_rules = [];
+      if (!config.privacy) config.privacy = {};
       if (!config.privacy.app_rules) config.privacy.app_rules = [];
       if (!config.privacy.excluded_keywords) config.privacy.excluded_keywords = [];
       delete config.privacy.sensitive_keywords;
