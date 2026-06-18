@@ -17,6 +17,10 @@
 </p>
 
 <p align="center">
+  <strong>🔒 仅供个人使用 —— 所有数据只存在你的设备上。</strong>
+</p>
+
+<p align="center">
   <a href="./README.md">English</a> · <a href="./README.zh.md">中文</a> · <a href="./README.tw.md">繁體中文</a>
 </p>
 
@@ -309,7 +313,7 @@ npm run tauri:build  # 构建
 
 ## License
 
-MIT
+[MIT](./LICENSE) © 2026 wm94i
 
 ---
 

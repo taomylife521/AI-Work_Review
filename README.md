@@ -17,6 +17,10 @@
 </p>
 
 <p align="center">
+  <strong>🔒 For personal use only — all data stays on your device.</strong>
+</p>
+
+<p align="center">
   <a href="./README.md">English</a> · <a href="./README.zh.md">中文</a> · <a href="./README.tw.md">繁體中文</a>
 </p>
 
@@ -308,7 +312,7 @@ Requires: Node.js 18+ / Rust stable / Tauri 2 CLI · Tech stack: Tauri 2 + Rust 
 
 ## License
 
-MIT
+[MIT](./LICENSE) © 2026 wm94i
 
 ---
 

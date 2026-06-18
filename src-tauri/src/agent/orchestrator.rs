@@ -69,12 +69,23 @@ pub fn route_query(question: &str, has_model: bool) -> RouteDecision {
         };
     }
 
-    // ── 无模型（基础模板模式）→ 仅对明确工作查询走 FastPath 统计模板 ──
-    // 没有模型可用，只能用规则兜底。用"强工作信号"关键词（而非时间词），让"我这周主要做了什么"
-    // 这类工作查询得到统计模板，而"今天天气怎么样"这类含时间词的非工作问题不被误判为工作查询。
+    // ── 无模型（基础模板模式）→ 完整覆盖工作查询的统计模板 ──
+    // 没有模型可用，只能用规则兜底。fast_answer 对任何带时间范围的工作查询都给统一统计
+    // （活动总览 / 分类分布 / Top 应用 / 相关记录），所以这里尽量放宽触发，让"我这周主要做了什么"
+    // "今天怎么样""最近忙啥"等工作查询都能拿到统计；仅明显非工作领域（天气/股票/新闻…）放行到 Fallback。
+    let non_work_signals = ["天气", "股票", "新闻", "笑话", "写诗", "算命", "星座", "汇率", "翻译成"];
+    if non_work_signals.iter().any(|p| q.contains(p)) {
+        return RouteDecision {
+            path: QueryPath::Fallback,
+            reason: "无模型且明显非工作领域，模板兜底".to_string(),
+        };
+    }
     let work_signals = [
-        "做了什么", "主要做了", "工作记录", "工作总结", "工作内容", "时间分布",
-        "时间花在哪", "花在哪", "时长", "总结", "待办",
+        // 时间词（工作查询常带）
+        "今天", "昨天", "前天", "本周", "这周", "上周", "本月", "这个月", "上月", "上个月", "最近", "这几天", "近期",
+        // 工作/统计词
+        "做了什么", "主要做了", "忙什么", "忙啥", "工作", "记录", "总结", "待办", "时长", "时间",
+        "统计", "会话", "session", "效率", "占比", "比例", "分类", "应用", "进度", "进展", "回顾", "复盘", "整理",
     ];
     if work_signals.iter().any(|p| q.contains(p)) {
         return RouteDecision {
@@ -425,10 +436,10 @@ mod tests {
     }
 
     #[test]
-    fn test_route_no_model_complex_falls_to_fallback() {
+    fn test_route_no_model_time_word_fast() {
+        // 放宽后：含时间词的工作查询走 Fast（基础模板给统计），不再 Fallback。
         let d = route_query("对比上个月和这个月", false);
-        assert_eq!(d.path, QueryPath::Fallback);
-        assert!(d.reason.contains("无模型"));
+        assert_eq!(d.path, QueryPath::Fast);
     }
 
     #[test]
@@ -453,8 +464,9 @@ mod tests {
 
     #[test]
     fn test_route_unknown_without_model() {
+        // 放宽后："效率"是工作信号 → 无模型走 Fast（基础模板给统计）。
         let d = route_query("帮我看看效率情况", false);
-        assert_eq!(d.path, QueryPath::Fallback); // 兜底走 Fallback
+        assert_eq!(d.path, QueryPath::Fast);
     }
 
     #[test]

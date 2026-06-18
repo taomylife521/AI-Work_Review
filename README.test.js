@@ -25,7 +25,7 @@ test('中英文 README 底部都应展示 Star History，并在 License 后加�
     readFile(new URL('./README.md', import.meta.url), 'utf8'),
   ]);
 
-  assert.match(zhSource, /## License\s+MIT\s+---\s+## 历史星标/s);
-  assert.match(enSource, /## License\s+MIT\s+---\s+## Star History/s);
+  assert.match(zhSource, /## License\s+\[MIT\]\(\.\/LICENSE\)[\s\S]*---\s+## 历史星标/);
+  assert.match(enSource, /## License\s+\[MIT\]\(\.\/LICENSE\)[\s\S]*---\s+## Star History/);
   assert.match(enSource, /star-history\.com\/#wm94i\/Work-Review&Date/);
 });

@@ -2,6 +2,7 @@
   "name": "work-review",
   "private": true,
   "version": "1.0.50",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",

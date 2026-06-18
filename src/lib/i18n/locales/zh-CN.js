@@ -263,7 +263,7 @@ export default {
       alipayQrAlt: '支付宝赞赏收款码',
       bmcOpen: '打开赞助页',
       localFirstTitle: '本地优先',
-      localFirstCopy: '核心记录默认仅保存在本机。',
+      localFirstCopy: '核心记录默认仅保存在本机，仅供个人复盘。',
       timelineTrustTitle: '时间线回看',
       timelineTrustCopy: '按时间快速回看工作轨迹。',
       reportTrustTitle: '日报整理',

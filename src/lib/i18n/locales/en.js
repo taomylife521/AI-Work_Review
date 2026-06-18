@@ -263,7 +263,7 @@ export default {
       alipayQrAlt: 'Alipay support QR code',
       bmcOpen: 'Open sponsorship page',
       localFirstTitle: 'Local First',
-      localFirstCopy: 'Core records stay on your device by default.',
+      localFirstCopy: 'Core records stay on your device. For personal review only.',
       timelineTrustTitle: 'Timeline Replay',
       timelineTrustCopy: 'Review your work quickly in chronological order.',
       reportTrustTitle: 'Daily Reports',
