@@ -326,6 +326,29 @@ jobs:
             BODY="版本 ${VERSION} 更新"
           fi
 
+          # 多语言 release notes（cc-switch 风格）：中文主体取自 CHANGELOG；
+          # 若存在 docs/release-notes/vX.Y.Z-en.md / -tw.md，在顶部追加语言切换链接。
+          # 详见 docs/release-notes/README.md。无对应文件则只保留中文主体（向后兼容）。
+          EN_FILE="docs/release-notes/v${VERSION}-en.md"
+          TW_FILE="docs/release-notes/v${VERSION}-tw.md"
+          LANG_LINKS=""
+          if [[ -f "$EN_FILE" ]]; then
+            LANG_LINKS="[English →](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/${EN_FILE})"
+          fi
+          if [[ -f "$TW_FILE" ]]; then
+            if [[ -n "$LANG_LINKS" ]]; then
+              LANG_LINKS="${LANG_LINKS} | "
+            fi
+            LANG_LINKS="${LANG_LINKS}[繁體中文 →](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/${TW_FILE})"
+          fi
+          if [[ -n "$LANG_LINKS" ]]; then
+            BODY="**${LANG_LINKS}**
+
+          ---
+
+          ${BODY}"
+          fi
+
           BODY="${BODY}
 
           ### macOS 安装说明
