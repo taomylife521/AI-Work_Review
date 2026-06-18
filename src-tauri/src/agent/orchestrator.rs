@@ -69,7 +69,20 @@ pub fn route_query(question: &str, has_model: bool) -> RouteDecision {
         };
     }
 
-    // ── 无模型 → 模板兜底（无法做意图判断）──
+    // ── 无模型（基础模板模式）→ 仅对明确工作查询走 FastPath 统计模板 ──
+    // 没有模型可用，只能用规则兜底。用"强工作信号"关键词（而非时间词），让"我这周主要做了什么"
+    // 这类工作查询得到统计模板，而"今天天气怎么样"这类含时间词的非工作问题不被误判为工作查询。
+    let work_signals = [
+        "做了什么", "主要做了", "工作记录", "工作总结", "工作内容", "时间分布",
+        "时间花在哪", "花在哪", "时长", "总结", "待办",
+    ];
+    if work_signals.iter().any(|p| q.contains(p)) {
+        return RouteDecision {
+            path: QueryPath::Fast,
+            reason: "无模型，工作查询走统计模板".to_string(),
+        };
+    }
+
     RouteDecision {
         path: QueryPath::Fallback,
         reason: "无模型，模板兜底".to_string(),
@@ -419,9 +432,16 @@ mod tests {
     }
 
     #[test]
-    fn test_route_no_model_falls_to_fallback() {
-        // 无模型时无法交给 Agent，统一走模板兜底。
-        let d = route_query("今天做了什么", false);
+    fn test_route_no_model_work_query_fast() {
+        // 无模型（基础模板）：明确工作查询走 FastPath 统计模板，得到有意义内容。
+        let d = route_query("我这周主要做了什么", false);
+        assert_eq!(d.path, QueryPath::Fast);
+    }
+
+    #[test]
+    fn test_route_no_model_non_work_fallback() {
+        // 无模型且非明确工作查询 → 模板兜底指引。
+        let d = route_query("随便聊聊", false);
         assert_eq!(d.path, QueryPath::Fallback);
     }
 
