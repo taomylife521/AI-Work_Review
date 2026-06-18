@@ -614,6 +614,7 @@ export default {
       thinking: '正在整理...',
       sending: '正在發送',
       sendMessage: '發送訊息',
+      emptyResponse: '本次沒有返回內容，請換個問法或稍後重試',
       referenceTypes: {
         activity: '活動記錄',
         hourly_summary: '時段摘要',

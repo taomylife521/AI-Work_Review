@@ -1,5 +1,6 @@
 <script>
   import { afterUpdate, onDestroy, onMount, tick } from 'svelte';
+  import { fly } from 'svelte/transition';
   import { invoke, Channel } from '@tauri-apps/api/core';
   import { marked } from 'marked';
   import { assistantStore, BASIC_ASSISTANT_MODEL_ID } from '../../lib/stores/assistant.js';
@@ -517,7 +518,7 @@
           <div class="ask-starter-grid grid w-full max-w-3xl gap-3 sm:grid-cols-2">
             {#each starterPrompts as prompt}
               <button
-                class="ask-starter-card rounded-[28px] bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(248,250,252,0.88))] px-5 py-4 text-left text-sm font-medium leading-6 text-slate-700 ring-1 ring-inset ring-slate-200/80 shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition hover:-translate-y-0.5 hover:text-slate-900 hover:ring-slate-300 dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.78),rgba(15,23,42,0.62))] dark:text-slate-200 dark:ring-slate-700/80 dark:shadow-none dark:hover:text-white dark:hover:ring-slate-600"
+                class="ask-starter-card rounded-[28px] bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(248,250,252,0.88))] px-5 py-4 text-left text-sm font-medium leading-6 text-slate-700 ring-1 ring-inset ring-slate-200/80 shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition hover:-translate-y-0.5 hover:text-slate-900 hover:ring-indigo-300/80 hover:shadow-[0_12px_28px_rgba(79,70,229,0.10)] active:scale-[0.98] dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.78),rgba(15,23,42,0.62))] dark:text-slate-200 dark:ring-slate-700/80 dark:shadow-none dark:hover:text-white dark:hover:ring-indigo-500/60"
                 on:click={() => submitQuestion(prompt)}
                 disabled={sending}
               >
@@ -531,17 +532,21 @@
           {#each messages as message}
             <div class={message.role === 'user' ? 'flex w-full min-w-0 justify-end' : 'flex w-full min-w-0 justify-start'}>
               <div
+                in:fly={{ y: 10, duration: 240 }}
                 class={message.role === 'user'
-                  ? 'ask-message-card ask-message-card-user min-w-0 max-w-[78%] rounded-[28px] rounded-br-lg bg-gradient-to-br from-slate-100 to-slate-50 px-5 py-4 text-slate-800 ring-1 ring-inset ring-slate-200/60 shadow-sm dark:from-slate-800 dark:to-slate-900 dark:text-slate-100 dark:ring-slate-700/60'
-                  : 'ask-message-card ask-message-card-assistant min-w-0 w-full max-w-[90%] px-1 py-1 text-slate-800 dark:text-slate-100'}
+                  ? 'ask-message-card ask-message-card-user min-w-0 max-w-[78%] rounded-[28px] rounded-br-lg bg-gradient-to-br from-indigo-50 to-slate-50 px-5 py-4 text-slate-800 ring-1 ring-inset ring-indigo-200/70 shadow-sm dark:from-indigo-950/60 dark:to-slate-900 dark:text-slate-100 dark:ring-indigo-800/50'
+                  : 'ask-message-card ask-message-card-assistant min-w-0 w-full max-w-[90%] text-slate-800 dark:text-slate-100'}
               >
                 {#if message.role === 'assistant'}
                   {#if message.steps?.length}
                     <div class="mb-3 flex flex-col gap-1.5">
                       {#each message.steps as step}
-                        <div class="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                        <div
+                          class="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400"
+                          in:fly={{ x: -4, duration: 160 }}
+                        >
                           {#if step.status === 'running'}
-                            <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-transparent dark:border-slate-600"></span>
+                            <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-500 dark:border-indigo-900/60 dark:border-t-indigo-400"></span>
                           {:else}
                             <span class="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
                           {/if}
@@ -609,7 +614,10 @@
 
           <!-- Error callout -->
           {#if error}
-            <div class="flex items-start gap-3 rounded-[24px] border border-rose-200 bg-rose-50/80 px-5 py-4 dark:border-rose-900/60 dark:bg-rose-950/30">
+            <div
+              class="flex items-start gap-3 rounded-[24px] border border-rose-200 bg-rose-50/80 px-5 py-4 dark:border-rose-900/60 dark:bg-rose-950/30"
+              in:fly={{ y: -8, duration: 220 }}
+            >
               <svg class="mt-0.5 h-5 w-5 shrink-0 text-rose-500 dark:text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
               </svg>
@@ -670,7 +678,7 @@
             </div>
 
             <button
-              class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-900 text-white transition hover:scale-[1.02] hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white dark:disabled:bg-slate-700 dark:disabled:text-slate-400"
+              class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 text-white shadow-[0_6px_16px_rgba(79,70,229,0.32)] transition hover:scale-[1.04] hover:from-indigo-400 hover:to-violet-400 active:scale-95 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300 disabled:shadow-none dark:disabled:from-slate-700 dark:disabled:to-slate-700"
               on:click={() => submitQuestion()}
               disabled={sending || !input.trim()}
               aria-label={sending ? t('ask.sending') : t('ask.sendMessage')}

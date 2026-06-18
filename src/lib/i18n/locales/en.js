@@ -614,6 +614,7 @@ export default {
       thinking: 'Thinking...',
       sending: 'Sending...',
       sendMessage: 'Send message',
+      emptyResponse: 'No content was returned. Try rephrasing or retry later',
       referenceTypes: {
         activity: 'Activity',
         hourly_summary: 'Hourly Summary',
