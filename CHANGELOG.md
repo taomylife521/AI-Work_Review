@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Safari/WebKit 内部 helper 误识别为独立浏览器：`com.apple.SafariPlatformSupport.Helper`、`com.apple.WebKit.Networking` 等 Safari/WebKit 的瞬态内部 XPC service 被采集为独立 app，且 bundle id 含 "safari" 被 `is_browser_app` 判为浏览器，于是以原始 bundle id 作为独立"浏览器"条目显示。`normalize_display_app_name` 现将这类内部 helper 统一归并到 Safari。
 - 应用图标错配（显示层）：当 `executable_path` 与 `app_name` 不一致时，不再错误显示编译器图标。`executable_path` 解析出的 bundle 现需通过名称匹配校验（`macos_score_app_bundle_name > 0`）才获最高优先级，不匹配时回退名称评分兜底。
 - 图标缓存陈旧：macOS 磁盘缓存目录与前端 localStorage 同步升级到 v2，失效历史脏缓存（曾因上述错配把错误的编译器图标持久化），确保修复对存量用户立即生效。
+### 优化
+- 工作助手路由简化为「相信模型」：移除复杂意图 / 时间段 / 工作关键词等硬编码分类规则，有模型时统一交给 Agent，由模型自行判断问题是否工作相关、是否调用工作记录工具。非工作问题（如「今天天气怎么样」）不再因含「今天」被误判为工作查询而返回工作统计；无模型时走模板兜底。
 ### 文档
 - README 改为英文主页（中文版移至 `README.zh.md`）；三语补齐 Localhost API 文档（认证 / 接口列表 / 示例）；界面预览图按语言对应 `Introduction_en/zh/tw` 目录；语言切换链接统一为 English · 中文 · 繁體中文。
 - 新增多语言 release notes 机制（参考 cc-switch）：中文主体取自 CHANGELOG，英文 / 繁体作为独立文件放在 `docs/release-notes/`，发布时 CI 自动在 Release body 顶部生成语言切换链接。

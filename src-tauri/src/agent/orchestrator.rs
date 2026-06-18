@@ -59,75 +59,20 @@ pub fn route_query(question: &str, has_model: bool) -> RouteDecision {
         };
     }
 
-    // ── 规则 2：复杂意图 → Agent ──
-    let complex_patterns = [
-        "对比", "比较", "趋势", "分析", "变化",
-        "为什么", "原因", "怎么回事",
-        "建议", "优化", "改进",
-        "最多", "最少", "排名", "排行",
-        "占比", "比例", "效率",
-    ];
-    if complex_patterns.iter().any(|p| q.contains(p)) {
-        if !has_model {
-            return RouteDecision {
-                path: QueryPath::Fallback,
-                reason: "复杂查询但无模型，降级到模板".to_string(),
-            };
-        }
-        return RouteDecision {
-            path: QueryPath::Agent,
-            reason: "检测到复杂意图关键词".to_string(),
-        };
-    }
-
-    // ── 规则 3：包含多个时间段 → Agent ──
-    let time_keywords = [
-        "今天", "昨天", "本周", "这周", "上周",
-        "本月", "这个月", "上月", "上个月", "最近",
-    ];
-    let matched_times: Vec<&&str> = time_keywords.iter().filter(|k| q.contains(**k)).collect();
-    if matched_times.len() >= 2 {
-        if !has_model {
-            return RouteDecision {
-                path: QueryPath::Fallback,
-                reason: "多时间段查询但无模型，降级到模板".to_string(),
-            };
-        }
-        let labels: Vec<&str> = matched_times.iter().map(|k| **k).collect();
-        return RouteDecision {
-            path: QueryPath::Agent,
-            reason: format!("检测到多个时间段：{}", labels.join("、")),
-        };
-    }
-
-    // ── 规则 4：简单时间查询 → FastPath ──
-    if !matched_times.is_empty() {
-        return RouteDecision {
-            path: QueryPath::Fast,
-            reason: format!("简单时间查询：{}", matched_times[0]),
-        };
-    }
-
-    // ── 规则 5：包含明确关键词 → FastPath ──
-    let simple_patterns = ["做了什么", "工作记录", "时间分布", "待办", "总结"];
-    if simple_patterns.iter().any(|p| q.contains(p)) {
-        return RouteDecision {
-            path: QueryPath::Fast,
-            reason: "简单工作查询".to_string(),
-        };
-    }
-
-    // ── 兜底：不确定 → Agent（如果有模型）──
+    // ── 有模型 → 交给 Agent（相信模型）──
+    // 模型自行判断问题是否工作相关、是否调用工作记录工具、如何组织回答。
+    // 不再用关键词规则强行分类，避免"今天天气怎么样"被时间词误判为工作查询。
     if has_model {
-        RouteDecision {
+        return RouteDecision {
             path: QueryPath::Agent,
-            reason: "无法明确分类，走 Agent 兜底".to_string(),
-        }
-    } else {
-        RouteDecision {
-            path: QueryPath::Fallback,
-            reason: "无模型，降级到模板兜底".to_string(),
-        }
+            reason: "交给模型判断意图".to_string(),
+        };
+    }
+
+    // ── 无模型 → 模板兜底（无法做意图判断）──
+    RouteDecision {
+        path: QueryPath::Fallback,
+        reason: "无模型，模板兜底".to_string(),
     }
 }
 
@@ -413,14 +358,29 @@ mod tests {
 
     #[test]
     fn test_route_simple_time_query() {
+        // 简化后：有模型即交给 Agent，由模型决定是否调用工作记录工具。
         let d = route_query("今天做了什么", true);
-        assert_eq!(d.path, QueryPath::Fast);
+        assert_eq!(d.path, QueryPath::Agent);
     }
 
     #[test]
     fn test_route_simple_time_query_month() {
         let d = route_query("这个月的时间分布", true);
-        assert_eq!(d.path, QueryPath::Fast);
+        assert_eq!(d.path, QueryPath::Agent);
+    }
+
+    #[test]
+    fn test_route_non_work_weather_uses_agent() {
+        // 非工作问题（天气）也交给模型，不再被时间词"今天"误判为工作查询。
+        let d = route_query("今天天气怎么样", true);
+        assert_eq!(d.path, QueryPath::Agent);
+    }
+
+    #[test]
+    fn test_route_non_work_weather_no_model_fallback() {
+        // 无模型时无法由模型判断，走模板兜底。
+        let d = route_query("今天天气怎么样", false);
+        assert_eq!(d.path, QueryPath::Fallback);
     }
 
     #[test]
@@ -446,10 +406,9 @@ mod tests {
 
     #[test]
     fn test_route_pure_multi_time_periods() {
-        // 纯多时间段查询，不触发复杂意图关键词
+        // 简化后统一交给模型，不再按时间段数量分流。
         let d = route_query("上个月和这个月的工作记录", true);
         assert_eq!(d.path, QueryPath::Agent);
-        assert!(d.reason.contains("多个时间段"));
     }
 
     #[test]
@@ -460,10 +419,10 @@ mod tests {
     }
 
     #[test]
-    fn test_route_no_model_simple_still_fast() {
-        // 简单查询即使没模型也走 FastPath（因为不需要 LLM）
+    fn test_route_no_model_falls_to_fallback() {
+        // 无模型时无法交给 Agent，统一走模板兜底。
         let d = route_query("今天做了什么", false);
-        assert_eq!(d.path, QueryPath::Fast);
+        assert_eq!(d.path, QueryPath::Fallback);
     }
 
     #[test]
