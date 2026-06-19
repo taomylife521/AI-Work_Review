@@ -48,7 +48,17 @@ jobs:
       - name: Install Linux build dependencies
         if: startsWith(matrix.platform, 'ubuntu')
         run: |
-          sudo apt-get update
+          set -euo pipefail
+          # 兜底：GitHub runner 的 azure.archive.ubuntu.com 镜像偶发抽风（曾导致 update 卡 6h 被取消），
+          # 换回 archive.ubuntu.com 主源，并给 update 加超时 + 重试。
+          sudo find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) \
+            -exec sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' {} + 2>/dev/null || true
+          for i in 1 2 3; do
+            if sudo timeout 180 apt-get update; then break; fi
+            echo "::warning::apt-get update 失败 (尝试 $i/3)，重试..."
+            if [[ $i -eq 3 ]]; then echo "::error::apt-get update 三次均失败"; exit 1; fi
+            sleep 5
+          done
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
             libgtk-3-dev \
