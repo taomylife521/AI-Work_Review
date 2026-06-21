@@ -3982,6 +3982,16 @@ pub async fn generate_telegram_bot_bind_code(
     }))
 }
 
+/// 用指定模型生成一段文本（单轮，非 agent 循环）。用于 starter prompt 动态生成等轻量场景。
+#[tauri::command]
+pub async fn generate_text_with_model(
+    model_config: ModelConfig,
+    system_prompt: String,
+    prompt: String,
+) -> Result<String, AppError> {
+    generate_text_answer_with_model(&model_config, &system_prompt, &prompt).await
+}
+
 #[tauri::command]
 pub async fn reveal_localhost_api_token(
     state: State<'_, Arc<Mutex<AppState>>>,

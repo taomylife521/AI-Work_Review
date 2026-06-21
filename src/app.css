@@ -686,14 +686,7 @@
 }
 
 .sidebar-nav-item-active {
-  @apply text-indigo-700 dark:text-indigo-200 pl-4 shadow-sm;
-  background:
-    linear-gradient(135deg, rgba(224, 231, 255, 0.92), rgba(255, 255, 255, 0.92));
-}
-
-.dark .sidebar-nav-item-active {
-  background:
-    linear-gradient(135deg, rgba(49, 46, 129, 0.6), rgba(30, 41, 59, 0.9));
+  @apply text-indigo-700 dark:text-indigo-200 font-semibold;
 }
 
 .sidebar-nav-item-idle {
@@ -872,7 +865,7 @@
 }
 
 .settings-chip {
-  @apply inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium;
+  @apply inline-flex items-center rounded-md px-2.5 py-1 text-xs font-medium;
 }
 
 .settings-chip-neutral {

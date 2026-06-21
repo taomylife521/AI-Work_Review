@@ -120,18 +120,32 @@ fn main() {
         // 解析失败必须按 JSON-RPC 2.0 规范返回 -32700 Parse error，
         // 不能静默丢弃，否则客户端会一直等响应。
         let response = match serde_json::from_str::<Value>(&line) {
-            Ok(request) => handle_request(&request, &state),
+            Ok(request) => {
+                // JSON-RPC 通知（有 method 但无 id）不需要响应。MCP 的
+                // notifications/initialized 就是通知——回复无效消息（无 id/result/error）
+                // 会让严格客户端（Claude Code / Codex 等）解析报错、连接异常。
+                let is_notification = request.get("id").is_none();
+                let resp = handle_request(&request, &state);
+                if is_notification {
+                    None
+                } else {
+                    Some(resp)
+                }
+            }
             Err(parse_err) => {
                 log::warn!("收到不可解析的 JSON-RPC 请求: {parse_err}");
-                json!({
+                Some(json!({
                     "jsonrpc": "2.0",
                     "id": Value::Null,
                     "error": {
                         "code": -32700,
                         "message": format!("Parse error: {parse_err}")
                     }
-                })
+                }))
             }
+        };
+        let Some(response) = response else {
+            continue;
         };
         match serde_json::to_string(&response) {
             Ok(output) => {

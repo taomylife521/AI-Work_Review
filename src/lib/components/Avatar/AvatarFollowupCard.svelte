@@ -44,19 +44,13 @@
 
       <div class="relative mt-2 min-h-0 flex-1 overflow-y-auto pr-1">
         <p
-          class="break-words text-[13px] font-semibold leading-[1.45] text-slate-900"
+          class="break-all text-[13px] font-semibold leading-[1.45] text-slate-900"
           style={CLAMP_STYLE_FOUR_LINES}
         >
           {copy.summary}
         </p>
         <p class="mt-1 break-words text-[11px] leading-[1.45] text-slate-500">
           {copy.meta}
-        </p>
-        <p
-          class="mt-1 break-words pb-1 text-[11px] leading-[1.45] text-slate-600"
-          style={CLAMP_STYLE_TWO_LINES}
-        >
-          {copy.strategy}
         </p>
       </div>
 

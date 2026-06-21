@@ -23,7 +23,8 @@
   $: sending = assistantState.sending ?? false;
   $: messages = assistantState.messages ?? [];
   $: currentLocale = $locale;
-  $: starterPrompts = tm('ask.starterPrompts') || [];
+  $: starterPrompts = dynamicPrompts.length ? dynamicPrompts : (tm('ask.starterPrompts') || []);
+  let dynamicPrompts = [];
 
   // 模型选择器
   let modelProfiles = [];
@@ -147,6 +148,9 @@
     resizeComposer();
     await scrollToBottom('auto', 3);
     composer?.focus();
+
+    // 配了 AI 模型时，基于当前工作记录动态生成 starter prompts（替代固定 4 条）
+    refreshDynamicPrompts();
   });
 
   onDestroy(() => {
@@ -318,6 +322,7 @@
   function handleModelChange(event) {
     selectedModelId = event.currentTarget.value;
     assistantStore.setSelectedModelId(selectedModelId);
+    refreshDynamicPrompts();
   }
 
   async function clearConversation() {
@@ -495,6 +500,42 @@
     }
   }
 
+  async function refreshDynamicPrompts() {
+    // 没配 AI 模型时用固定 starter（i18n），配了才动态生成
+    if (selectedModelId === BASIC_ASSISTANT_MODEL_ID) {
+      dynamicPrompts = [];
+      return;
+    }
+    const profile = modelProfiles.find((p) => p.id === selectedModelId);
+    if (!profile) {
+      dynamicPrompts = [];
+      return;
+    }
+    try {
+      const stats = await invoke('get_today_stats');
+      const recentApps = (stats?.app_usage || []).slice(0, 3).map((a) => a.app_name).join('、');
+      const topCategory = stats?.category_usage?.[0]?.category || '';
+      const workMinutes = Math.round((stats?.total_work_duration || 0) / 60);
+
+      const systemPrompt = `你是工作助手的 starter prompt 生成器。根据用户当前的工作状态，生成 4 个用户最可能想问的问题。每个问题不超过 20 字，口语化、具体、能直接用工作记录回答。只返回 JSON 数组，如 ["问题1","问题2","问题3","问题4"]，不要其他文字。`;
+      const userPrompt = `当前状态：已工作 ${workMinutes} 分钟；最近用的应用：${recentApps || '暂无'}；主要分类：${topCategory || '暂无'}。生成 4 个 starter prompt。`;
+
+      const result = await invoke('generate_text_with_model', {
+        modelConfig: profile.model_config,
+        systemPrompt,
+        prompt: userPrompt,
+      });
+
+      const parsed = JSON.parse(result);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        dynamicPrompts = parsed.filter((p) => typeof p === 'string' && p.trim()).slice(0, 4);
+      }
+    } catch (e) {
+      console.warn('动态 starter 生成失败，用固定:', e);
+      dynamicPrompts = [];
+    }
+  }
+
   $: hasConversation = messages.length > 0;
   $: input, resizeComposer();
 
@@ -651,7 +692,7 @@
               <select
                 bind:value={selectedModelId}
                 on:change={handleModelChange}
-                class="h-8 min-w-[122px] max-w-[176px] cursor-pointer appearance-none rounded-full border border-slate-200/80 bg-slate-100/90 px-3 pr-8 text-[11px] font-medium text-slate-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] outline-none transition hover:bg-slate-200/70 focus:ring-2 focus:ring-slate-300 dark:border-slate-700/80 dark:bg-slate-800/70 dark:text-slate-300 dark:hover:bg-slate-700/80 dark:focus:ring-slate-600"
+                class="h-8 min-w-[122px] max-w-[176px] cursor-pointer appearance-none rounded-lg border border-slate-200/80 bg-slate-100/90 px-3 pr-8 text-[11px] font-medium text-slate-600 outline-none transition hover:bg-slate-200/70 focus:ring-2 focus:ring-slate-300 dark:border-slate-700/80 dark:bg-slate-800/70 dark:text-slate-300 dark:hover:bg-slate-700/80 dark:focus:ring-slate-600"
                 style="background-image: url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E&quot;); background-repeat: no-repeat; background-position: right 10px center;"
                 aria-label={t('ask.modelSelector')}
               >
@@ -660,8 +701,6 @@
                   <option value={profile.id}>{displayModelProfileName(profile) || t('ask.aiEnhanced')}</option>
                 {/each}
               </select>
-
-              <span class="mx-0.5 h-4 w-px shrink-0 bg-slate-200/60 dark:bg-slate-700/60"></span>
 
               {#if sending}
                 <span class="shrink-0 text-[11px] text-slate-400 dark:text-slate-500">{t('ask.thinking')}</span>

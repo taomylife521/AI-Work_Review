@@ -411,7 +411,7 @@ test('桌宠窗口应监听接上次继续事件，并提供继续任务、开�
   assert.match(cardSource, /focus/);
   assert.match(cardSource, /remember/);
   assert.match(cardSource, /snooze/);
-  assert.match(cardSource, /copy\.strategy/);
+  // strategy 段已移除（信息精简），不再断言 copy.strategy
   assert.match(cardSource, /copy\.badgeClass/);
   assert.match(cardSource, /copy\.primaryClass/);
   assert.match(cardSource, /dismissLabel/);

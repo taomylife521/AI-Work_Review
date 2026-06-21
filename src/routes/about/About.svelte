@@ -255,7 +255,7 @@
             </div>
             <h4 class="text-base font-semibold text-slate-900 dark:text-white">{t('about.wechat')}</h4>
           </div>
-          <div class="mt-4 flex items-center justify-center rounded-[24px] bg-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-slate-950">
+          <div class="mt-4 flex items-center justify-center rounded-[24px] bg-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-slate-950 dark:shadow-none">
             <img src={wechatSponsorshipQr} alt={t('about.wechatQrAlt')} class="aspect-square w-40 cursor-zoom-in rounded-2xl object-cover transition-transform hover:scale-[1.02]" on:click={() => zoomedQr = wechatSponsorshipQr} />
           </div>
         </div>
@@ -270,7 +270,7 @@
             </div>
             <h4 class="text-base font-semibold text-slate-900 dark:text-white">{t('about.alipay')}</h4>
           </div>
-          <div class="mt-4 flex items-center justify-center rounded-[24px] bg-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-slate-950">
+          <div class="mt-4 flex items-center justify-center rounded-[24px] bg-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-slate-950 dark:shadow-none">
             <img src={alipaySponsorshipQr} alt={t('about.alipayQrAlt')} class="aspect-square w-40 cursor-zoom-in rounded-2xl object-cover transition-transform hover:scale-[1.02]" on:click={() => zoomedQr = alipaySponsorshipQr} />
           </div>
         </div>
@@ -286,7 +286,7 @@
             </div>
             <h4 class="text-base font-semibold text-slate-900 dark:text-white">Buy Me a Coffee</h4>
           </div>
-          <div class="mt-4 flex items-center justify-center rounded-[24px] bg-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-slate-950">
+          <div class="mt-4 flex items-center justify-center rounded-[24px] bg-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-slate-950 dark:shadow-none">
             <img src={bmcQr} alt="Buy Me a Coffee QR code" class="aspect-square w-40 cursor-zoom-in rounded-2xl object-cover transition-transform hover:scale-[1.02]" on:click={() => zoomedQr = bmcQr} />
           </div>
         </div>

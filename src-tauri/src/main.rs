@@ -11,6 +11,7 @@ mod agent;
 mod analysis;
 mod autostart;
 mod avatar_engine;
+mod avatar_proactive;
 mod avatar_followup;
 mod bot_common;
 #[allow(dead_code)]
@@ -1334,6 +1335,12 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
     let mut cached_rules_signature: u64 = 0;
     const IDLE_TIMEOUT_MINUTES: u64 = 3;
     let idle_detector = idle_detector::IdleDetector::new(IDLE_TIMEOUT_MINUTES);
+    // 桌宠主动开口（AI 自定节奏）运行时状态
+    let task_start_ms = chrono::Local::now().timestamp_millis().max(0) as u64;
+    let mut next_proactive_check_ms: u64 = task_start_ms + 10 * 60_000; // 启动后 10 分钟首次
+    let mut proactive_mood: Option<(String, u64)> = None; // (mode, expires_ms)
+    let mut active_app_since_ms: u64 = task_start_ms;
+    let mut last_proactive_app: Option<String> = None;
 
     loop {
         let (
@@ -1359,6 +1366,11 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
                 state_guard.config.break_reminder_enabled,
                 state_guard.config.break_reminder_interval_minutes,
             )
+        };
+
+        let text_model = {
+            let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
+            state_guard.config.text_model.clone()
         };
 
         let activity_decision = avatar_activity_decision(
@@ -1527,6 +1539,10 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
             active_window.browser_url.as_deref().unwrap_or_default()
         );
         let window_changed = last_window_signature.as_deref() != Some(window_signature.as_str());
+        if last_proactive_app.as_deref() != Some(active_window.app_name.as_str()) {
+            active_app_since_ms = chrono::Local::now().timestamp_millis().max(0) as u64;
+            last_proactive_app = Some(active_window.app_name.clone());
+        }
 
         // 方向 2：频繁切换检测 —— 5 分钟内切换 ≥6 次 → 桌宠提醒专注（30 分钟冷却）
         let actually_switched = last_switch_signature.as_deref() != Some(window_signature.as_str());
@@ -1565,7 +1581,18 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
         pending_avatar_state = transition_decision.pending_state;
         pending_avatar_hits = transition_decision.pending_hits;
 
-        if let Some(next_avatar_state) = transition_decision.emit_state {
+        if let Some(mut next_avatar_state) = transition_decision.emit_state {
+            // 桌宠主动开口的情绪覆盖：AI 给的表情未过期则覆盖 mode
+            let mood_now_ms = chrono::Local::now().timestamp_millis().max(0) as u64;
+            match &proactive_mood {
+                Some((mood_mode, expires_ms)) if mood_now_ms < *expires_ms => {
+                    next_avatar_state.mode = mood_mode.clone();
+                }
+                Some(_) => {
+                    proactive_mood = None; // 过期清空
+                }
+                None => {}
+            }
             let collect_cost_ms = sampled_at.elapsed().as_millis();
             let previous_mode = last_avatar_state
                 .as_ref()
@@ -1673,6 +1700,54 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
                     }
                 }
             }
+        }
+
+        // 桌宠主动开口（AI 自定节奏）：到点才调一次 LLM，模型自主决定开口时机/内容/语气
+        let proactive_now_ms = chrono::Local::now().timestamp_millis().max(0) as u64;
+        let has_text_model =
+            !text_model.endpoint.trim().is_empty() && !text_model.model.trim().is_empty();
+        if avatar_enabled
+            && !is_paused
+            && has_text_model
+            && proactive_now_ms >= next_proactive_check_ms
+        {
+            let active_minutes = proactive_now_ms.saturating_sub(active_app_since_ms) / 60_000;
+            let recent_switches = recent_switches_ms.len() as u32;
+            let (work_seconds_today, hour, minute) = {
+                let now = chrono::Local::now();
+                let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
+                let today = now.format("%Y-%m-%d").to_string();
+                let segments = state_guard.config.effective_work_segments();
+                let work_secs = state_guard
+                    .database
+                    .get_daily_stats_with_segments(&today, &segments)
+                    .map(|st| st.work_time_duration.max(0) as u64)
+                    .unwrap_or(0);
+                let h = now.format("%H").to_string().parse::<u32>().unwrap_or(0);
+                let m = now.format("%M").to_string().parse::<u32>().unwrap_or(0);
+                (work_secs, h, m)
+            };
+            let context = avatar_proactive::ProactiveContext {
+                app_name: active_window.app_name.clone(),
+                active_minutes,
+                work_seconds_today,
+                recent_switches,
+                is_idle: input_idle,
+                hour,
+                minute,
+            };
+            let outcome = avatar_proactive::decide_and_speak(
+                &app,
+                &text_model,
+                &avatar_persona,
+                "zh-CN",
+                &context,
+            )
+            .await;
+            if let Some((mode, expires)) = outcome.mood {
+                proactive_mood = Some((mode, expires));
+            }
+            next_proactive_check_ms = outcome.next_check_ms;
         }
     }
 }
@@ -3427,6 +3502,7 @@ async fn main() {
             commands::get_node_gateway_status,
             commands::get_telegram_bot_status,
             commands::generate_telegram_bot_bind_code,
+            commands::generate_text_with_model,
             commands::reveal_localhost_api_token,
             commands::rotate_localhost_api_token,
             commands::get_config,

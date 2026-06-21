@@ -311,7 +311,7 @@
           .slice().sort((a, b) => b.duration - a.duration).slice(0, 5)}
         <div class="mt-3 rounded-2xl bg-sky-50 px-3.5 py-3 text-left dark:bg-sky-500/10">
           <div class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
-            <span class="inline-flex items-center rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold tracking-[0.08em] text-sky-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-slate-900/80 dark:text-sky-300">
+            <span class="inline-flex items-center rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold tracking-[0.08em] text-sky-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-slate-900/80 dark:text-sky-300 dark:shadow-none">
               当前选中
             </span>
             <span class="min-w-0 truncate text-sm font-medium text-slate-700 dark:text-slate-200">

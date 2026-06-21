@@ -211,6 +211,21 @@ jobs:
             fi
           done
 
+      - name: Package Windows portable (免安装版)
+        if: startsWith(matrix.platform, 'windows')
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 便携版 = Rust 主程序 exe（前端已嵌入，需 WebView2 运行时，Win10/11 自带）
+          EXE="$(find target -name "Work_Review.exe" -path "*/release/*" -not -path "*/build/*" -not -path "*/deps/*" 2>/dev/null | head -n 1 || true)"
+          if [[ -z "$EXE" || ! -f "$EXE" ]]; then
+            echo "Work_Review.exe 未找到，跳过便携版"
+            exit 0
+          fi
+          DIR="$(dirname "$EXE")"
+          printf 'Work Review 便携版\n\n- 双击 Work_Review.exe 直接运行，无需安装\n- 需要 WebView2 运行时（Windows 10/11 已自带；旧系统请自行安装）\n- 数据保存在 %%APPDATA%%\\work-review\n' > "$DIR/PORTABLE_README.txt"
+          (cd "$DIR" && rm -f Work_Review_portable_x64.zip && zip -j Work_Review_portable_x64.zip Work_Review.exe PORTABLE_README.txt)
+
       - name: Rename Linux bundle assets
         if: startsWith(matrix.platform, 'ubuntu')
         shell: bash
@@ -305,6 +320,7 @@ jobs:
             target/**/release/bundle/macos/*.app.tar.gz.sig
             target/**/release/bundle/nsis/*.exe
             target/**/release/bundle/nsis/*.sig
+            target/**/Work_Review_portable_*.zip
             target/**/release/bundle/appimage/*.AppImage
             target/**/release/bundle/deb/*.deb
           if-no-files-found: warn
