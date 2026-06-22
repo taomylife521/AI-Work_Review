@@ -2382,9 +2382,13 @@ fn apply_excluded_domains_to_stats(
 
 fn load_daily_stats_for_overview(state: &AppState, date: &str) -> Result<DailyStats, AppError> {
     let segments = state.config.effective_work_segments();
-    let mut stats = state
-        .database
-        .get_daily_stats_with_segments(date, &segments)?;
+    let (ignored_apps, excluded_domains) = collect_privacy_filters(state);
+    let mut stats = state.database.get_daily_stats_with_segments_filtered(
+        date,
+        &segments,
+        &ignored_apps,
+        &excluded_domains,
+    )?;
 
     // 加班时长：数据库已按秒级精度计算了"最后工作时段结束后的活动量"。
     // 仅当未启用工作时段（弹性工时）时，退回到标准工时方案。
@@ -2806,12 +2810,13 @@ pub(crate) fn get_daily_stats_inner(
 ) -> Result<DailyStats, AppError> {
     let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
     let segments = s.config.effective_work_segments();
-    let raw_stats = s.database.get_daily_stats_with_segments(date, &segments)?;
     let (ignored_apps, excluded_domains) = collect_privacy_filters(&s);
-    Ok(apply_excluded_domains_to_stats(
-        apply_ignored_apps_to_stats(raw_stats, &ignored_apps),
+    s.database.get_daily_stats_with_segments_filtered(
+        date,
+        &segments,
+        &ignored_apps,
         &excluded_domains,
-    ))
+    )
 }
 
 /// 获取指定日期的统计
@@ -2858,14 +2863,62 @@ pub async fn get_timeline(
     get_timeline_inner(date, limit, offset, state.inner())
 }
 
+pub(crate) fn get_hourly_app_breakdown_inner(
+    date: Option<String>,
+    date_from: Option<String>,
+    date_to: Option<String>,
+    mode: Option<String>,
+    state: &Arc<Mutex<AppState>>,
+) -> Result<Vec<HourlyAppBucket>, AppError> {
+    let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+    let normalized_mode = mode.unwrap_or_else(|| "date".to_string());
+    let (date_from, date_to) = match normalized_mode.trim().to_lowercase().as_str() {
+        "week" => {
+            let anchor = resolve_overview_anchor_date(date.as_deref())?;
+            overview_week_bounds_for_date(anchor)
+        }
+        "today" => {
+            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            (today.clone(), today)
+        }
+        _ => {
+            let (start, end) = resolve_overview_date_span(
+                date.as_deref(),
+                date_from.as_deref(),
+                date_to.as_deref(),
+            )?;
+            (
+                start.format("%Y-%m-%d").to_string(),
+                end.format("%Y-%m-%d").to_string(),
+            )
+        }
+    };
+
+    let (ignored_apps, _) = collect_privacy_filters(&state);
+    let mut buckets = state
+        .database
+        .get_hourly_app_breakdown_range(&date_from, &date_to)?;
+    if !ignored_apps.is_empty() {
+        for bucket in &mut buckets {
+            bucket
+                .apps
+                .retain(|app| !matches_ignored_app(&app.app_name, &ignored_apps));
+            bucket.total_duration = bucket.apps.iter().map(|app| app.duration).sum();
+        }
+    }
+    Ok(buckets)
+}
+
 /// 获取每小时×应用的时长分布
 #[tauri::command]
 pub async fn get_hourly_app_breakdown(
-    date: String,
+    date: Option<String>,
+    date_from: Option<String>,
+    date_to: Option<String>,
+    mode: Option<String>,
     state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<Vec<HourlyAppBucket>, AppError> {
-    let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-    state.database.get_hourly_app_breakdown(&date)
+    get_hourly_app_breakdown_inner(date, date_from, date_to, mode, state.inner())
 }
 
 fn collect_privacy_filters(state: &AppState) -> (Vec<String>, Vec<String>) {
@@ -3436,16 +3489,15 @@ pub(crate) async fn generate_report_inner(
     let (config, stats, activities, data_dir) = {
         let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
         let segments = state.config.effective_work_segments();
-        let raw_stats = state
-            .database
-            .get_daily_stats_with_segments(&date, &segments)?;
+        let (ignored_apps, excluded_domains) = collect_privacy_filters(&state);
+        let stats = state.database.get_daily_stats_with_segments_filtered(
+            &date,
+            &segments,
+            &ignored_apps,
+            &excluded_domains,
+        )?;
         // 生成日报时获取最多 2000 条记录
         let raw_activities = state.database.get_timeline(&date, Some(2000), None)?;
-        let (ignored_apps, excluded_domains) = collect_privacy_filters(&state);
-        let stats = apply_excluded_domains_to_stats(
-            apply_ignored_apps_to_stats(raw_stats, &ignored_apps),
-            &excluded_domains,
-        );
         let activities =
             filter_activities_by_privacy(raw_activities, &ignored_apps, &excluded_domains);
         (
@@ -3707,15 +3759,13 @@ pub(crate) fn get_saved_report_inner(
     // 用最新的 stats 重新渲染统计区块，解决 issue #80：保存的 markdown 里固化的时长
     // 数字会随着工作日继续推进而变得陈旧。老报告若没有占位符标记则原样返回。
     let segments = state.config.effective_work_segments();
-    if let Ok(raw_stats) = state
-        .database
-        .get_daily_stats_with_segments(&date, &segments)
-    {
-        let (ignored_apps, excluded_domains) = collect_privacy_filters(&state);
-        let live_stats = apply_excluded_domains_to_stats(
-            apply_ignored_apps_to_stats(raw_stats, &ignored_apps),
-            &excluded_domains,
-        );
+    let (ignored_apps, excluded_domains) = collect_privacy_filters(&state);
+    if let Ok(live_stats) = state.database.get_daily_stats_with_segments_filtered(
+        &date,
+        &segments,
+        &ignored_apps,
+        &excluded_domains,
+    ) {
         let category_name_overrides: std::collections::HashMap<String, String> = state
             .config
             .custom_categories

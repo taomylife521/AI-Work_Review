@@ -651,7 +651,7 @@
           </button>
           {#if showPresetDropdown}
             <!-- svelte-ignore a11y-click-events-have-key-events -->
-            <div use:portal data-preset-dropdown style={dropdownStyle} class="z-50 overflow-y-auto rounded-xl border border-slate-200 dark:border-[#484f58] bg-white dark:bg-[#21262d] shadow-xl dark:shadow-[0_12px_32px_rgba(0,0,0,0.5)] overscroll-contain" on:wheel={(e) => { e.stopPropagation(); e.preventDefault(); e.currentTarget.scrollTop += e.deltaY; }} on:touchmove|stopPropagation>
+            <div use:portal data-preset-dropdown style={dropdownStyle} class="app-floating-scroll z-50 overflow-y-auto rounded-xl border border-slate-200 dark:border-[#484f58] bg-white dark:bg-[#21262d] shadow-xl dark:shadow-[0_12px_32px_rgba(0,0,0,0.5)] overscroll-contain" on:wheel={(e) => { e.stopPropagation(); e.preventDefault(); e.currentTarget.scrollTop += e.deltaY; }} on:touchmove|stopPropagation>
               <div class="py-1.5">
                 {#each (config?.daily_report_prompt_presets || []) as preset, i}
                   {#if pendingDeletePreset === i}

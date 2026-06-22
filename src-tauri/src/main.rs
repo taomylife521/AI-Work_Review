@@ -1037,38 +1037,132 @@ fn resolve_previous_activity_to_backfill(
     }
 }
 
+fn persist_previous_activity_backfill(
+    database: &Database,
+    config: &AppConfig,
+    privacy_filter: &PrivacyFilter,
+    previous_activity: Option<&database::Activity>,
+    previous_app_name: Option<&str>,
+    previous_window_title: Option<&str>,
+    previous_browser_url: Option<&str>,
+    duration_delta: i64,
+    current_timestamp: i64,
+    current_app_name: &str,
+) -> Option<i64> {
+    if duration_delta <= 0 {
+        return None;
+    }
+
+    if let Some(previous_activity) = previous_activity {
+        let Some(previous_id) = previous_activity.id else {
+            return None;
+        };
+
+        let _ = database.merge_activity(
+            previous_id,
+            duration_delta,
+            None,
+            &previous_activity.screenshot_path,
+            current_timestamp,
+            None,
+        );
+        log::debug!(
+            "⏱️ 时长回补: {} +{}s (切换到 {})",
+            previous_activity.app_name,
+            duration_delta,
+            current_app_name
+        );
+        return Some(previous_id);
+    }
+
+    let previous_app_name = previous_app_name?.trim();
+    if previous_app_name.is_empty() {
+        return None;
+    }
+
+    let previous_window_title = previous_window_title.unwrap_or("");
+    let previous_browser_url = previous_browser_url.filter(|url| !url.is_empty());
+    let privacy_action = privacy_filter.check_privacy_full(
+        previous_app_name,
+        previous_window_title,
+        previous_browser_url,
+    );
+    if privacy_action == privacy::PrivacyAction::Skip {
+        log::debug!("上一应用回补跳过(隐私): {previous_app_name}");
+        return None;
+    }
+
+    let classification = crate::resolve_activity_classification(
+        config,
+        previous_app_name,
+        previous_window_title,
+        previous_browser_url,
+    );
+    let (window_title, browser_url) = if privacy_action == privacy::PrivacyAction::Anonymize {
+        ("[内容已脱敏]".to_string(), None)
+    } else {
+        (
+            previous_window_title.to_string(),
+            previous_browser_url.map(ToString::to_string),
+        )
+    };
+
+    let activity = database::Activity {
+        id: None,
+        timestamp: current_timestamp,
+        app_name: previous_app_name.to_string(),
+        window_title,
+        screenshot_path: String::new(),
+        ocr_text: None,
+        category: classification.base_category,
+        duration: duration_delta,
+        browser_url,
+        executable_path: None,
+        semantic_category: Some(classification.semantic_category),
+        semantic_confidence: Some(i32::from(classification.confidence)),
+        screenshot_url: None,
+    };
+
+    match database.insert_activity(&activity) {
+        Ok(activity_id) => {
+            log::debug!(
+                "⏱️ 新建上一应用回补: {} +{}s (id={}, 切换到 {})",
+                previous_app_name,
+                duration_delta,
+                activity_id,
+                current_app_name
+            );
+            Some(activity_id)
+        }
+        Err(e) => {
+            log::error!("上一应用回补记录失败: {e}");
+            None
+        }
+    }
+}
+
 fn backfill_previous_activity_if_needed(
     state: &Arc<Mutex<AppState>>,
     previous_activity: Option<&database::Activity>,
+    previous_app_name: Option<&str>,
+    previous_window_title: Option<&str>,
+    previous_browser_url: Option<&str>,
     duration_delta: i64,
     current_timestamp: i64,
     current_app_name: &str,
 ) {
-    if duration_delta <= 0 {
-        return;
-    }
-
-    let Some(previous_activity) = previous_activity else {
-        return;
-    };
-    let Some(previous_id) = previous_activity.id else {
-        return;
-    };
-
     let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
-    let _ = state_guard.database.merge_activity(
-        previous_id,
+    let _ = persist_previous_activity_backfill(
+        &state_guard.database,
+        &state_guard.config,
+        &state_guard.privacy_filter,
+        previous_activity,
+        previous_app_name,
+        previous_window_title,
+        previous_browser_url,
         duration_delta,
-        None,
-        &previous_activity.screenshot_path,
         current_timestamp,
-        None,
-    );
-    log::debug!(
-        "⏱️ 时长回补: {} +{}s (切换到 {})",
-        previous_activity.app_name,
-        duration_delta,
-        current_app_name
+        current_app_name,
     );
 }
 
@@ -2174,6 +2268,9 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                 backfill_previous_activity_if_needed(
                     &state,
                     previous_activity_to_backfill.as_ref(),
+                    previous_app_name.as_deref(),
+                    previous_window_title.as_deref(),
+                    previous_browser_url.as_deref(),
                     previous_effective_duration,
                     current_timestamp,
                     &active_window.app_name,
@@ -2350,6 +2447,9 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                     backfill_previous_activity_if_needed(
                         &state,
                         previous_activity_to_backfill.as_ref(),
+                        previous_app_name.as_deref(),
+                        previous_window_title.as_deref(),
+                        previous_browser_url.as_deref(),
                         previous_effective_duration,
                         current_timestamp,
                         &active_window.app_name,
@@ -2549,6 +2649,9 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                                 backfill_previous_activity_if_needed(
                                     &state,
                                     previous_activity_to_backfill.as_ref(),
+                                    previous_app_name.as_deref(),
+                                    previous_window_title.as_deref(),
+                                    previous_browser_url.as_deref(),
                                     previous_effective_duration,
                                     current_timestamp,
                                     &active_window.app_name,
@@ -2733,6 +2836,9 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                         backfill_previous_activity_if_needed(
                             &state,
                             previous_activity_to_backfill.as_ref(),
+                            previous_app_name.as_deref(),
+                            previous_window_title.as_deref(),
+                            previous_browser_url.as_deref(),
                             previous_effective_duration,
                             current_timestamp,
                             &active_window.app_name,
@@ -3648,10 +3754,11 @@ mod tests {
         avatar_monitor_poll_interval_ms_for_platform, avatar_transition_decision,
         browser_change_capture_min_interval_ms, effective_dock_visibility,
         launch_args_contain_autostart, main_window_close_behavior, monitoring_poll_interval_ms,
-        monitoring_poll_interval_ms_for_platform, previous_app_backfill_duration,
-        record_avatar_window_switch, recording_loop_decision, resolve_activity_classification,
-        reusable_cached_active_window, screen_lock_check_interval_ms_for_platform,
-        should_confirm_idle, should_emit_avatar_backlog_nudge, should_hide_main_window_on_setup,
+        monitoring_poll_interval_ms_for_platform, persist_previous_activity_backfill,
+        previous_app_backfill_duration, record_avatar_window_switch, recording_loop_decision,
+        resolve_activity_classification, reusable_cached_active_window,
+        screen_lock_check_interval_ms_for_platform, should_confirm_idle,
+        should_emit_avatar_backlog_nudge, should_hide_main_window_on_setup,
         should_persist_merge_update, should_prevent_exit,
         should_probe_browser_url_before_change_detection, should_request_screen_capture_permission,
         should_skip_system_window, tray_recording_toggle_action, tray_recording_toggle_label,
@@ -3662,8 +3769,19 @@ mod tests {
         apply_avatar_visual_settings, default_avatar_state, derive_avatar_state,
     };
     use crate::config::{AppConfig, AvatarFollowupItem, WebsiteSemanticRule};
+    use crate::database::Database;
     use crate::monitor::ActiveWindow;
-    use std::time::{Duration, Instant};
+    use crate::privacy::PrivacyFilter;
+    use std::path::PathBuf;
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+    fn temp_db_path(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir().join(format!("work-review-tauri-{name}-{unique}.db"))
+    }
 
     #[test]
     fn 暂停录制时应重置截图计时器() {
@@ -3724,6 +3842,40 @@ mod tests {
         assert!(should_persist_merge_update(120, true));
         assert!(should_persist_merge_update(0, true));
         assert!(!should_persist_merge_update(0, false));
+    }
+
+    #[test]
+    fn 切换到新应用时上一应用即使没有历史记录也应回补轻量活动() {
+        let db_path = temp_db_path("previous-backfill-new");
+        let database = Database::new(&db_path).expect("创建测试数据库失败");
+        let config = AppConfig::default();
+        let privacy_filter = PrivacyFilter::from_config(&config.privacy);
+        let current_timestamp = chrono::Local::now().timestamp();
+
+        let inserted_id = persist_previous_activity_backfill(
+            &database,
+            &config,
+            &privacy_filter,
+            None,
+            Some("cmux"),
+            Some("npm run tauri dev"),
+            None,
+            8,
+            current_timestamp,
+            "Google Chrome",
+        )
+        .expect("没有历史记录的上一应用也应创建轻量记录");
+
+        let activity = database
+            .get_activity_by_id(inserted_id)
+            .expect("查询回补活动失败")
+            .expect("回补活动应已写入数据库");
+
+        assert_eq!(activity.app_name, "cmux");
+        assert_eq!(activity.window_title, "npm run tauri dev");
+        assert_eq!(activity.duration, 8);
+        assert_eq!(activity.timestamp, current_timestamp);
+        assert!(activity.screenshot_path.is_empty());
     }
 
     #[test]

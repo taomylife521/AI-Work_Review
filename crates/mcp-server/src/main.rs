@@ -2,8 +2,8 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::sync::{Arc, Mutex};
-use work_review_core::config::AppConfig;
-use work_review_core::database::Database;
+use work_review_core::config::{AppConfig, PrivacyConfig};
+use work_review_core::database::{Activity, DailyStats, Database, MemorySearchItem};
 use work_review_core::policy::{CallSource, Permission, PolicyDecision, PolicyEnforcer};
 use work_review_skills_engine::engine::SkillEngine;
 use work_review_skills_engine::executor::{ExecutionContext, OutputContentType};
@@ -70,7 +70,7 @@ fn main() {
     }
 
     let mut policy = PolicyEnforcer::new(&config);
-    let mut skills = SkillEngine::new();
+    let skills = SkillEngine::new();
 
     // 注册所有内置技能的权限到策略层
     for pkg in skills.list_skills() {
@@ -429,6 +429,190 @@ fn sanitize_value(value: &mut Value) {
     }
 }
 
+fn matches_ignored_app(app_name: &str, ignored_apps: &[String]) -> bool {
+    let app_lower = work_review_core::categorize::normalize_display_app_name(app_name)
+        .to_lowercase()
+        .trim()
+        .to_string();
+    if app_lower.is_empty() {
+        return false;
+    }
+
+    ignored_apps
+        .iter()
+        .any(|ignored| app_lower.contains(ignored) || ignored.contains(&app_lower))
+}
+
+fn matches_excluded_domain(target: &str, excluded_domains: &[String]) -> bool {
+    let domain = PrivacyConfig::extract_domain(target);
+    if domain.is_empty() {
+        return false;
+    }
+
+    excluded_domains.iter().any(|excluded| {
+        let excluded_domain = PrivacyConfig::extract_domain(excluded);
+        !excluded_domain.is_empty()
+            && (PrivacyConfig::domain_matches(&domain, &excluded_domain)
+                || merged_domain_matches_excluded(&domain, &excluded_domain))
+    })
+}
+
+fn merged_domain_matches_excluded(domain: &str, excluded_domain: &str) -> bool {
+    if !work_review_core::categorize::is_merged_domain(domain) {
+        return false;
+    }
+
+    let domain = domain.trim_end_matches('.').to_lowercase();
+    let excluded_domain = excluded_domain.trim_end_matches('.').to_lowercase();
+    let domain_labels: Vec<&str> = domain.split('.').collect();
+    let excluded_labels: Vec<&str> = excluded_domain.split('.').collect();
+
+    domain_labels.len() == 2
+        && excluded_labels.len() == 2
+        && domain_labels[0] == excluded_labels[0]
+        && domain_labels[1].starts_with(excluded_labels[1])
+        && domain_labels[1].len() > excluded_labels[1].len()
+}
+
+fn collect_privacy_filters(config: &AppConfig) -> (Vec<String>, Vec<String>) {
+    (
+        config.privacy.collect_ignored_app_names(),
+        config.privacy.collect_excluded_domains(),
+    )
+}
+
+fn apply_ignored_apps_to_stats(mut stats: DailyStats, ignored_apps: &[String]) -> DailyStats {
+    if ignored_apps.is_empty() {
+        return stats;
+    }
+
+    let filtered_app_usage: Vec<_> = stats
+        .app_usage
+        .into_iter()
+        .filter(|app| !matches_ignored_app(&app.app_name, ignored_apps))
+        .collect();
+
+    stats.total_duration = filtered_app_usage.iter().map(|app| app.duration).sum();
+    stats.app_usage = filtered_app_usage;
+    stats
+        .browser_usage
+        .retain(|browser| !matches_ignored_app(&browser.browser_name, ignored_apps));
+    stats.browser_duration = stats
+        .browser_usage
+        .iter()
+        .map(|browser| browser.duration)
+        .sum();
+
+    if stats.work_time_duration > stats.total_duration {
+        stats.work_time_duration = stats.total_duration;
+    }
+
+    stats
+}
+
+fn apply_excluded_domains_to_stats(
+    mut stats: DailyStats,
+    excluded_domains: &[String],
+) -> DailyStats {
+    if excluded_domains.is_empty() {
+        return stats;
+    }
+
+    stats
+        .url_usage
+        .retain(|url| !matches_excluded_domain(&url.domain, excluded_domains));
+    stats
+        .domain_usage
+        .retain(|domain| !matches_excluded_domain(&domain.domain, excluded_domains));
+
+    for browser in &mut stats.browser_usage {
+        browser
+            .domains
+            .retain(|domain| !matches_excluded_domain(&domain.domain, excluded_domains));
+        browser.duration = browser.domains.iter().map(|domain| domain.duration).sum();
+    }
+    stats.browser_usage.retain(|browser| browser.duration > 0);
+    stats.browser_usage.sort_by(|left, right| {
+        right
+            .duration
+            .cmp(&left.duration)
+            .then_with(|| left.browser_name.cmp(&right.browser_name))
+    });
+    stats.browser_duration = stats
+        .browser_usage
+        .iter()
+        .map(|browser| browser.duration)
+        .sum();
+
+    stats
+}
+
+fn apply_privacy_to_stats(stats: DailyStats, config: &AppConfig) -> DailyStats {
+    let (ignored_apps, excluded_domains) = collect_privacy_filters(config);
+    apply_excluded_domains_to_stats(
+        apply_ignored_apps_to_stats(stats, &ignored_apps),
+        &excluded_domains,
+    )
+}
+
+fn load_daily_stats_for_mcp(
+    state: &AppState,
+    date: &str,
+) -> work_review_core::error::Result<DailyStats> {
+    let segments = state.config.effective_work_segments();
+    let (ignored_apps, excluded_domains) = collect_privacy_filters(&state.config);
+    state.db.get_daily_stats_with_segments_filtered(
+        date,
+        &segments,
+        &ignored_apps,
+        &excluded_domains,
+    )
+}
+
+fn filter_activities_by_privacy(activities: Vec<Activity>, config: &AppConfig) -> Vec<Activity> {
+    let (ignored_apps, excluded_domains) = collect_privacy_filters(config);
+    if ignored_apps.is_empty() && excluded_domains.is_empty() {
+        return activities;
+    }
+
+    activities
+        .into_iter()
+        .filter(|activity| {
+            !matches_ignored_app(&activity.app_name, &ignored_apps)
+                && activity
+                    .browser_url
+                    .as_deref()
+                    .map(|url| !matches_excluded_domain(url, &excluded_domains))
+                    .unwrap_or(true)
+        })
+        .collect()
+}
+
+fn filter_memory_results_by_privacy(
+    results: Vec<MemorySearchItem>,
+    config: &AppConfig,
+) -> Vec<MemorySearchItem> {
+    let (ignored_apps, excluded_domains) = collect_privacy_filters(config);
+    if ignored_apps.is_empty() && excluded_domains.is_empty() {
+        return results;
+    }
+
+    results
+        .into_iter()
+        .filter(|item| {
+            item.app_name
+                .as_deref()
+                .map(|app| !matches_ignored_app(app, &ignored_apps))
+                .unwrap_or(true)
+                && item
+                    .browser_url
+                    .as_deref()
+                    .map(|url| !matches_excluded_domain(url, &excluded_domains))
+                    .unwrap_or(true)
+        })
+        .collect()
+}
+
 fn handle_tool_call(name: &str, args: &Value, state: &Arc<Mutex<AppState>>) -> Value {
     match name {
         "query_timeline" => with_policy_check(state, name, Permission::ReadActivities, |s| {
@@ -436,16 +620,18 @@ fn handle_tool_call(name: &str, args: &Value, state: &Arc<Mutex<AppState>>) -> V
             let limit = args["limit"].as_u64().map(|l| l as u32);
             let offset = args["offset"].as_u64().map(|o| o as u32);
             match s.db.get_timeline(date, limit, offset) {
-                Ok(activities) => json!({
+                Ok(activities) => {
+                    let activities = filter_activities_by_privacy(activities, &s.config);
+                    json!({
                     "content": [{ "type": "text", "text": serde_json::to_string_pretty(&activities).unwrap_or_default() }]
-                }),
+                    })
+                }
                 Err(e) => tool_error(&format!("查询时间线失败: {e}")),
             }
         }),
         "get_daily_stats" => with_policy_check(state, name, Permission::ReadStats, |s| {
             let date = args["date"].as_str().unwrap_or("");
-            let segments = s.config.effective_work_segments();
-            match s.db.get_daily_stats_with_segments(date, &segments) {
+            match load_daily_stats_for_mcp(s, date) {
                 Ok(stats) => json!({
                     "content": [{ "type": "text", "text": serde_json::to_string_pretty(&stats).unwrap_or_default() }]
                 }),
@@ -458,9 +644,12 @@ fn handle_tool_call(name: &str, args: &Value, state: &Arc<Mutex<AppState>>) -> V
             let date_to = args["date_to"].as_str();
             let limit = args["limit"].as_u64().unwrap_or(50) as usize;
             match s.db.search_memory(query, date_from, date_to, limit) {
-                Ok(results) => json!({
+                Ok(results) => {
+                    let results = filter_memory_results_by_privacy(results, &s.config);
+                    json!({
                     "content": [{ "type": "text", "text": serde_json::to_string_pretty(&results).unwrap_or_default() }]
-                }),
+                    })
+                }
                 Err(e) => tool_error(&format!("搜索失败: {e}")),
             }
         }),
@@ -468,6 +657,7 @@ fn handle_tool_call(name: &str, args: &Value, state: &Arc<Mutex<AppState>>) -> V
             let date = args["date"].as_str().unwrap_or("");
             match s.db.get_timeline(date, None, None) {
                 Ok(activities) => {
+                    let activities = filter_activities_by_privacy(activities, &s.config);
                     let sessions =
                         work_review_core::work_intelligence::build_work_sessions(&activities);
                     json!({
@@ -481,6 +671,7 @@ fn handle_tool_call(name: &str, args: &Value, state: &Arc<Mutex<AppState>>) -> V
             let date = args["date"].as_str().unwrap_or("");
             match s.db.get_timeline(date, None, None) {
                 Ok(activities) => {
+                    let activities = filter_activities_by_privacy(activities, &s.config);
                     let intents = work_review_core::work_intelligence::analyze_intents(&activities);
                     json!({
                         "content": [{ "type": "text", "text": serde_json::to_string_pretty(&intents.summary).unwrap_or_default() }]
@@ -494,8 +685,7 @@ fn handle_tool_call(name: &str, args: &Value, state: &Arc<Mutex<AppState>>) -> V
             let locale =
                 work_review_core::analysis::AppLocale::from_option(args["locale"].as_str());
             // 使用用户配置的工作时段，而不是默认值（默认 9-18，会与 UI 显示对不上）。
-            let segments = s.config.effective_work_segments();
-            match s.db.get_daily_stats_with_segments(date, &segments) {
+            match load_daily_stats_for_mcp(s, date) {
                 Ok(stats) => {
                     let summary = work_review_core::analysis::generate_stats_summary_for_locale(
                         &stats,
@@ -524,6 +714,10 @@ fn handle_tool_call(name: &str, args: &Value, state: &Arc<Mutex<AppState>>) -> V
             let today = chrono::Local::now().format("%Y-%m-%d").to_string();
             match s.db.get_timeline(&today, Some(10), None) {
                 Ok(activities) if !activities.is_empty() => {
+                    let activities = filter_activities_by_privacy(activities, &s.config);
+                    if activities.is_empty() {
+                        return tool_error("暂无活动记录");
+                    }
                     let current = &activities[0];
                     let primary_app = &current.app_name;
                     let mut duration_secs: i64 = current.duration;
@@ -700,11 +894,15 @@ fn handle_resource_read(uri: &str, state: &Arc<Mutex<AppState>>) -> Value {
 
     let raw_text = match uri {
         "timeline/today" => match s.db.get_timeline(&today, Some(50), None) {
-            Ok(activities) => serde_json::to_string_pretty(&activities).unwrap_or_default(),
+            Ok(activities) => {
+                let activities = filter_activities_by_privacy(activities, &s.config);
+                serde_json::to_string_pretty(&activities).unwrap_or_default()
+            }
             Err(e) => return resource_result(uri, &format!("Error: {e}")),
         },
         "sessions/current" => match s.db.get_timeline(&today, None, None) {
             Ok(activities) => {
+                let activities = filter_activities_by_privacy(activities, &s.config);
                 let sessions =
                     work_review_core::work_intelligence::build_work_sessions(&activities);
                 serde_json::to_string_pretty(&sessions).unwrap_or_default()
@@ -717,7 +915,7 @@ fn handle_resource_read(uri: &str, state: &Arc<Mutex<AppState>>) -> Value {
                 let date = (chrono::Local::now() - chrono::Duration::days(i))
                     .format("%Y-%m-%d")
                     .to_string();
-                if let Ok(stats) = s.db.get_daily_stats(&date) {
+                if let Ok(stats) = load_daily_stats_for_mcp(&s, &date) {
                     weekly.push(json!({ "date": date, "total_duration": stats.total_duration, "screenshot_count": stats.screenshot_count }));
                 }
             }
@@ -805,6 +1003,7 @@ mod tests {
             "execute_skill",
             "list_skills",
             "get_skill_stats",
+            "get_current_context",
         ] {
             assert!(
                 names.contains(&required),
@@ -861,6 +1060,125 @@ mod tests {
         assert_eq!(res["description"], json!("未知提示词"));
         let text = res["messages"][0]["content"]["text"].as_str().unwrap();
         assert!(text.is_empty());
+    }
+
+    #[test]
+    fn apply_privacy_to_stats_应过滤忽略应用和排除域名() {
+        let mut config = AppConfig::default();
+        config
+            .privacy
+            .app_rules
+            .push(work_review_core::config::AppPrivacyRule {
+                app_name: "SecretApp".to_string(),
+                level: work_review_core::config::PrivacyLevel::Ignored,
+            });
+        config.privacy.excluded_domains = vec!["secret.example.com".to_string()];
+
+        let stats = DailyStats {
+            total_duration: 180,
+            work_time_duration: 180,
+            app_usage: vec![
+                work_review_core::database::AppUsage {
+                    app_name: "SecretApp".to_string(),
+                    duration: 60,
+                    count: 1,
+                    executable_path: None,
+                    screenshot_url: None,
+                },
+                work_review_core::database::AppUsage {
+                    app_name: "Code".to_string(),
+                    duration: 120,
+                    count: 1,
+                    executable_path: None,
+                    screenshot_url: None,
+                },
+            ],
+            domain_usage: vec![
+                work_review_core::database::DomainUsage {
+                    domain: "secret.example.com".to_string(),
+                    duration: 60,
+                    semantic_category: None,
+                    urls: vec![],
+                },
+                work_review_core::database::DomainUsage {
+                    domain: "docs.example.com".to_string(),
+                    duration: 120,
+                    semantic_category: None,
+                    urls: vec![],
+                },
+            ],
+            browser_usage: vec![work_review_core::database::BrowserUsage {
+                browser_name: "Google Chrome".to_string(),
+                duration: 180,
+                executable_path: None,
+                domains: vec![
+                    work_review_core::database::DomainUsage {
+                        domain: "secret.example.com".to_string(),
+                        duration: 60,
+                        semantic_category: None,
+                        urls: vec![],
+                    },
+                    work_review_core::database::DomainUsage {
+                        domain: "docs.example.com".to_string(),
+                        duration: 120,
+                        semantic_category: None,
+                        urls: vec![],
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+
+        let filtered = apply_privacy_to_stats(stats, &config);
+
+        assert_eq!(filtered.total_duration, 120);
+        assert_eq!(filtered.app_usage.len(), 1);
+        assert_eq!(filtered.app_usage[0].app_name, "Code");
+        assert_eq!(filtered.domain_usage.len(), 1);
+        assert_eq!(filtered.domain_usage[0].domain, "docs.example.com");
+        assert_eq!(filtered.browser_duration, 120);
+        assert_eq!(filtered.browser_usage[0].domains.len(), 1);
+    }
+
+    #[test]
+    fn filter_activities_by_privacy_应过滤忽略应用和排除域名() {
+        let mut config = AppConfig::default();
+        config
+            .privacy
+            .app_rules
+            .push(work_review_core::config::AppPrivacyRule {
+                app_name: "SecretApp".to_string(),
+                level: work_review_core::config::PrivacyLevel::Ignored,
+            });
+        config.privacy.excluded_domains = vec!["secret.example.com".to_string()];
+
+        let activity = |app_name: &str, browser_url: Option<&str>| Activity {
+            id: None,
+            timestamp: 1,
+            app_name: app_name.to_string(),
+            window_title: String::new(),
+            screenshot_path: String::new(),
+            ocr_text: None,
+            category: "development".to_string(),
+            duration: 60,
+            browser_url: browser_url.map(str::to_string),
+            executable_path: None,
+            semantic_category: None,
+            semantic_confidence: None,
+            screenshot_url: None,
+        };
+
+        let filtered = filter_activities_by_privacy(
+            vec![
+                activity("SecretApp", None),
+                activity("Google Chrome", Some("https://secret.example.com/a")),
+                activity("Code", None),
+            ],
+            &config,
+        );
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].app_name, "Code");
     }
 
     #[test]

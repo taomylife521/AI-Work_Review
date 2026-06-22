@@ -132,6 +132,15 @@ test('概览页的应用使用与按小时活跃度应支持视图切换并记�
   assert.match(source, /localStorage\.setItem\(key, value\)/);
 });
 
+test('概览页小时应用明细应与当前概览日期范围保持同口径', async () => {
+  const source = await readFile(new URL('./Overview.svelte', import.meta.url), 'utf8');
+
+  assert.match(source, /getHourlyBreakdownRange\(\)/);
+  assert.match(source, /dateFrom:\s*range\.dateFrom/);
+  assert.match(source, /dateTo:\s*range\.dateTo/);
+  assert.match(source, /mode:\s*overviewMode/);
+});
+
 test('概览统计命令应注册为 get_overview_stats', async () => {
   const source = await readFile(new URL('../../src-tauri/src/main.rs', import.meta.url), 'utf8');
 

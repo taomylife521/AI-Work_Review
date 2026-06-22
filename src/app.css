@@ -36,29 +36,37 @@
 
 /* 滚动条样式 */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 0.55rem;
+  height: 0.55rem;
 }
 
 ::-webkit-scrollbar-track {
   background: transparent;
+  margin-block: 0.35rem;
+  margin-inline: 0.35rem;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 4px;
+  background-color: rgba(100, 116, 139, 0.34);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
 }
 
 .dark ::-webkit-scrollbar-thumb {
-  background: #30363d;
+  background-color: rgba(139, 148, 158, 0.36);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background-color: rgba(71, 85, 105, 0.54);
 }
 
 .dark ::-webkit-scrollbar-thumb:hover {
-  background: #484f58;
+  background-color: rgba(139, 148, 158, 0.58);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 /* 动画 */
@@ -114,13 +122,17 @@
 
 .app-shell {
   isolation: isolate;
+  overflow: hidden;
+  border-radius: 0;
   background: var(--editorial-shell-bg);
 }
 
 .app-shell-stage {
   position: relative;
   align-items: stretch;
-  padding: 0.35rem;
+  padding-right: 0.35rem;
+  padding-bottom: 0.35rem;
+  padding-left: 0.35rem;
   border-radius: 0;
   background: transparent;
   border: none;
@@ -128,12 +140,23 @@
   backdrop-filter: none;
 }
 
+.app-shell-stage--windowbar {
+  padding-top: 1.75rem;
+}
+
+.app-shell-stage--macos {
+  padding-top: 0.6rem;
+}
+
 .app-shell-sidebar-frame,
 .app-shell-main-frame {
+  --app-shell-frame-radius: 2rem;
+  --app-shell-inner-radius: 1.78rem;
   min-width: 0;
   min-height: 0;
   padding: 0.2rem;
-  border-radius: 2.1rem;
+  border-radius: var(--app-shell-frame-radius);
+  box-sizing: border-box;
   background: rgba(255, 255, 255, 0.34);
   border: 1px solid rgba(255, 255, 255, 0.42);
   box-shadow:
@@ -143,7 +166,8 @@
 
 .app-shell-sidebar {
   position: relative;
-  border-radius: 1.9rem;
+  min-height: 0;
+  border-radius: var(--app-shell-inner-radius);
   background: transparent;
   box-shadow: none;
   backdrop-filter: none;
@@ -151,7 +175,8 @@
 
 .app-shell-main {
   position: relative;
-  border-radius: 2rem;
+  min-height: 0;
+  border-radius: var(--app-shell-inner-radius);
   padding: 0.18rem;
   background: transparent;
   box-shadow: none;
@@ -161,18 +186,78 @@
 .app-shell-main-scroll {
   position: relative;
   scrollbar-gutter: stable;
-  border-radius: 1.72rem;
-  padding-right: 0.12rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.42) transparent;
+  border-radius: calc(var(--app-shell-inner-radius) - 0.18rem);
+  margin-right: 0.42rem;
+  padding-right: 0.28rem;
   padding-bottom: 0.12rem;
+}
+
+.dark .app-shell-main-scroll {
+  scrollbar-color: rgba(139, 148, 158, 0.44) transparent;
+}
+
+.app-shell-main-scroll::-webkit-scrollbar {
+  width: 0.6rem;
+  height: 0.6rem;
+}
+
+.app-shell-main-scroll::-webkit-scrollbar-track {
+  margin-block: 1rem;
+  margin-inline: 0.6rem;
+  background: transparent;
+}
+
+.app-shell-main-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-block-width: 0.85rem;
+  min-height: 2.6rem;
+}
+
+.app-shell-main-scroll::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.app-floating-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.38) transparent;
+}
+
+.dark .app-floating-scroll {
+  scrollbar-color: rgba(139, 148, 158, 0.42) transparent;
+}
+
+.app-floating-scroll::-webkit-scrollbar {
+  width: 0.5rem;
+  height: 0.5rem;
+}
+
+.app-floating-scroll::-webkit-scrollbar-track {
+  margin-block: 0.35rem;
+  margin-inline: 0.35rem;
+  background: transparent;
+}
+
+.app-floating-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+}
+
+.app-floating-scroll::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .app-shell-windowbar {
   cursor: default;
-  background: linear-gradient(180deg, #f4f7ff 0%, #eef2ff 100%);
+  background: transparent;
 }
 
 .dark .app-shell-windowbar {
-  background: linear-gradient(180deg, #020617 0%, #08101f 100%);
+  background: transparent;
 }
 
 .app-shell-window-controls {

@@ -18,7 +18,7 @@ test('应用壳层应使用统一 i18n 资源并支持三种界面语言', async
   assert.match(appSource, /<Router \{routes\} \/>/);
 });
 
-test('侧边栏底部应提供语言切换菜单，并按 ZH、TW、EN 顺序展示缩写标识', async () => {
+test('侧边栏底部应提供语言切换菜单，并按 ZH、EN、TW 顺序展示缩写标识', async () => {
   const source = await readFile(new URL('./lib/components/Sidebar.svelte', import.meta.url), 'utf8');
 
   assert.match(source, /locale-switch/);
@@ -26,14 +26,14 @@ test('侧边栏底部应提供语言切换菜单，并按 ZH、TW、EN 顺序展
   assert.match(source, /toggleLocaleMenu/);
   assert.match(source, /selectLocale\(option\.value\)/);
   assert.match(source, /value: 'zh-CN', label: 'ZH'/);
-  assert.match(source, /value: 'zh-TW', label: 'TW'/);
   assert.match(source, /value: 'en', label: 'EN'/);
+  assert.match(source, /value: 'zh-TW', label: 'TW'/);
   assert.ok(
     source.indexOf("value: 'zh-CN', label: 'ZH'")
-      < source.indexOf("value: 'zh-TW', label: 'TW'")
-      && source.indexOf("value: 'zh-TW', label: 'TW'")
-      < source.indexOf("value: 'en', label: 'EN'"),
-    '语言顺序应为 ZH、TW、EN'
+      < source.indexOf("value: 'en', label: 'EN'")
+      && source.indexOf("value: 'en', label: 'EN'")
+      < source.indexOf("value: 'zh-TW', label: 'TW'"),
+    '语言顺序应为 ZH、EN、TW'
   );
   assert.match(source, /emitTo\('avatar', 'locale-changed', normalizedLocale\)/);
   assert.doesNotMatch(source, /sidebar-footer-version/);

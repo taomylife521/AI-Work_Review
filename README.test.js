@@ -29,3 +29,17 @@ test('中英文 README 底部都应展示 Star History，并在 License 后加�
   assert.match(enSource, /## License\s+\[MIT\]\(\.\/LICENSE\)[\s\S]*---\s+## Star History/);
   assert.match(enSource, /star-history\.com\/#wm94i\/Work-Review&Date/);
 });
+
+test('README 不应把默认关闭的 Localhost API 描述为启动后自动开放', async () => {
+  const sources = await Promise.all([
+    readFile(new URL('./README.md', import.meta.url), 'utf8'),
+    readFile(new URL('./README.zh.md', import.meta.url), 'utf8'),
+    readFile(new URL('./README.tw.md', import.meta.url), 'utf8'),
+  ]);
+
+  for (const source of sources) {
+    assert.doesNotMatch(source, /automatically exposes a local HTTP API after launch/);
+    assert.doesNotMatch(source, /应用启动后自动在本地开放 HTTP API/);
+    assert.doesNotMatch(source, /應用啟動後自動在本地開放 HTTP API/);
+  }
+});

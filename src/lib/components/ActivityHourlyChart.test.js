@@ -32,3 +32,20 @@ test('按小时活跃度图表应在图表下方显示当前选中时段信息�
   assert.match(source, /\{formatHourRangeLabel\(selectedBucket\.hour\)\}/);
   assert.match(source, /\{formatCompact\(selectedBucket\.duration\)\}/);
 });
+
+test('按小时活跃度图表无数据时不应把 00:00 显示成峰值', async () => {
+  const source = await readFile(new URL('./ActivityHourlyChart.svelte', import.meta.url), 'utf8');
+
+  assert.match(source, /hasActiveData = activeBuckets\.length > 0/);
+  assert.match(source, /\{hasActiveData \? formatHourLabel\(peakBucket\.hour\) : '--'\}/);
+  assert.match(source, /\{hasActiveData \? formatCompact\(peakBucket\.duration\) : '--'\}/);
+});
+
+test('按小时活跃度图表的柱子和时间刻度应共用同一套 24 列网格', async () => {
+  const source = await readFile(new URL('./ActivityHourlyChart.svelte', import.meta.url), 'utf8');
+
+  assert.equal((source.match(/grid-cols-\[repeat\(24,minmax\(0,1fr\)\)\]/g) || []).length, 2);
+  assert.match(source, /<div class="grid h-44 grid-cols-\[repeat\(24,minmax\(0,1fr\)\)\] items-end gap-1">/);
+  assert.match(source, /<div class="mt-3 grid grid-cols-\[repeat\(24,minmax\(0,1fr\)\)\] gap-1">/);
+  assert.doesNotMatch(source, /hourAxisLabelAlignmentClass/);
+});

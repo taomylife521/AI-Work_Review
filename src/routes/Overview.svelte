@@ -71,6 +71,16 @@
     return `${formatLocalizedDate(monday, { year: 'numeric', month: 'short', day: 'numeric' })} - ${formatLocalizedDate(anchor, { year: 'numeric', month: 'short', day: 'numeric' })}`;
   }
 
+  function getWeekDateRange(dateValue) {
+    const anchor = parseDateString(dateValue);
+    const monday = new Date(anchor);
+    monday.setDate(anchor.getDate() - ((anchor.getDay() + 6) % 7));
+    return {
+      dateFrom: formatIsoDate(monday),
+      dateTo: formatIsoDate(anchor),
+    };
+  }
+
   function formatOverviewDateInput(dateValue) {
     return dateValue ? dateValue.replace(/-/g, '/') : '';
   }
@@ -119,15 +129,38 @@
   let hourlyAppBreakdown = [];
   let categoryList = [];
   let workGoalMinutes = null;
+  function getHourlyBreakdownRange() {
+    if (overviewMode === 'week') {
+      return getWeekDateRange(getLocalDateString());
+    }
+    if (overviewMode === 'date') {
+      return {
+        dateFrom: selectedDateFrom,
+        dateTo: selectedDateTo,
+      };
+    }
+    const today = getLocalDateString();
+    return {
+      dateFrom: today,
+      dateTo: today,
+    };
+  }
+
   async function loadHourlyBreakdown() {
+    const range = getHourlyBreakdownRange();
     try {
-      hourlyAppBreakdown = await invoke('get_hourly_app_breakdown', { date: selectedDateFrom });
+      hourlyAppBreakdown = await invoke('get_hourly_app_breakdown', {
+        mode: overviewMode,
+        date: range.dateTo,
+        dateFrom: range.dateFrom,
+        dateTo: range.dateTo,
+      });
     } catch (e) {
       hourlyAppBreakdown = [];
     }
   }
   // 切换日期时刷新 hourly 分类细分
-  $: { selectedDateFrom; if (categoryList.length) loadHourlyBreakdown(); }
+  $: { overviewMode; selectedDateFrom; selectedDateTo; if (categoryList.length) loadHourlyBreakdown(); }
   $: hourlyCategoryColors = categoryList.reduce((acc, c) => {
     acc[c.key] = c.color;
     return acc;

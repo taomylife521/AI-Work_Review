@@ -39,16 +39,6 @@
     return keyHours.includes(hour);
   }
 
-  function hourAxisLabelAlignmentClass(hour) {
-    if (hour === 0) {
-      return 'justify-start';
-    }
-    if (hour === 23) {
-      return 'justify-end';
-    }
-    return 'justify-center';
-  }
-
   function formatAxisTickLabel(seconds) {
     const minutes = Math.round(seconds / 60);
     if (minutes === 0) {
@@ -81,6 +71,7 @@
 
   $: maxDuration = Math.max(1, ...buckets.map((bucket) => bucket.duration || 0));
   $: activeBuckets = buckets.filter((bucket) => bucket.duration > 0);
+  $: hasActiveData = activeBuckets.length > 0;
   $: totalDuration = buckets.reduce((sum, bucket) => sum + (bucket.duration || 0), 0);
   // 图例：从 categoryBreakdown 聚合出当前用到的分类（按时长降序）
   $: usedCategories = (() => {
@@ -126,13 +117,13 @@
     <div class={summaryCardClass}>
       <p class="text-[13px] font-medium text-slate-400 dark:text-[#636c76]">{peakHourLabel || t('hourlyChart.peakHour')}</p>
       <p class={summaryValueClass}>
-        {formatHourLabel(peakBucket.hour)}
+        {hasActiveData ? formatHourLabel(peakBucket.hour) : '--'}
       </p>
     </div>
     <div class={summaryCardClass}>
       <p class="text-[13px] font-medium text-slate-400 dark:text-[#636c76]">{peakDurationLabel || t('hourlyChart.peakDuration')}</p>
       <p class={summaryValueClass}>
-        {formatCompact(peakBucket.duration)}
+        {hasActiveData ? formatCompact(peakBucket.duration) : '--'}
       </p>
     </div>
     <div class={summaryCardClass}>
@@ -170,8 +161,8 @@
         </p>
         <p class="mt-1 text-xs text-slate-500 dark:text-[#7d8590]">
           {t(distributionSubtitleKey, {
-            hour: formatHourLabel(peakBucket.hour),
-            duration: formatDurationLocalized(peakBucket.duration),
+            hour: hasActiveData ? formatHourLabel(peakBucket.hour) : '--',
+            duration: hasActiveData ? formatDurationLocalized(peakBucket.duration) : '--',
           })}
         </p>
       </div>
@@ -259,48 +250,48 @@
             {/each}
           </div>
           <div class="relative">
-            <div class="pointer-events-none absolute inset-x-0 top-0 bottom-8">
+            <div class="pointer-events-none absolute inset-x-3 top-0 h-44">
               <div class="absolute inset-x-0 top-0 border-t border-dashed border-slate-200 dark:border-[#30363d]/80"></div>
               <div class="absolute inset-x-0 top-1/3 border-t border-dashed border-slate-200 dark:border-[#30363d]/80"></div>
               <div class="absolute inset-x-0 top-2/3 border-t border-dashed border-slate-200 dark:border-[#30363d]/80"></div>
               <div class="absolute inset-x-0 bottom-0 border-t border-dashed border-slate-200 dark:border-[#30363d]/80"></div>
             </div>
 
-            <div class="relative flex h-44 items-end gap-1">
-              {#each buckets as bucket}
-                {@const height = bucket.duration > 0 ? Math.max((bucket.duration / axisMax) * 100, 6) : 2}
-                {@const isPeak = bucket.duration > 0 && bucket.hour === peakBucket.hour}
-                <div class="relative flex h-full min-w-0 flex-1 flex-col justify-end">
-                  <button
-                    type="button"
-                    class={`w-full overflow-hidden transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-sky-300 dark:focus:ring-sky-500 ${selectedHour === bucket.hour ? 'ring-2 ring-sky-300 dark:focus:ring-sky-500' : ''} ${categoryMode && bucket.duration > 0 ? '' : isPeak ? 'bg-sky-500 dark:bg-sky-400' : 'bg-slate-300 dark:bg-[#484f58]'}`}
-                    style={`height: ${height}%; opacity: ${bucket.duration > 0 ? 1 : 0.35}; border-top-left-radius: 10px; border-top-right-radius: 10px;`}
-                    title={`${formatHourRangeLabel(bucket.hour)} · ${formatDurationLocalized(bucket.duration)}`}
-                    aria-pressed={selectedHour === bucket.hour}
-                    on:click={() => selectHour(bucket.hour)}
-                  >
-                    {#if categoryMode && bucket.duration > 0}
-                      <div class="flex h-full w-full flex-col justify-end overflow-hidden" style="border-top-left-radius: 10px; border-top-right-radius: 10px;">
-                        {#each (categoryBreakdown?.[bucket.hour] || []) as seg}
-                          <div style={`height: ${(seg.duration / bucket.duration) * 100}%; background: ${(categoryColors && categoryColors[seg.category]) || '#94a3b8'};`}></div>
-                        {/each}
-                      </div>
-                    {/if}
-                  </button>
-                </div>
-              {/each}
-            </div>
-
-            <div class="mt-3 flex gap-1 px-1">
-              {#each buckets as bucket}
-                <div class="flex-1">
-                  <div class={`flex w-full ${hourAxisLabelAlignmentClass(bucket.hour)}`}>
-                  <span class={`text-[10px] font-medium ${showHourLabel(bucket.hour) ? 'text-slate-400 dark:text-[#636c76]' : 'text-transparent'}`}>
-                    {showHourLabel(bucket.hour) ? formatHourLabel(bucket.hour) : '.'}
-                  </span>
+            <div class="relative px-3">
+              <div class="grid h-44 grid-cols-[repeat(24,minmax(0,1fr))] items-end gap-1">
+                {#each buckets as bucket}
+                  {@const height = bucket.duration > 0 ? Math.max((bucket.duration / axisMax) * 100, 6) : 2}
+                  {@const isPeak = bucket.duration > 0 && bucket.hour === peakBucket.hour}
+                  <div class="relative flex h-full min-w-0 flex-col justify-end">
+                    <button
+                      type="button"
+                      class={`w-full overflow-hidden transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-sky-300 dark:focus:ring-sky-500 ${selectedHour === bucket.hour ? 'ring-2 ring-sky-300 dark:focus:ring-sky-500' : ''} ${categoryMode && bucket.duration > 0 ? '' : isPeak ? 'bg-sky-500 dark:bg-sky-400' : 'bg-slate-300 dark:bg-[#484f58]'}`}
+                      style={`height: ${height}%; opacity: ${bucket.duration > 0 ? 1 : 0.35}; border-top-left-radius: 10px; border-top-right-radius: 10px;`}
+                      title={`${formatHourRangeLabel(bucket.hour)} · ${formatDurationLocalized(bucket.duration)}`}
+                      aria-pressed={selectedHour === bucket.hour}
+                      on:click={() => selectHour(bucket.hour)}
+                    >
+                      {#if categoryMode && bucket.duration > 0}
+                        <div class="flex h-full w-full flex-col justify-end overflow-hidden" style="border-top-left-radius: 10px; border-top-right-radius: 10px;">
+                          {#each (categoryBreakdown?.[bucket.hour] || []) as seg}
+                            <div style={`height: ${(seg.duration / bucket.duration) * 100}%; background: ${(categoryColors && categoryColors[seg.category]) || '#94a3b8'};`}></div>
+                          {/each}
+                        </div>
+                      {/if}
+                    </button>
                   </div>
-                </div>
-              {/each}
+                {/each}
+              </div>
+
+              <div class="mt-3 grid grid-cols-[repeat(24,minmax(0,1fr))] gap-1">
+                {#each buckets as bucket}
+                  <div class="min-w-0 text-center">
+                    <span class={`text-[10px] font-medium ${showHourLabel(bucket.hour) ? 'text-slate-400 dark:text-[#636c76]' : 'text-transparent'}`}>
+                      {showHourLabel(bucket.hour) ? formatHourLabel(bucket.hour) : '.'}
+                    </span>
+                  </div>
+                {/each}
+              </div>
             </div>
           </div>
         </div>

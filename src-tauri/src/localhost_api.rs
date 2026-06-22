@@ -748,13 +748,17 @@ async fn route_request(
             if date.is_empty() {
                 Err(AppError::Config("日期不能为空".to_string()))
             } else {
-                match state.lock() {
-                    Ok(s) => s
-                        .database
-                        .get_hourly_app_breakdown(date)
-                        .map(|result| HttpResponse::json(200, &result)),
-                    Err(e) => Err(AppError::Unknown(e.to_string())),
-                }
+                let mode = request.query.get("mode").cloned();
+                let date_from = request.query.get("date_from").cloned();
+                let date_to = request.query.get("date_to").cloned();
+                commands::get_hourly_app_breakdown_inner(
+                    Some(date.to_string()),
+                    date_from,
+                    date_to,
+                    mode,
+                    state,
+                )
+                .map(|result| HttpResponse::json(200, &result))
             }
         }
         _ if request.method == "GET" && request.path.starts_with("/v1/activities/") => {

@@ -5,11 +5,11 @@
 <h1 align="center">Work Review</h1>
 
 <p align="center">
-  <strong>A personal, local-first work activity log and review tool.</strong>
+  <strong>A local-first personal work review tool that records context, helps you review your day, and generates daily reports.</strong>
 </p>
 
 <p align="center">
-  Automatically organizes the apps you used, websites you visited, window titles, and optional screenshot records throughout your day into a reviewable, question-answerable work timeline.
+  Automatically organizes the apps you used, websites you visited, window titles, usage time, and optional screenshots into a timeline you can review, analyze, and ask questions about.
 </p>
 
 <p align="center">
@@ -35,9 +35,9 @@
 
 ---
 
-## What Is It For
+## What It Solves
 
-Work Review is designed for individuals who want to answer questions like these:
+Work Review is designed for personal work review and helps answer questions like these:
 
 - What did I actually do today?
 - What have I been focusing on over the past few days?
@@ -45,18 +45,18 @@ Work Review is designed for individuals who want to answer questions like these:
 - Which pages, windows, and context did I look at back then?
 - How can I quickly put together today's daily report?
 
-The focus is not on "monitoring" but on helping you **recall, organize, and review** your own work process.
+The focus is not "monitoring". It is helping you **recall, organize, and review** your own work process.
 
 ---
 
-## Core Features
+## Core Capabilities
 
-- **Automatic work trail recording** — Automatically captures foreground apps, website visits, window titles, optional screenshots, and OCR text, minimizing manual note-taking and after-the-fact recall
-- **A unified work timeline** — Overview, timeline, work assistant, and daily report all share the same underlying records, letting you view statistics and drill down to specific pages and context
-- **Direct answers to work questions** — Answers questions like "What did I do today?", "What have I been focusing on recently?", and "What are my pending items?" based on local records
-- **Daily report generation and export** — Structured daily reports, historical review, Markdown export with auto-export, AI-enhanced prompt attachments and paragraph-level editing
-- **Desktop Avatar Beta** — The first step toward a personal work Agent, evolving into a desktop partner that can sense work context, proactively remind, and assist with decisions
-- **Privacy-first, locally controllable** — Data stored in local SQLite; AI can remain disabled by default, model calls use your own API Key without third-party relay
+- **Automatic work context recording** — Records foreground apps, browser pages, window titles, usage time, optional screenshots, and OCR text, reducing manual note-taking
+- **Unified timeline and statistics** — Overview, timeline, work assistant, and daily report share the same local records, so you can inspect trends and drill into context
+- **Questions over local records** — Use the basic template or your configured model to answer "What did I do today?", "How long did this task take?", and "What have I been focused on?"
+- **Daily report generation and export** — Generate structured daily reports with Markdown export, auto-export, paragraph editing, pin/hide controls, and cached AI section ordering
+- **Privacy-first and locally controllable** — Data is stored in local SQLite by default; AI is optional, and model calls use your own API key without third-party relay
+- **Desktop Avatar Beta** — Shows work status through a desktop avatar and is gradually expanding toward proactive reminders and context assistance
 
 ---
 
@@ -85,30 +85,28 @@ You can control the recording scope as needed:
 
 ---
 
-## Main Features
+## Feature Overview
 
 ### Automatic Recording
 
-- Automatically detects the foreground app, tracking usage duration, window titles, and categories
-- Identifies browser URLs and aggregates visit records by site/page
-- Periodic screenshots with OCR text extraction, supporting multi-display strategies
-- Keyboard/mouse + screen idle detection to reduce false records during idle time
-- Timeline replay to review specific context from any time period
+- Foreground apps, window titles, browser URLs, usage duration, and category records
+- Optional screenshots and OCR with multi-display strategies
+- Keyboard/mouse activity + screen-change idle detection to reduce false records
+- Timeline review for pages, windows, and context from any time period
 
 ### Smart Organization
 
-- Work assistant: Q&A based on local records, with multi-model switching support
-- Automatically understands natural language time ranges like "yesterday", "this week", "last N days"
+- Work assistant based on local records, with basic template and AI-enhanced modes
+- Duration statistics, category filtering, trend comparison, and natural-language time ranges
 - Fragments grouped into continuous work sessions
 - Extracts potential follow-up to-dos from pages, window titles, and context
-- Two response modes: basic template and AI-enhanced
 
 ### Daily Reports and Review
 
-- Generate structured daily reports with historical review
-- Markdown export and automatic export
-- Hourly activity summaries
-- AI-enhanced prompt attachments and paragraph editing
+- Structured daily reports, historical review, Markdown export, and auto-export
+- Report blocks for hourly activity, time distribution, app usage, website visits, and more
+- Paragraph-level pin/hide/restore controls, with cached AI section ordering
+- AI-enhanced prompt attachments and custom model settings
 - Website semantic categorization: changing a domain category automatically backfills history
 - Multi-segment work time: e.g. morning + afternoon, break time excluded
 
@@ -178,7 +176,7 @@ Uses a standalone desktop pet window to reflect idle / working / reading / meeti
 
 <img src="docs/桌宠.png" alt="Desktop Avatar" width="220" />
 
-Still being actively refined — interaction linkage, expressions, and preset details will continue to improve.
+Still being actively refined — interaction linkage, state expression, and preset details will continue to improve.
 
 </details>
 
@@ -192,7 +190,7 @@ Query records and generate daily reports remotely from Telegram / Feishu via loc
 <details>
 <summary>Localhost API</summary>
 
-The app automatically exposes a local HTTP API after launch (default `127.0.0.1:47831`), authenticated with a Bearer Token (auto-generated on first launch, saved in `localhost_api_token.txt` in the data directory).
+After Localhost API is enabled, the app exposes a local HTTP API (default `127.0.0.1:47831`), authenticated with a Bearer Token (auto-generated on first launch, saved in `localhost_api_token.txt` in the data directory).
 
 ### Authentication
 

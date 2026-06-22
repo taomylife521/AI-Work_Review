@@ -3,7 +3,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { emitTo } from '@tauri-apps/api/event';
   import { createEventDispatcher } from 'svelte';
-  import { getLocaleShortLabel, locale, setLocale, t } from '$lib/i18n/index.js';
+  import { getLocaleLabel, locale, setLocale, t } from '$lib/i18n/index.js';
 
   export let isRecording = true;
   export let isPaused = false;
@@ -29,14 +29,14 @@
   };
   const localeOptionsBase = [
     { value: 'zh-CN', label: 'ZH', fullLabelKey: 'sidebar.localeNames.zhCN' },
-    { value: 'zh-TW', label: 'TW', fullLabelKey: 'sidebar.localeNames.zhTW' },
     { value: 'en', label: 'EN', fullLabelKey: 'sidebar.localeNames.en' },
+    { value: 'zh-TW', label: 'TW', fullLabelKey: 'sidebar.localeNames.zhTW' },
   ];
   $: localeOptions = localeOptionsBase.map((option) => ({
     ...option,
     fullLabel: translate(option.fullLabelKey),
   }));
-  $: currentLocaleLabel = getLocaleShortLabel(currentLocale);
+  $: currentLocaleLabel = getLocaleLabel(currentLocale);
 
   function cycleTheme() {
     const themes = ['system', 'light', 'dark'];
@@ -199,7 +199,7 @@
         <div class="relative" bind:this={localeMenuContainer}>
           <button
             type="button"
-            class="locale-switch inline-flex h-8 min-w-[54px] items-center justify-center gap-1.5 rounded-full border border-slate-200/80 bg-white/90 px-3 text-[11px] font-semibold tracking-[0.08em] text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] outline-none dark:shadow-none transition hover:border-slate-300 hover:text-slate-900 focus:ring-2 focus:ring-slate-300 dark:border-[#30363d]/80 dark:bg-[#161b22]/80 dark:text-[#c9d1d9] dark:hover:border-[#484f58] dark:hover:text-[#e6edf3] dark:focus:ring-primary-600"
+            class="locale-switch inline-flex h-8 min-w-[72px] items-center justify-center gap-1.5 rounded-full border border-slate-200/80 bg-white/90 px-3 text-[11px] font-semibold tracking-normal text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] outline-none dark:shadow-none transition hover:border-slate-300 hover:text-slate-900 focus:ring-2 focus:ring-slate-300 dark:border-[#30363d]/80 dark:bg-[#161b22]/80 dark:text-[#c9d1d9] dark:hover:border-[#484f58] dark:hover:text-[#e6edf3] dark:focus:ring-primary-600"
             aria-label={translate('sidebar.localeButtonTitle')}
             aria-haspopup="menu"
             aria-expanded={localeMenuOpen}
@@ -225,6 +225,7 @@
                   aria-checked={currentLocale === option.value}
                   on:click={() => selectLocale(option.value)}
                 >
+                  <span class="w-3.5 shrink-0 text-center text-slate-900 dark:text-[#e6edf3]">{currentLocale === option.value ? '✓' : ''}</span>
                   <span class="font-semibold tracking-[0.08em] text-slate-500 dark:text-[#7d8590]">{option.label}</span>
                   <span class="text-slate-700 dark:text-[#c9d1d9]">{option.fullLabel}</span>
                 </button>
