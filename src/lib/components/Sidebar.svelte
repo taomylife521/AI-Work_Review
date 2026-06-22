@@ -102,7 +102,7 @@
     <div class="sidebar-brand sidebar-brand-panel">
       <div class="sidebar-brand-row flex items-center gap-3 min-w-0">
         <div class="flex items-center gap-3 min-w-0">
-          <div class="w-10 h-10 rounded-xl overflow-hidden shadow-md shrink-0 ring-1 ring-slate-200/50 dark:ring-slate-700/50">
+          <div class="w-10 h-10 rounded-xl overflow-hidden shadow-md dark:shadow-[0_4px_12px_rgba(0,0,0,0.4)] shrink-0 ring-1 ring-slate-200/50 dark:ring-[#30363d]/50">
             <img src="/icons/256x256.png" alt="Work Review" class="w-full h-full object-cover" />
           </div>
           <div class="min-w-0">
@@ -121,10 +121,10 @@
               <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
               <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
             {:else}
-              <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-slate-300 dark:bg-slate-600"></span>
+              <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-slate-300 dark:bg-[#484f58]"></span>
             {/if}
           </span>
-          <span class="text-[12px] font-semibold tracking-[0.08em] text-slate-500 dark:text-slate-400">
+          <span class="text-[12px] font-semibold tracking-[0.08em] text-slate-500 dark:text-[#7d8590]">
             {translate('sidebar.recordingStatus')}
           </span>
         </div>
@@ -133,7 +133,7 @@
           class="mt-0.5 shrink-0 px-3 py-1.5 text-[11px] font-semibold rounded-full transition-all
             {isPaused 
               ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-300' 
-              : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300'}"
+              : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-[#30363d] dark:text-[#adbac7]'}"
         >
           {#if isPaused}{translate('sidebar.resume')}{:else}{translate('sidebar.pause')}{/if}
         </button>
@@ -155,7 +155,7 @@
 
               <div class="sidebar-nav-main">
                 <!-- SVG 图标 -->
-                <div class="sidebar-nav-icon {activeStates[item.path] ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400 group-hover:text-slate-500 dark:group-hover:text-slate-300'}">
+                <div class="sidebar-nav-icon {activeStates[item.path] ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400 group-hover:text-slate-500 dark:group-hover:text-slate-400'}">
                   {#if item.icon === 'home'}
                     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
@@ -199,7 +199,7 @@
         <div class="relative" bind:this={localeMenuContainer}>
           <button
             type="button"
-            class="locale-switch inline-flex h-8 min-w-[54px] items-center justify-center gap-1.5 rounded-full border border-slate-200/80 bg-white/90 px-3 text-[11px] font-semibold tracking-[0.08em] text-slate-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] outline-none dark:shadow-none transition hover:border-slate-300 hover:text-slate-800 focus:ring-2 focus:ring-slate-300 dark:border-slate-700/80 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:text-white dark:focus:ring-slate-600"
+            class="locale-switch inline-flex h-8 min-w-[54px] items-center justify-center gap-1.5 rounded-full border border-slate-200/80 bg-white/90 px-3 text-[11px] font-semibold tracking-[0.08em] text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] outline-none dark:shadow-none transition hover:border-slate-300 hover:text-slate-900 focus:ring-2 focus:ring-slate-300 dark:border-[#30363d]/80 dark:bg-[#161b22]/80 dark:text-[#c9d1d9] dark:hover:border-[#484f58] dark:hover:text-[#e6edf3] dark:focus:ring-primary-600"
             aria-label={translate('sidebar.localeButtonTitle')}
             aria-haspopup="menu"
             aria-expanded={localeMenuOpen}
@@ -214,19 +214,19 @@
 
           {#if localeMenuOpen}
             <div
-              class="absolute bottom-full left-0 mb-2 min-w-[148px] rounded-2xl border border-slate-200/80 bg-white/96 p-1.5 shadow-xl shadow-slate-900/12 backdrop-blur dark:border-slate-700/80 dark:bg-slate-900/96"
+              class="absolute bottom-full left-0 mb-2 min-w-[148px] rounded-2xl border border-slate-200/80 bg-white/96 p-1.5 shadow-xl dark:shadow-[0_12px_32px_rgba(0,0,0,0.5)] backdrop-blur dark:border-[#30363d]/80 dark:bg-[#161b22]/96"
               role="menu"
             >
               {#each localeOptions as option}
                 <button
                   type="button"
-                  class="flex w-full items-center gap-2.5 whitespace-nowrap rounded-xl px-3 py-2 text-left text-xs font-medium transition-colors {currentLocale === option.value ? 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800 dark:text-slate-300 dark:hover:bg-slate-800/80 dark:hover:text-white'}"
+                  class="flex w-full items-center gap-2.5 whitespace-nowrap rounded-xl px-3 py-2 text-left text-xs font-medium transition-colors {currentLocale === option.value ? 'bg-slate-100 text-slate-900 dark:bg-[#21262d] dark:text-[#e6edf3]' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900 dark:text-[#adbac7] dark:hover:bg-[#21262d]/80 dark:hover:text-[#e6edf3]'}"
                   role="menuitemradio"
                   aria-checked={currentLocale === option.value}
                   on:click={() => selectLocale(option.value)}
                 >
-                  <span class="font-semibold tracking-[0.08em] text-slate-500 dark:text-slate-400">{option.label}</span>
-                  <span class="text-slate-700 dark:text-slate-200">{option.fullLabel}</span>
+                  <span class="font-semibold tracking-[0.08em] text-slate-500 dark:text-[#7d8590]">{option.label}</span>
+                  <span class="text-slate-700 dark:text-[#c9d1d9]">{option.fullLabel}</span>
                 </button>
               {/each}
             </div>

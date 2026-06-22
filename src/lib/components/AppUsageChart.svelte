@@ -48,10 +48,10 @@
   $: maxDuration = displayApps.length > 0 ? Math.max(...displayApps.map(a => a.duration)) : 1;
   $: columnShellClass = embedded
     ? 'app-usage-chart__columns app-usage-chart__columns-embedded'
-    : 'app-usage-chart__columns rounded-2xl border border-slate-100 bg-white/90 p-4 dark:border-slate-700/60 dark:bg-slate-800/70';
+    : 'app-usage-chart__columns rounded-2xl border border-slate-100 bg-white/90 p-4 dark:border-[#30363d]/60 dark:bg-[#21262d]/70';
   $: plotClass = embedded
-    ? 'app-usage-chart__plot relative rounded-[22px] bg-slate-50/90 px-3 pb-3 pt-4 dark:bg-slate-900/40'
-    : 'app-usage-chart__plot relative rounded-2xl bg-slate-50 px-3 pb-3 pt-4 dark:bg-slate-900/40';
+    ? 'app-usage-chart__plot relative rounded-[22px] bg-slate-50/90 px-3 pb-3 pt-4 dark:bg-[#161b22]/40'
+    : 'app-usage-chart__plot relative rounded-2xl bg-slate-50 px-3 pb-3 pt-4 dark:bg-[#161b22]/40';
 </script>
 
 <div class="space-y-2" data-locale={currentLocale}>
@@ -59,9 +59,9 @@
     <div class={columnShellClass}>
       <div class={plotClass}>
         <div class="pointer-events-none absolute inset-x-3 top-4 bottom-14">
-          <div class="absolute inset-x-0 top-0 border-t border-dashed border-slate-200 dark:border-slate-700/80"></div>
-          <div class="absolute inset-x-0 top-1/2 border-t border-dashed border-slate-200 dark:border-slate-700/80"></div>
-          <div class="absolute inset-x-0 bottom-0 border-t border-dashed border-slate-200 dark:border-slate-700/80"></div>
+          <div class="absolute inset-x-0 top-0 border-t border-dashed border-slate-200 dark:border-[#30363d]/80"></div>
+          <div class="absolute inset-x-0 top-1/2 border-t border-dashed border-slate-200 dark:border-[#30363d]/80"></div>
+          <div class="absolute inset-x-0 bottom-0 border-t border-dashed border-slate-200 dark:border-[#30363d]/80"></div>
         </div>
 
         <div class="relative flex h-52 items-end gap-3 overflow-x-auto pb-2">
@@ -71,10 +71,10 @@
               appIcons[getIconCacheKey({ appName: app.app_name, executablePath: app.executable_path })]
             )}
             <div class="min-w-[5.5rem] flex-1">
-              <div class="mb-2 text-center text-[11px] font-medium whitespace-nowrap tabular-nums text-slate-500 dark:text-slate-400">
+              <div class="mb-2 text-center text-[11px] font-medium whitespace-nowrap tabular-nums text-slate-500 dark:text-[#7d8590]">
                 {formatDuration(app.duration)}
               </div>
-              <div class="mx-auto flex h-32 w-12 items-end rounded-2xl bg-slate-100 p-1 dark:bg-slate-700/50">
+              <div class="mx-auto flex h-32 w-12 items-end rounded-2xl bg-slate-100 p-1 dark:bg-[#30363d]/50">
                 <div
                   class="app-usage-chart__bar w-full rounded-2xl transition-all duration-500"
                   style="height: {Math.max((app.duration / maxDuration) * 100, 6)}%; background-color: {colors[i % colors.length]}; opacity: 0.88"
@@ -84,9 +84,9 @@
                 {#if iconSrc}
                   <img src={iconSrc} alt="" class="h-5 w-5 rounded-md object-cover" />
                 {:else}
-                  <span class="inline-flex h-5 w-5 items-center justify-center rounded-md bg-slate-100 text-[10px] text-slate-500 dark:bg-slate-700">{i + 1}</span>
+                  <span class="inline-flex h-5 w-5 items-center justify-center rounded-md bg-slate-100 text-[10px] text-slate-500 dark:bg-[#30363d]">{i + 1}</span>
                 {/if}
-                <span class="min-w-0 truncate text-[11px] font-medium text-slate-600 dark:text-slate-300">{app.app_name}</span>
+                <span class="min-w-0 truncate text-[11px] font-medium text-slate-700 dark:text-[#adbac7]">{app.app_name}</span>
               </div>
             </div>
           {/each}
@@ -104,24 +104,24 @@
           {#if iconSrc}
             <img src={iconSrc} alt="" class="w-5 h-5 rounded-md object-cover" />
           {:else}
-            <span class="w-5 h-5 flex items-center justify-center rounded bg-slate-100 dark:bg-slate-700 text-xs text-slate-500">{i + 1}</span>
+            <span class="w-5 h-5 flex items-center justify-center rounded bg-slate-100 dark:bg-[#30363d] text-xs text-slate-500">{i + 1}</span>
           {/if}
         </div>
-        <span class="w-24 text-xs text-slate-600 dark:text-slate-300 truncate flex-shrink-0">{app.app_name}</span>
-        <div class="flex-1 h-4 bg-slate-100 dark:bg-slate-700/50 rounded-full overflow-hidden">
+        <span class="w-24 text-xs text-slate-700 dark:text-[#adbac7] truncate flex-shrink-0">{app.app_name}</span>
+        <div class="flex-1 h-4 bg-slate-100 dark:bg-[#30363d]/50 rounded-full overflow-hidden">
           <div
             class="h-full rounded-full transition-all duration-500"
             style="width: {Math.max((app.duration / maxDuration) * 100, 2)}%; background-color: {colors[i % colors.length]}; opacity: 0.8"
           ></div>
         </div>
-        <span class="text-xs text-slate-500 dark:text-slate-400 min-w-[5.5rem] text-right flex-shrink-0 whitespace-nowrap tabular-nums">{formatDuration(app.duration)}</span>
+        <span class="text-xs text-slate-500 dark:text-[#7d8590] min-w-[5.5rem] text-right flex-shrink-0 whitespace-nowrap tabular-nums">{formatDuration(app.duration)}</span>
       </div>
     {/each}
   {/if}
 
   {#if hasMore}
     <button
-      class="w-full text-center text-xs text-slate-400 hover:text-primary-500 dark:text-slate-500 dark:hover:text-primary-400 py-1 transition-colors"
+      class="w-full text-center text-xs text-slate-400 hover:text-primary-600 dark:text-[#636c76] dark:hover:text-primary-400 py-1 transition-colors"
       on:click={() => expanded = !expanded}
     >
       {expanded ? t('overview.appUsageCollapse') : t('overview.appUsageExpandAll', { count: data.length })}

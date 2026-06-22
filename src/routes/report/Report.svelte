@@ -608,7 +608,7 @@
           <button
             type="button"
             data-preset-toggle
-            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:border-indigo-300 dark:hover:border-indigo-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-[#484f58] bg-white dark:bg-[#21262d] text-slate-700 dark:text-[#7d8590] hover:border-indigo-300 dark:hover:border-indigo-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
             on:click={(e) => {
               if (showPresetDropdown) {
                 showPresetDropdown = false;
@@ -624,7 +624,7 @@
           </button>
           {#if showPresetDropdown}
             <!-- svelte-ignore a11y-click-events-have-key-events -->
-            <div use:portal data-preset-dropdown style={dropdownStyle} class="z-50 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 shadow-xl overscroll-contain" on:wheel={(e) => { e.stopPropagation(); e.preventDefault(); e.currentTarget.scrollTop += e.deltaY; }} on:touchmove|stopPropagation>
+            <div use:portal data-preset-dropdown style={dropdownStyle} class="z-50 overflow-y-auto rounded-xl border border-slate-200 dark:border-[#484f58] bg-white dark:bg-[#21262d] shadow-xl dark:shadow-[0_12px_32px_rgba(0,0,0,0.5)] overscroll-contain" on:wheel={(e) => { e.stopPropagation(); e.preventDefault(); e.currentTarget.scrollTop += e.deltaY; }} on:touchmove|stopPropagation>
               <div class="py-1.5">
                 {#each (config?.daily_report_prompt_presets || []) as preset, i}
                   {#if pendingDeletePreset === i}
@@ -647,13 +647,13 @@
                         >{t('common.confirm') || '确定'}</button>
                         <button
                           type="button"
-                          class="px-2.5 py-0.5 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 rounded-md border border-slate-200 dark:border-slate-600 transition-colors"
+                          class="px-2.5 py-0.5 text-xs font-medium text-slate-500 dark:text-[#7d8590] hover:text-slate-700 dark:hover:text-[#adbac7] rounded-md border border-slate-200 dark:border-[#484f58] transition-colors"
                           on:click|stopPropagation={() => { pendingDeletePreset = -1; }}
                         >{t('common.cancel') || '取消'}</button>
                       </div>
                     </div>
                   {:else}
-                    <div class="group flex items-center gap-1 mx-1.5 px-1.5 py-0.5 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                    <div class="group flex items-center gap-1 mx-1.5 px-1.5 py-0.5 rounded-lg hover:bg-slate-50 dark:hover:bg-[#30363d]/50 transition-colors">
                       {#if config.daily_report_custom_prompt === preset.prompt}
                         <svg class="w-3.5 h-3.5 text-indigo-500 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
                       {:else}
@@ -661,7 +661,7 @@
                       {/if}
                       <button
                         type="button"
-                        class="flex-1 text-left px-1 py-1.5 text-sm text-slate-700 dark:text-slate-300 truncate transition-colors"
+                        class="flex-1 text-left px-1 py-1.5 text-sm text-slate-700 dark:text-[#adbac7] truncate transition-colors"
                         title={preset.prompt}
                         on:click={() => {
                           config.daily_report_custom_prompt = preset.prompt;
@@ -673,7 +673,7 @@
                       </button>
                       <button
                         type="button"
-                        class="p-1 text-slate-300 hover:text-rose-500 dark:text-slate-600 dark:hover:text-rose-400 rounded-md hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors shrink-0 opacity-0 group-hover:opacity-100"
+                        class="p-1 text-slate-400 hover:text-rose-500 dark:text-[#484f58] dark:hover:text-rose-400 rounded-md hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors shrink-0 opacity-0 group-hover:opacity-100"
                         title="删除"
                         on:click|stopPropagation={() => { pendingDeletePreset = i; }}
                       >
@@ -683,7 +683,7 @@
                   {/if}
                 {/each}
               </div>
-              <div class="border-t border-slate-100 dark:border-slate-700">
+              <div class="border-t border-slate-100 dark:border-[#30363d]">
                 <button
                   type="button"
                   class="w-full text-center px-3 py-2.5 text-sm text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors flex items-center justify-center gap-1.5"
@@ -714,21 +714,21 @@
       ></textarea>
 
       <!-- 系统提示词覆盖 -->
-      <div class="mt-4 pt-3 border-t border-slate-200 dark:border-slate-700">
+      <div class="mt-4 pt-3 border-t border-slate-200 dark:border-[#30363d]">
         <div class="flex items-center justify-between mb-2">
-          <label class="text-sm font-medium text-slate-700 dark:text-slate-300">
+          <label class="text-sm font-medium text-slate-700 dark:text-[#adbac7]">
             {t('report.systemPromptOverride')}
           </label>
           <button
             type="button"
-            class="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition"
+            class="text-xs text-slate-400 hover:text-slate-700 dark:hover:text-[#adbac7] transition"
             on:click={() => { config.daily_report_system_prompt_override = null; }}
             disabled={!config.daily_report_system_prompt_override}
           >
             {t('report.resetSystemPrompt')}
           </button>
         </div>
-        <p class="text-xs text-slate-400 dark:text-slate-500 mb-2">{t('report.systemPromptOverrideHint')}</p>
+        <p class="text-xs text-slate-400 dark:text-[#636c76] mb-2">{t('report.systemPromptOverrideHint')}</p>
         <textarea
           rows="6"
           class="control-input resize-y min-h-[100px] font-mono text-xs"
@@ -800,21 +800,21 @@
         </div>
         {#if freshStats}
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-            <div class="rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5 text-center">
-              <div class="text-[11px] text-slate-500 dark:text-slate-400 mb-0.5">{t('report.statTotalDuration')}</div>
-              <div class="text-sm font-semibold text-slate-800 dark:text-slate-200">{formatDurationLocalized(freshStats.total_duration)}</div>
+            <div class="rounded-lg bg-slate-50 dark:bg-[#21262d]/60 px-3 py-2.5 text-center">
+              <div class="text-[11px] text-slate-500 dark:text-[#7d8590] mb-0.5">{t('report.statTotalDuration')}</div>
+              <div class="text-sm font-semibold text-slate-900 dark:text-[#c9d1d9]">{formatDurationLocalized(freshStats.total_duration)}</div>
             </div>
-            <div class="rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5 text-center">
-              <div class="text-[11px] text-slate-500 dark:text-slate-400 mb-0.5">{t('report.statScreenshots')}</div>
-              <div class="text-sm font-semibold text-slate-800 dark:text-slate-200">{freshStats.screenshot_count}</div>
+            <div class="rounded-lg bg-slate-50 dark:bg-[#21262d]/60 px-3 py-2.5 text-center">
+              <div class="text-[11px] text-slate-500 dark:text-[#7d8590] mb-0.5">{t('report.statScreenshots')}</div>
+              <div class="text-sm font-semibold text-slate-900 dark:text-[#c9d1d9]">{freshStats.screenshot_count}</div>
             </div>
-            <div class="rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5 text-center">
-              <div class="text-[11px] text-slate-500 dark:text-slate-400 mb-0.5">{t('report.statApps')}</div>
-              <div class="text-sm font-semibold text-slate-800 dark:text-slate-200">{freshStats.app_usage?.length ?? 0}</div>
+            <div class="rounded-lg bg-slate-50 dark:bg-[#21262d]/60 px-3 py-2.5 text-center">
+              <div class="text-[11px] text-slate-500 dark:text-[#7d8590] mb-0.5">{t('report.statApps')}</div>
+              <div class="text-sm font-semibold text-slate-900 dark:text-[#c9d1d9]">{freshStats.app_usage?.length ?? 0}</div>
             </div>
-            <div class="rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5 text-center">
-              <div class="text-[11px] text-slate-500 dark:text-slate-400 mb-0.5">{t('report.statWebsites')}</div>
-              <div class="text-sm font-semibold text-slate-800 dark:text-slate-200">{freshStats.domain_usage?.length ?? 0}</div>
+            <div class="rounded-lg bg-slate-50 dark:bg-[#21262d]/60 px-3 py-2.5 text-center">
+              <div class="text-[11px] text-slate-500 dark:text-[#7d8590] mb-0.5">{t('report.statWebsites')}</div>
+              <div class="text-sm font-semibold text-slate-900 dark:text-[#c9d1d9]">{freshStats.domain_usage?.length ?? 0}</div>
             </div>
           </div>
         {/if}
@@ -919,18 +919,18 @@
       </div>
       <div class="modal-body space-y-4">
         <div>
-          <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">{t('report.presetNamePlaceholder')}</label>
+          <label class="block text-xs font-medium text-slate-500 dark:text-[#7d8590] mb-1.5">{t('report.presetNamePlaceholder')}</label>
           <input
             type="text"
-            class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-400 transition-colors"
+            class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-[#484f58] bg-white dark:bg-[#21262d] text-slate-900 dark:text-[#c9d1d9] placeholder-slate-400 dark:placeholder-[#636c76] focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-400 transition-colors"
             placeholder={t('report.presetNamePlaceholder')}
             bind:value={editingPresetName}
           />
         </div>
         <div>
-          <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">{t('report.promptLabel')}</label>
+          <label class="block text-xs font-medium text-slate-500 dark:text-[#7d8590] mb-1.5">{t('report.promptLabel')}</label>
           <textarea
-            class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-400 transition-colors resize-y min-h-[160px] leading-relaxed"
+            class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-[#484f58] bg-white dark:bg-[#21262d] text-slate-900 dark:text-[#c9d1d9] placeholder-slate-400 dark:placeholder-[#636c76] focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-400 transition-colors resize-y min-h-[160px] leading-relaxed"
             placeholder={t('report.presetPromptPlaceholder')}
             bind:value={editingPresetPrompt}
             rows="6"
@@ -939,13 +939,13 @@
       </div>
       <div class="modal-footer">
         <button
-          class="px-4 py-2 text-sm font-medium rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+          class="px-4 py-2 text-sm font-medium rounded-lg text-slate-700 dark:text-[#7d8590] hover:bg-slate-100 dark:hover:bg-[#30363d] transition-colors"
           on:click={() => { showPresetModal = false; }}
         >
           {t('report.cancelEdit')}
         </button>
         <button
-          class="px-4 py-2 text-sm font-medium rounded-lg bg-indigo-500 hover:bg-indigo-600 text-white shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          class="px-4 py-2 text-sm font-medium rounded-lg bg-indigo-500 hover:bg-indigo-600 text-white shadow-sm dark:shadow-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           disabled={!editingPresetName.trim() || !editingPresetPrompt.trim() || presetSaving}
           on:click={async () => {
             if (presetSaving) return;
@@ -994,7 +994,7 @@
         </button>
       </div>
       <div class="modal-body space-y-4">
-        <p class="text-xs text-slate-500 dark:text-slate-400">{t('report.batchExportHint')}</p>
+        <p class="text-xs text-slate-500 dark:text-[#7d8590]">{t('report.batchExportHint')}</p>
 
         <div class="flex flex-wrap gap-2">
           <button class="page-control-btn" on:click={() => applyBatchPreset('thisWeek')}>{t('report.batchPresetThisWeek')}</button>
@@ -1005,35 +1005,35 @@
 
         <div class="grid gap-3 grid-cols-2">
           <label class="block">
-            <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{t('report.batchStartDate')}</span>
+            <span class="text-xs font-medium text-slate-500 dark:text-[#7d8590]">{t('report.batchStartDate')}</span>
             <input
               type="date"
               bind:value={batchStartDate}
               max={getLocalDateString()}
-              class="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+              class="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-[#484f58] bg-white dark:bg-[#21262d] text-slate-900 dark:text-[#c9d1d9] focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
             />
           </label>
           <label class="block">
-            <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{t('report.batchEndDate')}</span>
+            <span class="text-xs font-medium text-slate-500 dark:text-[#7d8590]">{t('report.batchEndDate')}</span>
             <input
               type="date"
               bind:value={batchEndDate}
               max={getLocalDateString()}
-              class="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+              class="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-[#484f58] bg-white dark:bg-[#21262d] text-slate-900 dark:text-[#c9d1d9] focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
             />
           </label>
         </div>
       </div>
       <div class="modal-footer">
         <button
-          class="px-4 py-2 text-sm font-medium rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+          class="px-4 py-2 text-sm font-medium rounded-lg text-slate-700 dark:text-[#7d8590] hover:bg-slate-100 dark:hover:bg-[#30363d] transition-colors"
           on:click={() => { if (!batchExporting) showBatchExportModal = false; }}
           disabled={batchExporting}
         >
           {t('report.cancelEdit')}
         </button>
         <button
-          class="px-4 py-2 text-sm font-medium rounded-lg bg-indigo-500 hover:bg-indigo-600 text-white shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          class="px-4 py-2 text-sm font-medium rounded-lg bg-indigo-500 hover:bg-indigo-600 text-white shadow-sm dark:shadow-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           on:click={exportReportsRange}
           disabled={batchExporting || !batchStartDate || !batchEndDate}
         >

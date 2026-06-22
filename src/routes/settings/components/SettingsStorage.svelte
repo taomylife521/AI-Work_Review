@@ -246,7 +246,7 @@
           config.storage.screenshots_enabled = !config.storage.screenshots_enabled;
           handleChange();
         }}
-        class="switch-track {config.storage.screenshots_enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}"
+        class="switch-track {config.storage.screenshots_enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-[#484f58]'}"
         aria-pressed={config.storage.screenshots_enabled}
       >
         <span class="switch-thumb {config.storage.screenshots_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
@@ -268,7 +268,7 @@
               config.screenshot_interval = Math.max(5, Math.min(600, Number(config.screenshot_interval) || 30));
               handleChange();
             }}
-            class="w-16 rounded-md border border-slate-200 bg-white px-2 py-1 text-center text-sm dark:border-slate-600 dark:bg-slate-800"
+            class="w-16 rounded-md border border-slate-200 bg-white px-2 py-1 text-center text-sm dark:border-[#484f58] dark:bg-[#21262d]"
           />
           <span class="text-xs settings-subtle">{t('settingsStorage.secondsUnit')}</span>
         </div>
@@ -309,7 +309,7 @@
                 }
                 handleChange();
               }}
-              class="rounded border-slate-300 dark:border-slate-600"
+              class="rounded border-slate-300 dark:border-[#484f58]"
             />
             {t('settingsStorage.keepForever')}
           </label>
@@ -324,7 +324,7 @@
                 config.storage.screenshot_retention_days = Math.max(1, Number(config.storage.screenshot_retention_days) || 7);
                 handleChange();
               }}
-              class="w-16 rounded-md border border-slate-200 bg-white px-2 py-1 text-center text-sm dark:border-slate-600 dark:bg-slate-800"
+              class="w-16 rounded-md border border-slate-200 bg-white px-2 py-1 text-center text-sm dark:border-[#484f58] dark:bg-[#21262d]"
             />
           {:else}
             <span class="settings-value">∞</span>
@@ -456,7 +456,7 @@
   <h3 class="settings-card-title">{t('settingsStorage.exportTitle')}</h3>
 
   <div class="settings-block">
-    <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 dark:border-slate-700/80 dark:bg-slate-800/40">
+    <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 dark:border-[#30363d]/80 dark:bg-[#21262d]/40">
       <p class="settings-text">{t('settingsStorage.exportDir')}</p>
       <p class="settings-muted mt-1 break-all">
         {config.daily_report_export_dir || t('settingsStorage.notSet')}
@@ -487,7 +487,7 @@
         </div>
         <button
           type="button"
-          class="switch-track {config.daily_report_auto_export ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'} {!config.daily_report_export_dir ? 'opacity-60 cursor-not-allowed' : ''}"
+          class="switch-track {config.daily_report_auto_export ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-[#484f58]'} {!config.daily_report_export_dir ? 'opacity-60 cursor-not-allowed' : ''}"
           on:click={() => { if (config.daily_report_export_dir) config.daily_report_auto_export = !config.daily_report_auto_export; }}
           disabled={!config.daily_report_export_dir}
         >
@@ -505,14 +505,14 @@
   storageKey="settings.storage.remoteBackup"
 >
   <div class="settings-section space-y-4">
-    <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 dark:border-slate-700/80 dark:bg-slate-800/40">
+    <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 dark:border-[#30363d]/80 dark:bg-[#21262d]/40">
       <div class="flex items-center gap-2 mb-3">
         <div class="flex h-6 w-6 items-center justify-center rounded-md bg-primary-100 dark:bg-primary-900/30">
           <svg class="w-3.5 h-3.5 text-primary-600 dark:text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
           </svg>
         </div>
-        <span class="text-sm font-medium text-slate-700 dark:text-slate-200">{t('settingsStorage.remoteProvider')}</span>
+        <span class="text-sm font-medium text-slate-700 dark:text-[#c9d1d9]">{t('settingsStorage.remoteProvider')}</span>
       </div>
       <div class="flex gap-2">
         {#each [
@@ -539,35 +539,35 @@
     </div>
 
     {#if config.remote_storage?.provider === 's3'}
-      <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 space-y-3 dark:border-slate-700/80 dark:bg-slate-800/40">
+      <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 space-y-3 dark:border-[#30363d]/80 dark:bg-[#21262d]/40">
         <div class="flex items-center gap-2">
           <div class="flex h-6 w-6 items-center justify-center rounded-md bg-amber-100 dark:bg-amber-900/30">
             <svg class="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
             </svg>
           </div>
-          <span class="text-sm font-medium text-slate-700 dark:text-slate-200">S3 / MinIO</span>
+          <span class="text-sm font-medium text-slate-700 dark:text-[#c9d1d9]">S3 / MinIO</span>
           <span class="settings-chip-success">{t('settingsStorage.remoteProviderS3')}</span>
         </div>
 
         <div class="grid gap-2 grid-cols-2">
           <label class="block">
-            <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.s3Endpoint')}</span>
+            <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('settingsStorage.s3Endpoint')}</span>
             <input
               type="text"
               bind:value={config.remote_storage.s3.endpoint}
               on:blur={handleChange}
-              class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+              class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
               placeholder={t('settingsStorage.s3EndpointHint')}
             />
           </label>
           <label class="block">
-            <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.s3Bucket')}</span>
+            <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('settingsStorage.s3Bucket')}</span>
             <input
               type="text"
               bind:value={config.remote_storage.s3.bucket}
               on:blur={handleChange}
-              class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+              class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
               placeholder="my-bucket"
             />
           </label>
@@ -575,14 +575,14 @@
 
         <div class="grid gap-2 grid-cols-2">
           <label class="block">
-            <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.s3AccessKey')}</span>
+            <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('settingsStorage.s3AccessKey')}</span>
             <div class="mt-0.5 relative">
               {#if s3AccessKeyVisible}
                 <input
                   type="text"
                   bind:value={config.remote_storage.s3.access_key}
                   on:blur={handleChange}
-                  class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                  class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
                   placeholder="Access Key"
                   autocomplete="off"
                 />
@@ -591,14 +591,14 @@
                   type="password"
                   bind:value={config.remote_storage.s3.access_key}
                   on:blur={handleChange}
-                  class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                  class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
                   placeholder="Access Key"
                   autocomplete="off"
                 />
               {/if}
               <button
                 type="button"
-                class="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                class="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-[#adbac7]"
                 on:click={() => (s3AccessKeyVisible = !s3AccessKeyVisible)}
               >
                 {#if s3AccessKeyVisible}
@@ -610,14 +610,14 @@
             </div>
           </label>
           <label class="block">
-            <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.s3SecretKey')}</span>
+            <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('settingsStorage.s3SecretKey')}</span>
             <div class="mt-0.5 relative">
               {#if s3SecretKeyVisible}
                 <input
                   type="text"
                   bind:value={config.remote_storage.s3.secret_key}
                   on:blur={handleChange}
-                  class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                  class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
                   placeholder="Secret Key"
                   autocomplete="off"
                 />
@@ -626,14 +626,14 @@
                   type="password"
                   bind:value={config.remote_storage.s3.secret_key}
                   on:blur={handleChange}
-                  class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                  class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
                   placeholder="Secret Key"
                   autocomplete="off"
                 />
               {/if}
               <button
                 type="button"
-                class="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                class="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-[#adbac7]"
                 on:click={() => (s3SecretKeyVisible = !s3SecretKeyVisible)}
               >
                 {#if s3SecretKeyVisible}
@@ -648,40 +648,40 @@
 
         <div class="grid gap-2 grid-cols-2">
           <label class="block">
-            <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.s3Region')}</span>
+            <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('settingsStorage.s3Region')}</span>
             <input
               type="text"
               bind:value={config.remote_storage.s3.region}
               on:blur={handleChange}
-              class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+              class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
               placeholder="us-east-1"
             />
           </label>
           <label class="block">
-            <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.s3PathPrefix')}</span>
+            <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('settingsStorage.s3PathPrefix')}</span>
             <input
               type="text"
               bind:value={config.remote_storage.s3.path_prefix}
               on:blur={handleChange}
-              class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+              class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
               placeholder={t('settingsStorage.s3PathPrefixHint')}
             />
           </label>
         </div>
 
         <label class="block">
-          <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.s3PublicUrlBase')}</span>
+          <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('settingsStorage.s3PublicUrlBase')}</span>
           <input
             type="text"
             bind:value={config.remote_storage.s3.public_url_base}
             on:blur={handleChange}
-            class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+            class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
             placeholder={t('settingsStorage.s3PublicUrlBaseHint')}
           />
         </label>
 
         <div class="flex items-center justify-between pt-1">
-          <p class="text-[11px] text-slate-400 dark:text-slate-500">{t('settingsStorage.publicUrlBaseEffectHint')}</p>
+          <p class="text-[11px] text-slate-400 dark:text-[#636c76]">{t('settingsStorage.publicUrlBaseEffectHint')}</p>
           <button
             type="button"
             class="settings-action-secondary"
@@ -695,48 +695,48 @@
     {/if}
 
     {#if config.remote_storage?.provider === 'webdav'}
-      <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 space-y-3 dark:border-slate-700/80 dark:bg-slate-800/40">
+      <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 space-y-3 dark:border-[#30363d]/80 dark:bg-[#21262d]/40">
         <div class="flex items-center gap-2">
           <div class="flex h-6 w-6 items-center justify-center rounded-md bg-blue-100 dark:bg-blue-900/30">
             <svg class="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
             </svg>
           </div>
-          <span class="text-sm font-medium text-slate-700 dark:text-slate-200">WebDAV</span>
+          <span class="text-sm font-medium text-slate-700 dark:text-[#c9d1d9]">WebDAV</span>
           <span class="settings-chip-success">{t('settingsStorage.remoteProviderWebDav')}</span>
         </div>
 
         <label class="block">
-          <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.webdavUrl')}</span>
+          <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('settingsStorage.webdavUrl')}</span>
           <input
             type="text"
             bind:value={config.remote_storage.webdav.url}
             on:blur={handleChange}
-            class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+            class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
             placeholder={t('settingsStorage.webdavUrlHint')}
           />
         </label>
 
         <div class="grid gap-2 grid-cols-2">
           <label class="block">
-            <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.webdavUsername')}</span>
+            <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('settingsStorage.webdavUsername')}</span>
             <input
               type="text"
               bind:value={config.remote_storage.webdav.username}
               on:blur={handleChange}
-              class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+              class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
               placeholder="username"
             />
           </label>
           <label class="block">
-            <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.webdavPassword')}</span>
+            <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('settingsStorage.webdavPassword')}</span>
             <div class="mt-0.5 relative">
               {#if webdavPasswordVisible}
                 <input
                   type="text"
                   bind:value={config.remote_storage.webdav.password}
                   on:blur={handleChange}
-                  class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                  class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
                   placeholder="password"
                   autocomplete="off"
                 />
@@ -745,14 +745,14 @@
                   type="password"
                   bind:value={config.remote_storage.webdav.password}
                   on:blur={handleChange}
-                  class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                  class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
                   placeholder="password"
                   autocomplete="off"
                 />
               {/if}
               <button
                 type="button"
-                class="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                class="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-[#adbac7]"
                 on:click={() => (webdavPasswordVisible = !webdavPasswordVisible)}
               >
                 {#if webdavPasswordVisible}
@@ -766,29 +766,29 @@
         </div>
 
         <label class="block">
-          <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.webdavPathPrefix')}</span>
+          <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('settingsStorage.webdavPathPrefix')}</span>
           <input
             type="text"
             bind:value={config.remote_storage.webdav.path_prefix}
             on:blur={handleChange}
-            class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+            class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
             placeholder={t('settingsStorage.webdavPathPrefixHint')}
           />
         </label>
 
         <label class="block">
-          <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.webdavPublicUrlBase')}</span>
+          <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('settingsStorage.webdavPublicUrlBase')}</span>
           <input
             type="text"
             bind:value={config.remote_storage.webdav.public_url_base}
             on:blur={handleChange}
-            class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+            class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
             placeholder={t('settingsStorage.webdavPublicUrlBaseHint')}
           />
         </label>
 
         <div class="flex items-center justify-between pt-1">
-          <p class="text-[11px] text-slate-400 dark:text-slate-500">{t('settingsStorage.publicUrlBaseEffectHint')}</p>
+          <p class="text-[11px] text-slate-400 dark:text-[#636c76]">{t('settingsStorage.publicUrlBaseEffectHint')}</p>
           <button
             type="button"
             class="settings-action-secondary"
@@ -808,7 +808,7 @@
 
   <div class="settings-section">
     <div class="settings-block">
-      <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 dark:border-slate-700/80 dark:bg-slate-800/40">
+      <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 dark:border-[#30363d]/80 dark:bg-[#21262d]/40">
         <div class="grid gap-4 md:grid-cols-2">
           <div>
             <p class="settings-text">{t('settingsStorage.currentDir')}</p>
@@ -883,16 +883,16 @@
 
     {#if storageStats}
       <div class="settings-block">
-        <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 dark:border-slate-700/80 dark:bg-slate-800/40">
+        <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 dark:border-[#30363d]/80 dark:bg-[#21262d]/40">
           <div class="mb-5">
             <div class="mb-2 flex items-end justify-between">
               <div>
-                <span class="text-2xl font-bold text-slate-800 dark:text-white">{storageStats.total_size_mb}</span>
+                <span class="text-2xl font-bold text-slate-900 dark:text-[#e6edf3]">{storageStats.total_size_mb}</span>
                 <span class="settings-muted"> / {config.storage.storage_limit_mb} MB</span>
               </div>
               <span class="text-sm font-medium {usagePercent > 80 ? 'settings-text-danger' : 'settings-muted'}">{usagePercent}%</span>
             </div>
-            <div class="h-2.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700">
+            <div class="h-2.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-[#30363d]">
               <div
                 class="h-full rounded-full transition-all duration-500 {usageColor}"
                 style="width: {usagePercent}%"
@@ -900,7 +900,7 @@
             </div>
           </div>
           <div class="mb-4 flex items-center justify-between gap-3">
-            <span class="text-xs text-slate-500 dark:text-slate-400">{t('settingsStorage.storageLimitLabel')}</span>
+            <span class="text-xs text-slate-500 dark:text-[#7d8590]">{t('settingsStorage.storageLimitLabel')}</span>
             <div class="flex items-center gap-1.5">
               <input
                 type="number"
@@ -912,23 +912,23 @@
                   config.storage.storage_limit_mb = Math.max(256, Number(config.storage.storage_limit_mb) || 2048);
                   handleChange();
                 }}
-                class="w-24 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-right text-sm font-mono text-slate-700 ring-1 ring-slate-200 focus:ring-primary-300 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                class="w-24 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-right text-sm font-mono text-slate-700 ring-1 ring-slate-200 focus:ring-primary-300 dark:border-[#484f58] dark:bg-[#21262d] dark:text-[#c9d1d9] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
               />
-              <span class="text-xs text-slate-400 dark:text-slate-500">MB</span>
+              <span class="text-xs text-slate-400 dark:text-[#636c76]">MB</span>
             </div>
           </div>
 
           <div class="grid grid-cols-3 gap-3">
-            <div class="rounded-xl bg-white/70 p-3 text-center ring-1 ring-slate-200/70 dark:bg-slate-900/20 dark:ring-slate-700/70">
-              <p class="text-xl font-bold text-slate-800 dark:text-white">{storageStats.total_files}</p>
+            <div class="rounded-xl bg-white/70 p-3 text-center ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
+              <p class="text-xl font-bold text-slate-900 dark:text-[#e6edf3]">{storageStats.total_files}</p>
               <p class="settings-muted mt-0.5">{t('settingsStorage.screenshotsCount')}</p>
             </div>
-            <div class="rounded-xl bg-white/70 p-3 text-center ring-1 ring-slate-200/70 dark:bg-slate-900/20 dark:ring-slate-700/70">
-              <p class="text-xl font-bold text-slate-800 dark:text-white">{storageStats.total_size_mb} MB</p>
+            <div class="rounded-xl bg-white/70 p-3 text-center ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
+              <p class="text-xl font-bold text-slate-900 dark:text-[#e6edf3]">{storageStats.total_size_mb} MB</p>
               <p class="settings-muted mt-0.5">{t('settingsStorage.usedSpace')}</p>
             </div>
-            <div class="rounded-xl bg-white/70 p-3 text-center ring-1 ring-slate-200/70 dark:bg-slate-900/20 dark:ring-slate-700/70">
-              <p class="text-xl font-bold text-slate-800 dark:text-white">{storageRetentionLabel}</p>
+            <div class="rounded-xl bg-white/70 p-3 text-center ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
+              <p class="text-xl font-bold text-slate-900 dark:text-[#e6edf3]">{storageRetentionLabel}</p>
               <p class="settings-muted mt-0.5">{t('settingsStorage.retentionPeriod')}</p>
             </div>
           </div>

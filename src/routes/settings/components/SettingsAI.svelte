@@ -377,7 +377,7 @@
 
 <!-- AI 模型配置 -->
 {#if isAiMode}
-  <div class="settings-block pt-3 border-t border-slate-200 dark:border-slate-700">
+  <div class="settings-block pt-3 border-t border-slate-200 dark:border-[#30363d]">
     <!-- 提供商 -->
     <div>
       <label for="ai-provider" class="settings-label mb-1.5">{t('settingsAI.provider')}</label>
@@ -432,7 +432,7 @@
           {/if}
           <button
             type="button"
-            class="absolute inset-y-0 right-3 inline-flex items-center justify-center text-slate-400 transition hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+            class="absolute inset-y-0 right-3 inline-flex items-center justify-center text-slate-400 transition hover:text-slate-700 dark:text-[#636c76] dark:hover:text-[#adbac7]"
             aria-label={showApiKey ? t('settingsAI.hideApiKey') : t('settingsAI.showApiKey')}
             title={showApiKey ? t('settingsAI.hideApiKey') : t('settingsAI.showApiKey')}
             on:click={() => showApiKey = !showApiKey}
@@ -550,7 +550,7 @@
     {/if}
   </div>
 {:else}
-  <div class="pt-3 border-t border-slate-200 dark:border-slate-700">
+  <div class="pt-3 border-t border-slate-200 dark:border-[#30363d]">
     <p class="settings-empty">{t('settingsAI.aiModeDisabled')}</p>
   </div>
 {/if}

@@ -26,17 +26,17 @@
   };
 
   $: cardClass = embedded
-    ? 'block min-h-[108px] rounded-[22px] bg-slate-50/88 px-4 py-4 dark:bg-slate-900/30'
-    : 'block min-h-[116px] rounded-2xl border border-slate-100 bg-white p-5 dark:border-slate-700/60 dark:bg-slate-800/80';
+    ? 'block min-h-[108px] rounded-[22px] bg-slate-50/88 px-4 py-4 dark:bg-[#161b22]/30'
+    : 'block min-h-[116px] rounded-2xl border border-slate-100 bg-white p-5 dark:border-[#30363d]/60 dark:bg-[#21262d]/80';
   $: iconClass = embedded
     ? `flex h-10 w-10 items-center justify-center rounded-2xl ${iconBgs[color]} ${iconColors[color]} shrink-0`
-    : `flex h-11 w-11 items-center justify-center rounded-2xl border border-white/80 shadow-sm dark:border-slate-700/80 ${iconBgs[color]} ${iconColors[color]} shrink-0`;
+    : `flex h-11 w-11 items-center justify-center rounded-2xl border border-white/80 shadow-sm dark:shadow-none dark:border-[#30363d]/80 ${iconBgs[color]} ${iconColors[color]} shrink-0`;
   $: valueClass = embedded
-    ? 'mt-4 text-[1.9rem] font-semibold tracking-tight leading-none text-slate-800 dark:text-white'
-    : 'mt-6 text-[2.15rem] font-semibold tracking-tight leading-none text-slate-800 dark:text-white';
+    ? 'mt-4 text-[1.9rem] font-semibold tracking-tight leading-none text-slate-900 dark:text-[#e6edf3]'
+    : 'mt-6 text-[2.15rem] font-semibold tracking-tight leading-none text-slate-900 dark:text-[#e6edf3]';
   $: interactiveClass = embedded
     ? 'transition-all duration-200 hover:bg-slate-100/90 hover:-translate-y-0.5 dark:hover:bg-slate-900/50'
-    : 'transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 cursor-pointer group';
+    : 'transition-all duration-200 hover:shadow-md dark:shadow-[0_4px_12px_rgba(0,0,0,0.4)] hover:-translate-y-0.5 cursor-pointer group';
 </script>
 
 {#if href}
@@ -46,10 +46,10 @@
   >
     <div class="flex h-full items-center justify-between gap-4">
       <div class="min-w-0 flex-1">
-        <span class="text-[13px] font-medium text-slate-400 dark:text-slate-500 leading-none">{title}</span>
+        <span class="text-[13px] font-medium text-slate-400 dark:text-[#636c76] leading-none">{title}</span>
         <p class={valueClass}>{value}</p>
         {#if subtitle}
-          <p class="mt-1.5 text-xs font-medium leading-none text-slate-400 dark:text-slate-500">{subtitle}</p>
+          <p class="mt-1.5 text-xs font-medium leading-none text-slate-400 dark:text-[#636c76]">{subtitle}</p>
         {/if}
       </div>
       <div class={iconClass}>
@@ -82,10 +82,10 @@
   <div class={cardClass}>
     <div class="flex h-full items-center justify-between gap-4">
       <div class="min-w-0 flex-1">
-        <span class="text-[13px] font-medium text-slate-400 dark:text-slate-500 leading-none">{title}</span>
+        <span class="text-[13px] font-medium text-slate-400 dark:text-[#636c76] leading-none">{title}</span>
         <p class={valueClass}>{value}</p>
         {#if subtitle}
-          <p class="mt-1.5 text-xs font-medium leading-none text-slate-400 dark:text-slate-500">{subtitle}</p>
+          <p class="mt-1.5 text-xs font-medium leading-none text-slate-400 dark:text-[#636c76]">{subtitle}</p>
         {/if}
       </div>
       <div class={iconClass}>

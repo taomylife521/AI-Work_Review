@@ -112,31 +112,31 @@
   })();
   $: yAxisTicks = [axisMax, Math.round(axisMax * 2 / 3), Math.round(axisMax / 3), 0];
   $: summaryCardClass = embedded
-    ? 'min-h-[88px] rounded-[22px] bg-slate-50/90 px-2 py-3 text-center dark:bg-slate-900/30'
-    : 'min-h-[104px] rounded-2xl border border-slate-100 bg-white p-4 text-center dark:border-slate-700/60 dark:bg-slate-800/80';
+    ? 'min-h-[88px] rounded-[22px] bg-slate-50/90 px-2 py-3 text-center dark:bg-[#161b22]/30'
+    : 'min-h-[104px] rounded-2xl border border-slate-100 bg-white p-4 text-center dark:border-[#30363d]/60 dark:bg-[#21262d]/80';
   $: summaryValueClass =
-    'mt-2 text-center text-base font-semibold tracking-tight text-slate-800 dark:text-white leading-tight';
+    'mt-2 text-center text-base font-semibold tracking-tight text-slate-900 dark:text-[#e6edf3] leading-tight';
   $: chartShellClass = embedded
     ? 'rounded-[24px] bg-transparent p-0'
-    : 'rounded-2xl border border-slate-100 bg-white p-4 dark:border-slate-700/60 dark:bg-slate-800/80';
+    : 'rounded-2xl border border-slate-100 bg-white p-4 dark:border-[#30363d]/60 dark:bg-[#21262d]/80';
 </script>
 
 <div class="space-y-4" data-locale={currentLocale}>
   <div class="grid grid-cols-4 gap-2">
     <div class={summaryCardClass}>
-      <p class="text-[13px] font-medium text-slate-400 dark:text-slate-500">{peakHourLabel || t('hourlyChart.peakHour')}</p>
+      <p class="text-[13px] font-medium text-slate-400 dark:text-[#636c76]">{peakHourLabel || t('hourlyChart.peakHour')}</p>
       <p class={summaryValueClass}>
         {formatHourLabel(peakBucket.hour)}
       </p>
     </div>
     <div class={summaryCardClass}>
-      <p class="text-[13px] font-medium text-slate-400 dark:text-slate-500">{peakDurationLabel || t('hourlyChart.peakDuration')}</p>
+      <p class="text-[13px] font-medium text-slate-400 dark:text-[#636c76]">{peakDurationLabel || t('hourlyChart.peakDuration')}</p>
       <p class={summaryValueClass}>
         {formatCompact(peakBucket.duration)}
       </p>
     </div>
     <div class={summaryCardClass}>
-      <p class="text-[13px] font-medium text-slate-400 dark:text-slate-500">{t('hourlyChart.activeHours')}</p>
+      <p class="text-[13px] font-medium text-slate-400 dark:text-[#636c76]">{t('hourlyChart.activeHours')}</p>
       <p class={summaryValueClass}>
         {activeBuckets.length}
       </p>
@@ -146,15 +146,15 @@
         {@const goalSecs = workGoalMinutes * 60}
         {@const pct = Math.min(100, Math.round((workDuration / goalSecs) * 100))}
         {@const reached = workDuration >= goalSecs}
-        <p class="text-[13px] font-medium {reached ? 'text-emerald-500' : 'text-slate-400 dark:text-slate-500'}">{t('hourlyChart.workGoal')}</p>
+        <p class="text-[13px] font-medium {reached ? 'text-emerald-500' : 'text-slate-400 dark:text-[#636c76]'}">{t('hourlyChart.workGoal')}</p>
         <p class={summaryValueClass}>
           {formatCompact(workDuration)} <span class="text-[0.7em] text-slate-400">/ {formatCompact(goalSecs)}</span>
         </p>
-        <div class="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+        <div class="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-[#30363d]">
           <div class={`h-full rounded-full transition-all duration-500 ${reached ? 'bg-emerald-500' : 'bg-primary-500'}`} style={`width: ${pct}%;`}></div>
         </div>
       {:else}
-        <p class="text-[13px] font-medium text-slate-400 dark:text-slate-500">{t('hourlyChart.totalDuration')}</p>
+        <p class="text-[13px] font-medium text-slate-400 dark:text-[#636c76]">{t('hourlyChart.totalDuration')}</p>
         <p class={summaryValueClass}>
           {formatCompact(totalDuration)}
         </p>
@@ -165,10 +165,10 @@
   <div class={chartShellClass}>
     <div class="mb-4 flex items-center justify-between gap-3">
       <div>
-        <p class="text-sm font-semibold text-slate-700 dark:text-slate-200">
+        <p class="text-sm font-semibold text-slate-700 dark:text-[#c9d1d9]">
           {distributionTitle || t('hourlyChart.distributionTitle')}
         </p>
-        <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+        <p class="mt-1 text-xs text-slate-500 dark:text-[#7d8590]">
           {t(distributionSubtitleKey, {
             hour: formatHourLabel(peakBucket.hour),
             duration: formatDurationLocalized(peakBucket.duration),
@@ -178,7 +178,7 @@
       {#if topBuckets.length > 0}
         <div class="hidden items-center gap-2 lg:flex">
           {#each topBuckets as bucket, index}
-            <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-500 dark:bg-slate-700/70 dark:text-slate-300">
+            <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-500 dark:bg-[#30363d]/70 dark:text-[#adbac7]">
               {t('hourlyChart.topHour', { index: index + 1, hour: formatHourLabel(bucket.hour) })}
             </span>
           {/each}
@@ -188,7 +188,7 @@
     {#if usedCategories.length}
       <div class="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
         {#each usedCategories as cat}
-          <span class="inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+          <span class="inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-[#7d8590]">
             <span class="inline-block h-2.5 w-2.5 rounded-[3px]" style={`background: ${(categoryColors && categoryColors[cat.category]) || '#94a3b8'};`}></span>
             {(categoryNames && categoryNames[cat.category]) || cat.category}
           </span>
@@ -197,18 +197,18 @@
     {/if}
 
     {#if mode === 'row'}
-      <div class="space-y-2 rounded-2xl bg-slate-50 p-3 dark:bg-slate-900/40">
+      <div class="space-y-2 rounded-2xl bg-slate-50 p-3 dark:bg-[#161b22]/40">
         {#each buckets as bucket}
           {@const width = bucket.duration > 0 ? Math.max((bucket.duration / maxDuration) * 100, 3) : 1}
           {@const isPeak = bucket.duration > 0 && bucket.hour === peakBucket.hour}
           <button
             type="button"
-            class={`grid w-full grid-cols-[3.25rem_minmax(0,1fr)_4.75rem] items-center gap-2 rounded-xl px-1.5 py-1 text-left transition-colors duration-200 ${selectedHour === bucket.hour ? 'bg-sky-50 dark:bg-sky-500/10' : 'hover:bg-white/70 dark:hover:bg-slate-800/60'}`}
+            class={`grid w-full grid-cols-[3.25rem_minmax(0,1fr)_4.75rem] items-center gap-2 rounded-xl px-1.5 py-1 text-left transition-colors duration-200 ${selectedHour === bucket.hour ? 'bg-sky-50 dark:bg-sky-500/10' : 'hover:bg-white/70 dark:hover:bg-[#21262d]/60'}`}
             aria-pressed={selectedHour === bucket.hour}
             on:click={() => selectHour(bucket.hour)}
           >
-            <span class="text-[11px] font-medium text-slate-500 dark:text-slate-400">{formatHourLabel(bucket.hour)}</span>
-            <div class="h-3 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700/60">
+            <span class="text-[11px] font-medium text-slate-500 dark:text-[#7d8590]">{formatHourLabel(bucket.hour)}</span>
+            <div class="h-3 overflow-hidden rounded-full bg-slate-200 dark:bg-[#30363d]/60">
               {#if categoryMode && bucket.duration > 0}
                 <div class="flex h-full" style={`width: ${width}%;`}>
                   {#each (categoryBreakdown?.[bucket.hour] || []) as seg}
@@ -221,22 +221,22 @@
                 </div>
               {:else}
                 <div
-                  class={`h-full rounded-full transition-all duration-300 ${isPeak ? 'bg-sky-500 dark:bg-sky-400' : 'bg-slate-400 dark:bg-slate-500'}`}
+                  class={`h-full rounded-full transition-all duration-300 ${isPeak ? 'bg-sky-500 dark:bg-sky-400' : 'bg-slate-400 dark:bg-[#636c76]'}`}
                   style={`width: ${width}%; opacity: ${bucket.duration > 0 ? 1 : 0.35};`}
                   title={`${formatHourRangeLabel(bucket.hour)} · ${formatDurationLocalized(bucket.duration)}`}
                 ></div>
               {/if}
             </div>
-            <span class="text-right text-[11px] font-medium tabular-nums text-slate-500 dark:text-slate-400">{formatCompact(bucket.duration)}</span>
+            <span class="text-right text-[11px] font-medium tabular-nums text-slate-500 dark:text-[#7d8590]">{formatCompact(bucket.duration)}</span>
           </button>
           {#if selectedHour === bucket.hour && bucket.duration > 0}
             {@const hourApps = (appBreakdown?.find(b => b.hour === bucket.hour)?.apps || [])
               .slice().sort((a, b) => b.duration - a.duration).slice(0, 5)}
-            <div class="ml-[3.5rem] mr-[5rem] mb-1 rounded-lg bg-white/80 px-3 py-2 ring-1 ring-slate-200/60 dark:bg-slate-800/60 dark:ring-slate-700/60">
+            <div class="ml-[3.5rem] mr-[5rem] mb-1 rounded-lg bg-white/80 px-3 py-2 ring-1 ring-slate-200/60 dark:bg-[#21262d]/60 dark:ring-[#30363d]/60">
               {#if hourApps.length > 0}
                 <div class="flex flex-wrap gap-x-3 gap-y-1">
                   {#each hourApps as app}
-                    <span class="inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+                    <span class="inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-[#7d8590]">
                       <span class="inline-block h-2 w-2 rounded-sm" style={`background: ${(categoryColors && categoryColors[app.category]) || '#94a3b8'};`}></span>
                       <span>{app.app_name}</span>
                       <span class="tabular-nums text-slate-400">{formatCompact(app.duration)}</span>
@@ -249,21 +249,21 @@
         {/each}
       </div>
     {:else}
-      <div class="overflow-hidden rounded-2xl bg-slate-50 px-3 pb-3 pt-4 dark:bg-slate-900/40">
+      <div class="overflow-hidden rounded-2xl bg-slate-50 px-3 pb-3 pt-4 dark:bg-[#161b22]/40">
         <div class="grid grid-cols-[2.9rem_minmax(0,1fr)] gap-2">
           <div class="relative h-44">
             {#each yAxisTicks as tick, index}
-              <div class="absolute inset-x-0 flex -translate-y-1/2 items-center justify-end text-[10px] font-medium text-slate-400 dark:text-slate-500" style={`top: ${(index / 3) * 100}%`}>
+              <div class="absolute inset-x-0 flex -translate-y-1/2 items-center justify-end text-[10px] font-medium text-slate-400 dark:text-[#636c76]" style={`top: ${(index / 3) * 100}%`}>
                 <span class="whitespace-nowrap">{formatAxisTickLabel(tick)}</span>
               </div>
             {/each}
           </div>
           <div class="relative">
             <div class="pointer-events-none absolute inset-x-0 top-0 bottom-8">
-              <div class="absolute inset-x-0 top-0 border-t border-dashed border-slate-200 dark:border-slate-700/80"></div>
-              <div class="absolute inset-x-0 top-1/3 border-t border-dashed border-slate-200 dark:border-slate-700/80"></div>
-              <div class="absolute inset-x-0 top-2/3 border-t border-dashed border-slate-200 dark:border-slate-700/80"></div>
-              <div class="absolute inset-x-0 bottom-0 border-t border-dashed border-slate-200 dark:border-slate-700/80"></div>
+              <div class="absolute inset-x-0 top-0 border-t border-dashed border-slate-200 dark:border-[#30363d]/80"></div>
+              <div class="absolute inset-x-0 top-1/3 border-t border-dashed border-slate-200 dark:border-[#30363d]/80"></div>
+              <div class="absolute inset-x-0 top-2/3 border-t border-dashed border-slate-200 dark:border-[#30363d]/80"></div>
+              <div class="absolute inset-x-0 bottom-0 border-t border-dashed border-slate-200 dark:border-[#30363d]/80"></div>
             </div>
 
             <div class="relative flex h-44 items-end gap-1">
@@ -273,7 +273,7 @@
                 <div class="relative flex h-full min-w-0 flex-1 flex-col justify-end">
                   <button
                     type="button"
-                    class={`w-full overflow-hidden transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-sky-300 dark:focus:ring-sky-500 ${selectedHour === bucket.hour ? 'ring-2 ring-sky-300 dark:focus:ring-sky-500' : ''} ${categoryMode && bucket.duration > 0 ? '' : isPeak ? 'bg-sky-500 dark:bg-sky-400' : 'bg-slate-300 dark:bg-slate-600'}`}
+                    class={`w-full overflow-hidden transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-sky-300 dark:focus:ring-sky-500 ${selectedHour === bucket.hour ? 'ring-2 ring-sky-300 dark:focus:ring-sky-500' : ''} ${categoryMode && bucket.duration > 0 ? '' : isPeak ? 'bg-sky-500 dark:bg-sky-400' : 'bg-slate-300 dark:bg-[#484f58]'}`}
                     style={`height: ${height}%; opacity: ${bucket.duration > 0 ? 1 : 0.35}; border-top-left-radius: 10px; border-top-right-radius: 10px;`}
                     title={`${formatHourRangeLabel(bucket.hour)} · ${formatDurationLocalized(bucket.duration)}`}
                     aria-pressed={selectedHour === bucket.hour}
@@ -295,7 +295,7 @@
               {#each buckets as bucket}
                 <div class="flex-1">
                   <div class={`flex w-full ${hourAxisLabelAlignmentClass(bucket.hour)}`}>
-                  <span class={`text-[10px] font-medium ${showHourLabel(bucket.hour) ? 'text-slate-400 dark:text-slate-500' : 'text-transparent'}`}>
+                  <span class={`text-[10px] font-medium ${showHourLabel(bucket.hour) ? 'text-slate-400 dark:text-[#636c76]' : 'text-transparent'}`}>
                     {showHourLabel(bucket.hour) ? formatHourLabel(bucket.hour) : '.'}
                   </span>
                   </div>
@@ -311,20 +311,20 @@
           .slice().sort((a, b) => b.duration - a.duration).slice(0, 5)}
         <div class="mt-3 rounded-2xl bg-sky-50 px-3.5 py-3 text-left dark:bg-sky-500/10">
           <div class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
-            <span class="inline-flex items-center rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold tracking-[0.08em] text-sky-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-slate-900/80 dark:text-sky-300 dark:shadow-none">
+            <span class="inline-flex items-center rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold tracking-[0.08em] text-sky-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-[#161b22]/80 dark:text-sky-300 dark:shadow-none">
               当前选中
             </span>
-            <span class="min-w-0 truncate text-sm font-medium text-slate-700 dark:text-slate-200">
+            <span class="min-w-0 truncate text-sm font-medium text-slate-700 dark:text-[#c9d1d9]">
               {formatHourRangeLabel(selectedBucket.hour)}
             </span>
-            <span class="text-sm font-semibold tabular-nums text-slate-500 dark:text-slate-300">
+            <span class="text-sm font-semibold tabular-nums text-slate-500 dark:text-[#adbac7]">
               {formatCompact(selectedBucket.duration)}
             </span>
           </div>
           {#if hourApps.length > 0}
             <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1">
               {#each hourApps as app}
-                <span class="inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+                <span class="inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-[#7d8590]">
                   <span class="inline-block h-2 w-2 rounded-sm" style={`background: ${(categoryColors && categoryColors[app.category]) || '#94a3b8'};`}></span>
                   <span>{app.app_name}</span>
                   <span class="tabular-nums text-slate-400">{formatCompact(app.duration)}</span>

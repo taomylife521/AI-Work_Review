@@ -157,7 +157,7 @@
     },
     coach: {
       badgeClass: 'bg-amber-500/14 text-amber-800',
-      primaryClass: 'bg-amber-500 hover:bg-amber-600 text-slate-950',
+      primaryClass: 'bg-amber-500 hover:bg-amber-600 text-slate-900',
       surfaceClass: 'border-amber-200/95 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(255,251,235,0.98))]',
       strategyKey: 'settingsAppearance.avatarFollowupCoachStrategy',
       focusKey: 'settingsAppearance.avatarFollowupFocusCoach',

@@ -31,7 +31,7 @@
 {#if dialogState}
   <div class="fixed inset-0 z-[200] flex items-center justify-center px-4 py-6 bg-slate-950/48 backdrop-blur-md animate-fadeIn">
     <div
-      class="w-full max-w-md rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl shadow-slate-950/24 dark:shadow-black/50 p-6"
+      class="w-full max-w-md rounded-3xl border border-slate-200 dark:border-[#30363d] bg-white dark:bg-[#161b22] shadow-2xl shadow-slate-950/24 dark:shadow-black/50 p-6"
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirm-dialog-title"
@@ -43,10 +43,10 @@
           </svg>
         </div>
         <div class="min-w-0 flex-1">
-          <h3 id="confirm-dialog-title" class="text-lg font-semibold tracking-tight text-slate-800 dark:text-white">
+          <h3 id="confirm-dialog-title" class="text-lg font-semibold tracking-tight text-slate-900 dark:text-[#e6edf3]">
             {dialogState.title}
           </h3>
-          <p class="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400 whitespace-pre-line">
+          <p class="mt-2 text-sm leading-6 text-slate-500 dark:text-[#7d8590] whitespace-pre-line">
             {dialogState.message}
           </p>
         </div>
@@ -56,7 +56,7 @@
         <button
           type="button"
           on:click={() => resolveConfirm(false)}
-          class="inline-flex min-h-11 items-center justify-center rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-5 text-sm font-medium text-slate-600 dark:text-slate-300 transition-colors hover:bg-slate-50 dark:hover:bg-slate-700"
+          class="inline-flex min-h-11 items-center justify-center rounded-2xl border border-slate-200 dark:border-[#30363d] bg-white dark:bg-[#21262d] px-5 text-sm font-medium text-slate-700 dark:text-[#adbac7] transition-colors hover:bg-slate-50 dark:hover:bg-[#30363d]"
         >
           {dialogState.cancelText}
         </button>

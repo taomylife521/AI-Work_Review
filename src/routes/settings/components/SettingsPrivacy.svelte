@@ -159,7 +159,7 @@
           <!-- 策略选择：分段按钮 -->
           <div class="settings-field mb-3">
             <span class="settings-label">{t('settingsPrivacy.strategy')}</span>
-            <div class="flex rounded-lg overflow-hidden border border-slate-200 dark:border-slate-600">
+            <div class="flex rounded-lg overflow-hidden border border-slate-200 dark:border-[#484f58]">
               {#each privacyLevels as level}
                 <button
                   on:click={() => selectedLevel = level.value}
@@ -213,7 +213,7 @@
               {#if runningApps.length > 8 && !appSearchQuery}
                 <button
                   on:click={() => showAllRunningApps = !showAllRunningApps}
-                  class="text-xs text-primary-500 hover:text-primary-600 mt-1"
+                  class="text-xs text-primary-600 hover:text-primary-600 mt-1"
                 >
                   {showAllRunningApps
                     ? t('settingsPrivacy.collapse') || '收起'
@@ -244,7 +244,7 @@
               {#if recentApps.length > 12 && !appSearchQuery}
                 <button
                   on:click={() => showAllRecentApps = !showAllRecentApps}
-                  class="text-xs text-primary-500 hover:text-primary-600 mt-1"
+                  class="text-xs text-primary-600 hover:text-primary-600 mt-1"
                 >
                   {showAllRecentApps
                     ? t('settingsPrivacy.collapse') || '收起'
@@ -309,7 +309,7 @@
       {/if}
     </div>
 
-    <hr class="border-slate-200 dark:border-slate-700" />
+    <hr class="border-slate-200 dark:border-[#30363d]" />
 
     <!-- 内容过滤（合并敏感词 + 域名黑名单），默认折叠 -->
     <div>

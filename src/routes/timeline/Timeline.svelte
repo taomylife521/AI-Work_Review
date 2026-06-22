@@ -1122,9 +1122,9 @@
     on:click|self={closeDetail}
     on:keydown={(e) => e.key === 'Escape' && closeDetail()}
   >
-    <div class="timeline-detail-dialog bg-white dark:bg-slate-800 rounded-xl shadow-xl max-w-3xl w-full max-h-[90vh] overflow-auto relative" role="dialog" aria-modal="true">
+    <div class="timeline-detail-dialog bg-white dark:bg-[#21262d] rounded-xl shadow-xl dark:shadow-[0_12px_32px_rgba(0,0,0,0.5)] max-w-3xl w-full max-h-[90vh] overflow-auto relative" role="dialog" aria-modal="true">
       <!-- 头部 -->
-      <div class="timeline-detail-header p-6 border-b border-slate-200 dark:border-slate-700">
+      <div class="timeline-detail-header p-6 border-b border-slate-200 dark:border-[#30363d]">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-3">
             <div class="timeline-app-icon timeline-app-icon-lg"
@@ -1138,8 +1138,8 @@
               {/if}
             </div>
             <div>
-              <h3 class="text-lg font-semibold text-slate-800 dark:text-white">{getTimelineAppName(selectedActivity)}</h3>
-              <p class="text-sm text-slate-500 dark:text-slate-400">{info.name}</p>
+              <h3 class="text-lg font-semibold text-slate-900 dark:text-[#e6edf3]">{getTimelineAppName(selectedActivity)}</h3>
+              <p class="text-sm text-slate-500 dark:text-[#7d8590]">{info.name}</p>
             </div>
           </div>
           <button class="btn btn-ghost" on:click={closeDetail}>
@@ -1155,8 +1155,8 @@
         <div>
           <div class="flex items-center justify-between gap-3">
             <div>
-              <span class="text-sm font-medium text-slate-500 dark:text-slate-400">{t('timeline.detail.appCategory')}</span>
-              <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              <span class="text-sm font-medium text-slate-500 dark:text-[#7d8590]">{t('timeline.detail.appCategory')}</span>
+              <p class="mt-1 text-xs text-slate-500 dark:text-[#7d8590]">
                 {t('timeline.detail.appCategoryHelp')}
               </p>
             </div>
@@ -1181,13 +1181,13 @@
                 {#if !cat.is_system}
                   <button
                     on:click|stopPropagation={() => startRenameCategory(cat)}
-                    class="absolute -top-1.5 left-1/2 -translate-x-1/2 w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs leading-none opacity-0 group-hover:opacity-100 hover:bg-blue-600 transition-opacity shadow-sm"
+                    class="absolute -top-1.5 left-1/2 -translate-x-1/2 w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs leading-none opacity-0 group-hover:opacity-100 hover:bg-blue-600 transition-opacity shadow-sm dark:shadow-none"
                     disabled={categorySaving}
                     title={t('timeline.renameCategory')}
                   >✎</button>
                   <button
                     on:click|stopPropagation={() => pendingDeleteCategory = { key: cat.key, name: getCategoryDisplayName(cat) }}
-                    class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center text-xs leading-none opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-opacity shadow-sm"
+                    class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center text-xs leading-none opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-opacity shadow-sm dark:shadow-none"
                     disabled={categorySaving}
                     title={t('timeline.deleteCategory')}
                   >×</button>
@@ -1206,14 +1206,14 @@
           </div>
 
           {#if showCreateCategory}
-            <div class="mt-3 p-3 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-800/50 space-y-2">
-              <p class="text-xs text-slate-500 dark:text-slate-400">{t('timeline.createCategoryHint')}</p>
+            <div class="mt-3 p-3 rounded-lg border border-dashed border-slate-300 dark:border-[#484f58] bg-slate-50 dark:bg-[#21262d]/50 space-y-2">
+              <p class="text-xs text-slate-500 dark:text-[#7d8590]">{t('timeline.createCategoryHint')}</p>
               <div class="flex items-center gap-2">
                 <input
                   type="text"
                   bind:value={newCategoryName}
                   placeholder={t('timeline.categoryNamePlaceholder')}
-                  class="flex-1 px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700"
+                  class="flex-1 px-2 py-1 text-sm rounded border border-slate-300 dark:border-[#484f58] bg-white dark:bg-[#30363d]"
                 />
                 <input
                   type="color"
@@ -1227,7 +1227,7 @@
                   <button
                     type="button"
                     on:click={() => newCategoryIcon = emoji}
-                    class="w-7 h-7 flex items-center justify-center text-base rounded hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors {newCategoryIcon === emoji ? 'bg-primary-100 dark:bg-primary-900/40 ring-1 ring-primary-400' : ''}"
+                    class="w-7 h-7 flex items-center justify-center text-base rounded hover:bg-slate-200 dark:hover:bg-[#484f58] transition-colors {newCategoryIcon === emoji ? 'bg-primary-100 dark:bg-primary-900/40 ring-1 ring-primary-400' : ''}"
                   >
                     {emoji}
                   </button>
@@ -1252,13 +1252,13 @@
 
           {#if showRenameCategory}
             <div class="mt-3 p-3 rounded-lg border border-dashed border-blue-300 dark:border-blue-600 bg-blue-50 dark:bg-blue-900/20 space-y-2">
-              <p class="text-xs text-slate-500 dark:text-slate-400">{t('timeline.renameCategory')}</p>
+              <p class="text-xs text-slate-500 dark:text-[#7d8590]">{t('timeline.renameCategory')}</p>
               <div class="flex items-center gap-2">
                 <input
                   type="text"
                   bind:value={renameCategoryName}
                   placeholder={t('timeline.categoryNamePlaceholder')}
-                  class="flex-1 px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700"
+                  class="flex-1 px-2 py-1 text-sm rounded border border-slate-300 dark:border-[#484f58] bg-white dark:bg-[#30363d]"
                 />
                 <input
                   type="color"
@@ -1272,7 +1272,7 @@
                   <button
                     type="button"
                     on:click={() => renameCategoryIcon = emoji}
-                    class="w-7 h-7 flex items-center justify-center text-base rounded hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors {renameCategoryIcon === emoji ? 'bg-primary-100 dark:bg-primary-900/40 ring-1 ring-primary-400' : ''}"
+                    class="w-7 h-7 flex items-center justify-center text-base rounded hover:bg-slate-200 dark:hover:bg-[#484f58] transition-colors {renameCategoryIcon === emoji ? 'bg-primary-100 dark:bg-primary-900/40 ring-1 ring-primary-400' : ''}"
                   >
                     {emoji}
                   </button>
@@ -1300,8 +1300,8 @@
         <div>
           <div class="flex items-center justify-between gap-3">
             <div>
-              <span class="text-sm font-medium text-slate-500 dark:text-slate-400">{t('timeline.detail.privacyRule')}</span>
-              <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              <span class="text-sm font-medium text-slate-500 dark:text-[#7d8590]">{t('timeline.detail.privacyRule')}</span>
+              <p class="mt-1 text-xs text-slate-500 dark:text-[#7d8590]">
                 {t('timeline.detail.privacyRuleHelp')}
               </p>
             </div>
@@ -1317,7 +1317,7 @@
             ] as opt}
               <button
                 on:click={() => requestPrivacyRule(opt.value)}
-                class="segment-btn flex-1 text-center border border-slate-200 dark:border-slate-600 rounded-lg {(selectedActivity._privacyLevel || 'full') === opt.value ? opt.activeClass : 'settings-segment-idle'}"
+                class="segment-btn flex-1 text-center border border-slate-200 dark:border-[#484f58] rounded-lg {(selectedActivity._privacyLevel || 'full') === opt.value ? opt.activeClass : 'settings-segment-idle'}"
                 disabled={privacySaving}
               >
                 {opt.label}
@@ -1337,9 +1337,9 @@
 
         <!-- 截图预览 -->
         <div>
-          <span class="text-sm font-medium text-slate-500 dark:text-slate-400">{t('timeline.detail.screenshot')}</span>
+          <span class="text-sm font-medium text-slate-500 dark:text-[#7d8590]">{t('timeline.detail.screenshot')}</span>
           <!-- 容器居中对齐，避免图片尺寸小时产生大面积空白 -->
-          <div class="mt-2 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-700 flex items-center justify-center min-h-[120px]">
+          <div class="mt-2 rounded-lg overflow-hidden bg-slate-100 dark:bg-[#30363d] flex items-center justify-center min-h-[120px]">
             {#if selectedActivity.thumbnailLoading}
               <div class="py-12 flex items-center justify-center">
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
@@ -1360,22 +1360,22 @@
         </div>
 
         <div>
-          <span class="text-sm font-medium text-slate-500 dark:text-slate-400">{t('timeline.detail.windowTitle')}</span>
-          <p class="text-base text-slate-800 dark:text-white mt-1 break-all leading-relaxed">{selectedActivity.window_title || t('timeline.noTitle')}</p>
+          <span class="text-sm font-medium text-slate-500 dark:text-[#7d8590]">{t('timeline.detail.windowTitle')}</span>
+          <p class="text-base text-slate-900 dark:text-[#e6edf3] mt-1 break-all leading-relaxed">{selectedActivity.window_title || t('timeline.noTitle')}</p>
         </div>
         <div class="grid grid-cols-2 gap-4">
           <div>
-            <span class="text-sm font-medium text-slate-500 dark:text-slate-400">{t('timeline.detail.recordTime')}</span>
-            <p class="text-base text-slate-800 dark:text-white mt-1 font-mono">{formatTime(selectedActivity.timestamp)}</p>
+            <span class="text-sm font-medium text-slate-500 dark:text-[#7d8590]">{t('timeline.detail.recordTime')}</span>
+            <p class="text-base text-slate-900 dark:text-[#e6edf3] mt-1 font-mono">{formatTime(selectedActivity.timestamp)}</p>
           </div>
           <div>
-            <span class="text-sm font-medium text-slate-500 dark:text-slate-400">{t('timeline.detail.duration')}</span>
-            <p class="text-base text-slate-800 dark:text-white mt-1">{formatDuration(selectedActivity.duration)}</p>
+            <span class="text-sm font-medium text-slate-500 dark:text-[#7d8590]">{t('timeline.detail.duration')}</span>
+            <p class="text-base text-slate-900 dark:text-[#e6edf3] mt-1">{formatDuration(selectedActivity.duration)}</p>
           </div>
         </div>
         {#if selectedActivity.browser_url}
           <div>
-            <span class="text-sm font-medium text-slate-500 dark:text-slate-400">{t('timeline.detail.visitedUrl')}</span>
+            <span class="text-sm font-medium text-slate-500 dark:text-[#7d8590]">{t('timeline.detail.visitedUrl')}</span>
             <button 
               on:click={() => openUrl(selectedActivity.browser_url)}
               class="text-primary-600 dark:text-primary-400 mt-1 text-sm hover:underline break-all block text-left cursor-pointer"
@@ -1405,16 +1405,16 @@
     on:click|self={cancelAction}
     on:keydown={(e) => e.key === 'Escape' && cancelAction()}
   >
-    <div class="w-full max-w-sm rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl p-6 mx-4">
+    <div class="w-full max-w-sm rounded-2xl border border-slate-200 dark:border-[#30363d] bg-white dark:bg-[#161b22] shadow-2xl p-6 mx-4">
       {#if isDelete}
-        <h3 class="text-base font-semibold text-slate-800 dark:text-white">{t('timeline.deleteCategoryTitle')}</h3>
-        <p class="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
+        <h3 class="text-base font-semibold text-slate-900 dark:text-[#e6edf3]">{t('timeline.deleteCategoryTitle')}</h3>
+        <p class="mt-2 text-sm text-slate-700 dark:text-[#7d8590] leading-relaxed">
           {t('timeline.deleteCategoryMessage', { category: pendingDeleteCategory.name })}
         </p>
         <div class="mt-5 flex justify-end gap-2">
           <button
             on:click={cancelAction}
-            class="px-4 py-2 text-sm rounded-lg text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 border border-slate-200 dark:border-slate-700"
+            class="px-4 py-2 text-sm rounded-lg text-slate-500 hover:text-slate-700 dark:text-[#7d8590] dark:hover:text-[#c9d1d9] border border-slate-200 dark:border-[#30363d]"
           >
             {t('timeline.cancel')}
           </button>
@@ -1426,8 +1426,8 @@
           </button>
         </div>
       {:else if isPrivacy}
-        <h3 class="text-base font-semibold text-slate-800 dark:text-white">{t('timeline.detail.privacyRule')}</h3>
-        <p class="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
+        <h3 class="text-base font-semibold text-slate-900 dark:text-[#e6edf3]">{t('timeline.detail.privacyRule')}</h3>
+        <p class="mt-2 text-sm text-slate-700 dark:text-[#7d8590] leading-relaxed">
           {t('timeline.detail.privacyConfirmMessage', {
             appName: selectedActivity.app_name,
             level: pendingPrivacyRule.levelLabel,
@@ -1436,7 +1436,7 @@
         <div class="mt-5 flex justify-end gap-2">
           <button
             on:click={cancelAction}
-            class="px-4 py-2 text-sm rounded-lg text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 border border-slate-200 dark:border-slate-700"
+            class="px-4 py-2 text-sm rounded-lg text-slate-500 hover:text-slate-700 dark:text-[#7d8590] dark:hover:text-[#c9d1d9] border border-slate-200 dark:border-[#30363d]"
           >
             {t('timeline.cancel')}
           </button>
@@ -1450,14 +1450,14 @@
       {:else}
         {@const categoryName = isApply ? pendingApplyCategory.name : pendingChangeCategory.categoryName}
         {@const appName = selectedActivity.app_name}
-        <h3 class="text-base font-semibold text-slate-800 dark:text-white">{t('timeline.changeCategoryTitle')}</h3>
-        <p class="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
+        <h3 class="text-base font-semibold text-slate-900 dark:text-[#e6edf3]">{t('timeline.changeCategoryTitle')}</h3>
+        <p class="mt-2 text-sm text-slate-700 dark:text-[#7d8590] leading-relaxed">
           {t('timeline.changeCategoryMessage', { appName, category: categoryName })}
         </p>
         <div class="mt-5 flex justify-end gap-2">
           <button
             on:click={cancelAction}
-            class="px-4 py-2 text-sm rounded-lg text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 border border-slate-200 dark:border-slate-700"
+            class="px-4 py-2 text-sm rounded-lg text-slate-500 hover:text-slate-700 dark:text-[#7d8590] dark:hover:text-[#c9d1d9] border border-slate-200 dark:border-[#30363d]"
           >
             {t('timeline.cancel')}
           </button>

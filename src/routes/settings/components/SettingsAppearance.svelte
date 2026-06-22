@@ -351,10 +351,10 @@
         <div>
           <div class="settings-text">{t('settingsAppearance.avatarSize')}</div>
         </div>
-        <div class="text-sm font-semibold text-slate-700 dark:text-slate-200">
+        <div class="text-sm font-semibold text-slate-700 dark:text-[#c9d1d9]">
           {avatarScaleLabel}
           {#if avatarScaleSaving}
-            <span class="ml-2 text-xs font-normal text-slate-400 dark:text-slate-500">{t('settingsAppearance.syncing')}</span>
+            <span class="ml-2 text-xs font-normal text-slate-400 dark:text-[#636c76]">{t('settingsAppearance.syncing')}</span>
           {/if}
         </div>
       </div>
@@ -369,7 +369,7 @@
         class="mt-3 w-full accent-primary-500"
         aria-label={t('settingsAppearance.avatarSizeAria')}
       />
-      <div class="mt-2 flex justify-between text-[11px] text-slate-400 dark:text-slate-500">
+      <div class="mt-2 flex justify-between text-[11px] text-slate-400 dark:text-[#636c76]">
         <span>{t('settingsAppearance.smaller')}</span>
         <span>{t('settingsAppearance.default90')}</span>
         <span>{t('settingsAppearance.larger')}</span>
@@ -382,10 +382,10 @@
           <div class="settings-text">{t('settingsAppearance.avatarOpacity')}</div>
           <div class="settings-muted mt-0.5">{t('settingsAppearance.avatarOpacityHint')}</div>
         </div>
-        <div class="text-sm font-semibold text-slate-700 dark:text-slate-200">
+        <div class="text-sm font-semibold text-slate-700 dark:text-[#c9d1d9]">
           {avatarOpacityLabel}
           {#if avatarOpacitySaving}
-            <span class="ml-2 text-xs font-normal text-slate-400 dark:text-slate-500">{t('settingsAppearance.syncing')}</span>
+            <span class="ml-2 text-xs font-normal text-slate-400 dark:text-[#636c76]">{t('settingsAppearance.syncing')}</span>
           {/if}
         </div>
       </div>
@@ -400,7 +400,7 @@
         class="mt-3 w-full accent-primary-500"
         aria-label={t('settingsAppearance.avatarOpacityAria')}
       />
-      <div class="mt-2 flex justify-between text-[11px] text-slate-400 dark:text-slate-500">
+      <div class="mt-2 flex justify-between text-[11px] text-slate-400 dark:text-[#636c76]">
         <span>{t('settingsAppearance.moreTransparent')}</span>
         <span>{t('settingsAppearance.default82')}</span>
         <span>{t('settingsAppearance.moreSolid')}</span>
@@ -413,7 +413,7 @@
           <div class="settings-text">{t('settingsAppearance.avatarPersona')}</div>
         </div>
         {#if avatarPersonaSaving}
-          <div class="text-xs text-slate-400 dark:text-slate-500">{t('settingsAppearance.syncing')}</div>
+          <div class="text-xs text-slate-400 dark:text-[#636c76]">{t('settingsAppearance.syncing')}</div>
         {/if}
       </div>
 
@@ -421,12 +421,12 @@
         {#each AVATAR_PERSONA_OPTIONS as persona}
           <button
             type="button"
-            class="rounded-lg border p-3 text-left transition {config.avatar_persona === persona.id ? 'border-emerald-400 bg-emerald-50/80 shadow-sm dark:border-emerald-400/70 dark:bg-emerald-500/10' : 'border-slate-200 bg-white hover:border-slate-300 dark:border-slate-700 dark:bg-slate-900/60 dark:hover:border-slate-600'}"
+            class="rounded-lg border p-3 text-left transition {config.avatar_persona === persona.id ? 'border-emerald-400 bg-emerald-50/80 shadow-sm dark:shadow-none dark:border-emerald-400/70 dark:bg-emerald-500/10' : 'border-slate-200 bg-white hover:border-slate-300 dark:border-[#30363d] dark:bg-[#161b22]/60 dark:hover:border-[#484f58]'}"
             on:click={() => selectAvatarPersona(persona.id)}
             aria-pressed={config.avatar_persona === persona.id}
           >
             <div class="flex items-center justify-between gap-3">
-              <div class="text-sm font-semibold text-slate-800 dark:text-slate-100">
+              <div class="text-sm font-semibold text-slate-900 dark:text-[#e6edf3]">
                 {t(persona.titleKey)}
               </div>
               {#if config.avatar_persona === persona.id}
@@ -435,7 +435,7 @@
                 </span>
               {/if}
             </div>
-            <div class="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
+            <div class="mt-2 text-xs leading-5 text-slate-500 dark:text-[#7d8590]">
               {t(persona.descriptionKey)}
             </div>
           </button>
@@ -449,7 +449,7 @@
           <div class="settings-text">{t('settingsAppearance.avatarPreset')}</div>
         </div>
         {#if avatarPresetSaving}
-          <div class="text-xs text-slate-400 dark:text-slate-500">{t('settingsAppearance.syncing')}</div>
+          <div class="text-xs text-slate-400 dark:text-[#636c76]">{t('settingsAppearance.syncing')}</div>
         {/if}
       </div>
 
@@ -457,17 +457,17 @@
         {#each AVATAR_PRESET_OPTIONS as preset}
           <button
             type="button"
-            class="rounded-2xl border p-3 text-left transition {config.avatar_preset === preset.id ? 'border-primary-500 bg-primary-50/70 shadow-sm dark:border-primary-400 dark:bg-primary-500/10' : 'border-slate-200 bg-white hover:border-slate-300 dark:border-slate-700 dark:bg-slate-900/60 dark:hover:border-slate-600'}"
+            class="rounded-2xl border p-3 text-left transition {config.avatar_preset === preset.id ? 'border-primary-500 bg-primary-50/70 shadow-sm dark:shadow-none dark:border-primary-400 dark:bg-primary-500/10' : 'border-slate-200 bg-white hover:border-slate-300 dark:border-[#30363d] dark:bg-[#161b22]/60 dark:hover:border-[#484f58]'}"
             on:click={() => selectAvatarPreset(preset.id)}
             aria-pressed={config.avatar_preset === preset.id}
           >
-            <div class="h-24 w-full rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-950/70">
+            <div class="h-24 w-full rounded-xl border border-slate-200 bg-slate-50 dark:border-[#30363d] dark:bg-[#0d1117]/70">
               <AvatarPresetPreview presetId={preset.id} selected={config.avatar_preset === preset.id} />
             </div>
-            <div class="mt-3 text-sm font-semibold text-slate-800 dark:text-slate-100">
+            <div class="mt-3 text-sm font-semibold text-slate-900 dark:text-[#e6edf3]">
               {t(preset.titleKey)}
             </div>
-            <div class="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+            <div class="mt-1 text-xs leading-5 text-slate-500 dark:text-[#7d8590]">
               {t(preset.descriptionKey)}
             </div>
           </button>
@@ -475,7 +475,7 @@
       </div>
     </div>
 
-    <hr class="border-slate-200 dark:border-slate-700" />
+    <hr class="border-slate-200 dark:border-[#30363d]" />
 
     <div class="flex items-center justify-between gap-4">
       <div>
@@ -485,14 +485,14 @@
       <button
         type="button"
         on:click={() => { config.avatar_click_through = !config.avatar_click_through; }}
-        class="switch-track {config.avatar_click_through ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'}"
+        class="switch-track {config.avatar_click_through ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'}"
         aria-pressed={config.avatar_click_through}
       >
         <span class="switch-thumb {config.avatar_click_through ? 'translate-x-5' : 'translate-x-0'}"></span>
       </button>
     </div>
 
-    <hr class="border-slate-200 dark:border-slate-700" />
+    <hr class="border-slate-200 dark:border-[#30363d]" />
 
     <div class="flex items-center justify-between gap-4">
       <div>
@@ -505,7 +505,7 @@
       <button
         type="button"
         on:click={toggleBreakReminder}
-        class="switch-track {config.break_reminder_enabled && config.avatar_enabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'} {!config.avatar_enabled ? 'cursor-not-allowed opacity-50' : ''}"
+        class="switch-track {config.break_reminder_enabled && config.avatar_enabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'} {!config.avatar_enabled ? 'cursor-not-allowed opacity-50' : ''}"
         disabled={!config.avatar_enabled}
         aria-pressed={config.break_reminder_enabled}
       >
@@ -514,7 +514,7 @@
     </div>
 
     {#if config.break_reminder_enabled}
-      <div class="settings-block pt-3 border-t border-slate-200 dark:border-slate-700">
+      <div class="settings-block pt-3 border-t border-slate-200 dark:border-[#30363d]">
         <label for="break-reminder-interval" class="settings-label mb-1.5">
           {t('settingsAppearance.breakReminderInterval')}
         </label>
@@ -544,11 +544,11 @@
     <!-- 预览 + 上传 -->
     <div class="flex items-start gap-4">
       {#if bgPreview}
-        <div class="w-32 h-20 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 flex-shrink-0">
+        <div class="w-32 h-20 rounded-lg overflow-hidden border border-slate-200 dark:border-[#30363d] flex-shrink-0">
           <img src={bgPreview} alt={t('settingsAppearance.bgPreviewAlt')} class="w-full h-full object-cover" />
         </div>
       {:else}
-        <div class="w-32 h-20 rounded-lg border-2 border-dashed border-slate-200 dark:border-slate-700 flex items-center justify-center flex-shrink-0">
+        <div class="w-32 h-20 rounded-lg border-2 border-dashed border-slate-200 dark:border-[#30363d] flex items-center justify-center flex-shrink-0">
           <span class="settings-subtle">{t('settingsAppearance.noBackground')}</span>
         </div>
       {/if}
@@ -577,7 +577,7 @@
     </div>
 
     {#if bgPreview || config.background_image}
-      <hr class="border-slate-200 dark:border-slate-700" />
+      <hr class="border-slate-200 dark:border-[#30363d]" />
 
       <!-- 显示强度 -->
       <div class="settings-block">

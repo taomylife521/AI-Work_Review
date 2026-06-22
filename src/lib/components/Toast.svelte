@@ -9,7 +9,7 @@
   };
 
   const colorMap = {
-    success: 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-800',
+    success: 'bg-slate-800 dark:bg-[#30363d] text-white dark:text-[#c9d1d9]',
     error: 'bg-red-600 text-white',
     warning: 'bg-amber-500 text-white',
     info: 'bg-sky-600 text-white',
@@ -25,7 +25,7 @@
     <button
       type="button"
       on:click={clearToast}
-      class={`max-w-full min-h-11 px-4 py-2.5 rounded-xl shadow-lg text-sm font-medium leading-none flex items-center gap-2 pointer-events-auto ${toastClass}`}
+      class={`max-w-full min-h-11 px-4 py-2.5 rounded-xl shadow-lg dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] text-sm font-medium leading-none flex items-center gap-2 pointer-events-auto ${toastClass}`}
     >
       <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={iconPath} />

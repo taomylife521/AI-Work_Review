@@ -479,7 +479,7 @@
       ></div>
       <!-- 半透明遮罩：遮罩越透明 = 背景图越明显 -->
       <div
-        class="absolute inset-0 bg-slate-50 dark:bg-slate-900 transition-opacity duration-300"
+        class="absolute inset-0 bg-slate-50 dark:bg-[#161b22] transition-opacity duration-300"
         style="opacity: {Math.max(0, 1 - backgroundOpacity)};"
       ></div>
     </div>

@@ -231,7 +231,7 @@
             config.work_time_enabled = !config.work_time_enabled;
             handleChange();
           }}
-          class="switch-track {config.work_time_enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}"
+          class="switch-track {config.work_time_enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-[#484f58]'}"
           aria-pressed={config.work_time_enabled}
         >
           <span class="switch-thumb {config.work_time_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
@@ -249,11 +249,11 @@
                 type="time"
                 value={segmentToTimeValue(segment.start_hour, segment.start_minute)}
                 on:change={(e) => updateSegment(index, 'start', e.target.value)}
-                class="w-24 bg-transparent text-sm font-mono text-slate-800 dark:text-white focus:outline-none"
+                class="w-24 bg-transparent text-sm font-mono text-slate-900 dark:text-[#e6edf3] focus:outline-none"
               />
             </div>
 
-            <span class="text-slate-300 dark:text-slate-600">—</span>
+            <span class="text-slate-400 dark:text-[#484f58]">—</span>
 
             <div class="control-inline">
               <span class="settings-subtle">{t('settingsGeneral.to')}</span>
@@ -261,7 +261,7 @@
                 type="time"
                 value={segmentToTimeValue(segment.end_hour, segment.end_minute)}
                 on:change={(e) => updateSegment(index, 'end', e.target.value)}
-                class="w-24 bg-transparent text-sm font-mono text-slate-800 dark:text-white focus:outline-none"
+                class="w-24 bg-transparent text-sm font-mono text-slate-900 dark:text-[#e6edf3] focus:outline-none"
               />
             </div>
 
@@ -309,9 +309,9 @@
                   handleChange();
                 }
               }}
-              class="w-20 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-center text-sm font-mono text-slate-800 focus:border-primary-400 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+              class="w-20 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-center text-sm font-mono text-slate-900 focus:border-primary-400 focus:outline-none dark:border-[#30363d] dark:bg-[#161b22] dark:text-[#e6edf3]"
             />
-            <span class="text-xs text-slate-500 dark:text-slate-400">{t('settingsGeneral.hours')}</span>
+            <span class="text-xs text-slate-500 dark:text-[#7d8590]">{t('settingsGeneral.hours')}</span>
           </div>
         </div>
 
@@ -332,7 +332,7 @@
                 config.idle_threshold_minutes = Math.max(1, Math.min(60, Number(config.idle_threshold_minutes) || 5));
                 handleChange();
               }}
-              class="w-16 rounded-md border border-slate-200 bg-white px-2 py-1 text-center text-sm dark:border-slate-600 dark:bg-slate-800"
+              class="w-16 rounded-md border border-slate-200 bg-white px-2 py-1 text-center text-sm dark:border-[#484f58] dark:bg-[#21262d]"
             />
             <span class="text-xs settings-subtle">{t('settingsGeneral.minutesUnit')}</span>
           </div>
@@ -359,9 +359,9 @@
               config.daily_work_goal_minutes = (!isNaN(hours) && hours > 0) ? Math.round(hours * 60) : null;
               handleChange();
             }}
-            class="w-20 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-center text-sm font-mono text-slate-800 focus:border-primary-400 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            class="w-20 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-center text-sm font-mono text-slate-900 focus:border-primary-400 focus:outline-none dark:border-[#30363d] dark:bg-[#161b22] dark:text-[#e6edf3]"
           />
-          <span class="text-xs text-slate-500 dark:text-slate-400">{t('settingsGeneral.hours')}</span>
+          <span class="text-xs text-slate-500 dark:text-[#7d8590]">{t('settingsGeneral.hours')}</span>
         </div>
       </div>
       <label class="flex items-center justify-between mt-3 cursor-pointer">
@@ -380,7 +380,7 @@
         <input type="checkbox" bind:checked={config.memory_enabled} on:change={handleChange} class="accent-primary-500" />
       </label>
     </CollapsibleSection>
-    <div class="settings-block pt-4 border-t border-slate-200 dark:border-slate-700">
+    <div class="settings-block pt-4 border-t border-slate-200 dark:border-[#30363d]">
       <div class="flex flex-wrap items-center gap-3">
         <span class="settings-text">{t('settingsGeneral.reportAutoGenerateTime')}</span>
         <div class="control-inline">
@@ -391,7 +391,7 @@
               config.daily_report_auto_generate_time = e.target.value || null;
               dispatch('change', config);
             }}
-            class="w-20 bg-transparent text-sm font-mono text-slate-800 dark:text-white focus:outline-none"
+            class="w-20 bg-transparent text-sm font-mono text-slate-900 dark:text-[#e6edf3] focus:outline-none"
           />
         </div>
         {#if config.daily_report_auto_generate_time}
@@ -411,13 +411,13 @@
     </div>
 
     <!-- 系统行为 -->
-    <div class="settings-block pt-4 border-t border-slate-200 dark:border-slate-700">
+    <div class="settings-block pt-4 border-t border-slate-200 dark:border-[#30363d]">
       <div class="space-y-2.5">
         <div class="settings-row">
           <span class="settings-text">{t('settingsGeneral.autoStart')}</span>
           <button
             on:click={toggleAutoStart}
-            class="switch-track {autoStartEnabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'}"
+            class="switch-track {autoStartEnabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'}"
           >
             <span class="switch-thumb {autoStartEnabled ? 'translate-x-5' : 'translate-x-0'}"></span>
           </button>
@@ -449,7 +449,7 @@
           <span class="settings-text">{t('settingsGeneral.hideDockIcon')}</span>
           <button
             on:click={toggleDockIcon}
-            class="switch-track {config.hide_dock_icon ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'}"
+            class="switch-track {config.hide_dock_icon ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'}"
           >
             <span class="switch-thumb {config.hide_dock_icon ? 'translate-x-5' : 'translate-x-0'}"></span>
           </button>
@@ -462,7 +462,7 @@
           </div>
           <button
             on:click={toggleLightweightMode}
-            class="switch-track {config.lightweight_mode ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'}"
+            class="switch-track {config.lightweight_mode ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'}"
           >
             <span class="switch-thumb {config.lightweight_mode ? 'translate-x-5' : 'translate-x-0'}"></span>
           </button>

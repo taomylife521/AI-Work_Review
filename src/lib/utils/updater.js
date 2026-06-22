@@ -89,9 +89,6 @@ export async function runUpdateFlow(options = {}) {
 
     if (!releaseInfo?.available) {
       onStatusChange(silentWhenUpToDate ? '' : t('updater.upToDate'));
-      if (!silentWhenUpToDate) {
-        showToast(t('updater.upToDate'), 'success');
-      }
       return { updated: false, available: false };
     }
 

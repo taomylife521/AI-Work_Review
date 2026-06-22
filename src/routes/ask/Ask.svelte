@@ -554,12 +554,12 @@
       {#if !hasConversation}
         <div class="ask-welcome-panel mx-auto flex min-h-full max-w-4xl flex-col items-center justify-center text-center">
           <span class="ask-kicker">{t('ask.title')}</span>
-          <h1 class="mb-2 text-2xl font-semibold tracking-tight text-slate-800 dark:text-slate-100">{t('ask.title')}</h1>
-          <p class="mb-10 text-sm text-slate-500 dark:text-slate-400">{t('ask.subtitle')}</p>
+          <h1 class="mb-2 text-2xl font-semibold tracking-tight text-slate-900 dark:text-[#e6edf3]">{t('ask.title')}</h1>
+          <p class="mb-10 text-sm text-slate-500 dark:text-[#7d8590]">{t('ask.subtitle')}</p>
           <div class="ask-starter-grid grid w-full max-w-3xl gap-3 sm:grid-cols-2">
             {#each starterPrompts as prompt}
               <button
-                class="ask-starter-card rounded-[28px] bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(248,250,252,0.88))] px-5 py-4 text-left text-sm font-medium leading-6 text-slate-700 ring-1 ring-inset ring-slate-200/80 shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition hover:-translate-y-0.5 hover:text-slate-900 hover:ring-indigo-300/80 hover:shadow-[0_12px_28px_rgba(79,70,229,0.10)] active:scale-[0.98] dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.78),rgba(15,23,42,0.62))] dark:text-slate-200 dark:ring-slate-700/80 dark:shadow-none dark:hover:text-white dark:hover:ring-indigo-500/60"
+                class="ask-starter-card rounded-[28px] bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(248,250,252,0.88))] px-5 py-4 text-left text-sm font-medium leading-6 text-slate-700 ring-1 ring-inset ring-slate-200/80 shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition hover:-translate-y-0.5 hover:text-slate-900 hover:ring-indigo-300/80 hover:shadow-[0_12px_28px_rgba(79,70,229,0.10)] active:scale-[0.98] dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.78),rgba(15,23,42,0.62))] dark:text-[#c9d1d9] dark:ring-[#30363d]/80 dark:shadow-none dark:hover:text-[#e6edf3] dark:hover:ring-indigo-500/60"
                 on:click={() => submitQuestion(prompt)}
                 disabled={sending}
               >
@@ -575,15 +575,15 @@
               <div
                 in:fly={{ y: 10, duration: 240 }}
                 class={message.role === 'user'
-                  ? 'ask-message-card ask-message-card-user min-w-0 max-w-[78%] rounded-[28px] rounded-br-lg bg-gradient-to-br from-indigo-50 to-slate-50 px-5 py-4 text-slate-800 ring-1 ring-inset ring-indigo-200/70 shadow-sm dark:from-indigo-950/60 dark:to-slate-900 dark:text-slate-100 dark:ring-indigo-800/50'
-                  : 'ask-message-card ask-message-card-assistant min-w-0 w-full max-w-[90%] text-slate-800 dark:text-slate-100'}
+                  ? 'ask-message-card ask-message-card-user min-w-0 max-w-[78%] rounded-[28px] rounded-br-lg bg-gradient-to-br from-indigo-50 to-slate-50 px-5 py-4 text-slate-900 ring-1 ring-inset ring-indigo-200/70 shadow-sm dark:shadow-none dark:from-indigo-950/60 dark:to-[#161b22] dark:text-[#e6edf3] dark:ring-indigo-800/50'
+                  : 'ask-message-card ask-message-card-assistant min-w-0 w-full max-w-[90%] text-slate-900 dark:text-[#e6edf3]'}
               >
                 {#if message.role === 'assistant'}
                   {#if message.steps?.length}
                     <div class="mb-3 flex flex-col gap-1.5">
                       {#each message.steps as step}
                         <div
-                          class="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400"
+                          class="flex items-center gap-2 text-xs text-slate-500 dark:text-[#7d8590]"
                           in:fly={{ x: -4, duration: 160 }}
                         >
                           {#if step.status === 'running'}
@@ -592,7 +592,7 @@
                             <span class="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
                           {/if}
                           <span>{step.label}</span>
-                          {#if step.status === 'done' && step.hits != null}<span class="text-slate-400 dark:text-slate-500">· {step.hits} {t('ask.hits')}</span>{/if}
+                          {#if step.status === 'done' && step.hits != null}<span class="text-slate-400 dark:text-[#636c76]">· {step.hits} {t('ask.hits')}</span>{/if}
                         </div>
                       {/each}
                     </div>
@@ -606,15 +606,15 @@
                   </div>
 
                   {#if message.references?.length}
-                    <details class="mt-6 rounded-[24px] bg-slate-50/74 px-4 py-3 ring-1 ring-inset ring-slate-200/60 dark:bg-slate-950/34 dark:ring-slate-800/70">
-                      <summary class="cursor-pointer list-none text-sm font-medium text-slate-500 dark:text-slate-400">
+                    <details class="mt-6 rounded-[24px] bg-slate-50/74 px-4 py-3 ring-1 ring-inset ring-slate-200/60 dark:bg-[#0d1117]/34 dark:ring-[#21262d]/70">
+                      <summary class="cursor-pointer list-none text-sm font-medium text-slate-500 dark:text-[#7d8590]">
                         {t('ask.references', { count: message.references.length })}
                       </summary>
 
                       <div class="mt-3 space-y-2">
                         {#each message.references as item}
-                          <div class="ask-reference-card rounded-[20px] bg-white/88 px-3 py-3 ring-1 ring-inset ring-slate-200/70 dark:bg-slate-900/80 dark:ring-slate-800">
-                            <div class="flex flex-wrap items-center gap-2 text-xs text-slate-400 dark:text-slate-500">
+                          <div class="ask-reference-card rounded-[20px] bg-white/88 px-3 py-3 ring-1 ring-inset ring-slate-200/70 dark:bg-[#161b22]/80 dark:ring-[#21262d]">
+                            <div class="flex flex-wrap items-center gap-2 text-xs text-slate-400 dark:text-[#636c76]">
                               <span>{sourceLabel(item.sourceType)}</span>
                               <span>{item.date}</span>
                               {#if item.appName}
@@ -624,9 +624,9 @@
                                 <span>{formatDurationLocalized(item.duration)}</span>
                               {/if}
                             </div>
-                            <div class="mt-1 text-sm font-medium text-slate-800 dark:text-slate-100">{item.title}</div>
+                            <div class="mt-1 text-sm font-medium text-slate-900 dark:text-[#e6edf3]">{item.title}</div>
                             {#if item.excerpt}
-                              <div class="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">{item.excerpt}</div>
+                              <div class="mt-1 text-sm leading-6 text-slate-500 dark:text-[#7d8590]">{item.excerpt}</div>
                             {/if}
                           </div>
                         {/each}
@@ -643,11 +643,11 @@
           <!-- Loading bubble -->
           {#if sending}
             <div class="flex justify-start">
-              <div class="rounded-[24px] bg-slate-50/80 px-5 py-4 ring-1 ring-inset ring-slate-200/50 dark:bg-slate-800/60 dark:ring-slate-700/50">
+              <div class="rounded-[24px] bg-slate-50/80 px-5 py-4 ring-1 ring-inset ring-slate-200/50 dark:bg-[#21262d]/60 dark:ring-[#30363d]/50">
                 <div class="flex items-center gap-1.5">
-                  <span class="inline-block h-2 w-2 animate-pulse rounded-full bg-slate-400 dark:bg-slate-500"></span>
-                  <span class="inline-block h-2 w-2 animate-pulse rounded-full bg-slate-400 dark:bg-slate-500" style="animation-delay: 0.2s"></span>
-                  <span class="inline-block h-2 w-2 animate-pulse rounded-full bg-slate-400 dark:bg-slate-500" style="animation-delay: 0.4s"></span>
+                  <span class="inline-block h-2 w-2 animate-pulse rounded-full bg-slate-400 dark:bg-[#636c76]"></span>
+                  <span class="inline-block h-2 w-2 animate-pulse rounded-full bg-slate-400 dark:bg-[#636c76]" style="animation-delay: 0.2s"></span>
+                  <span class="inline-block h-2 w-2 animate-pulse rounded-full bg-slate-400 dark:bg-[#636c76]" style="animation-delay: 0.4s"></span>
                 </div>
               </div>
             </div>
@@ -674,25 +674,25 @@
       {/if}
     </div>
 
-    <div class="pointer-events-none sticky bottom-0 bg-gradient-to-t from-slate-50 via-slate-50/90 to-transparent px-4 pb-4 pt-8 dark:from-slate-950 dark:via-slate-950/84">
+    <div class="pointer-events-none sticky bottom-0 bg-gradient-to-t from-slate-50 via-slate-50/90 to-transparent px-4 pb-4 pt-8 dark:from-[#0d1117] dark:via-[#010409]/84">
       <div class="pointer-events-auto mx-auto max-w-4xl">
-        <div class="ask-composer-shell rounded-[30px] border border-slate-200/70 bg-white/94 px-4 py-3 shadow-[0_12px_32px_rgba(15,23,42,0.08)] backdrop-blur dark:border-slate-700/70 dark:bg-slate-900/88 dark:shadow-[0_12px_32px_rgba(2,6,23,0.32)]">
+        <div class="ask-composer-shell rounded-[30px] border border-slate-200/70 bg-white/94 px-4 py-3 shadow-[0_12px_32px_rgba(15,23,42,0.08)] backdrop-blur dark:border-[#30363d]/70 dark:bg-[#161b22]/88 dark:shadow-[0_12px_32px_rgba(2,6,23,0.32)]">
           <textarea
             bind:this={composer}
             bind:value={input}
             rows="1"
-            class="max-h-[220px] min-h-[26px] w-full resize-none bg-transparent text-[15px] leading-7 text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500"
+            class="max-h-[220px] min-h-[26px] w-full resize-none bg-transparent text-[15px] leading-7 text-slate-900 outline-none placeholder:text-slate-400 dark:text-[#e6edf3] dark:placeholder:text-slate-500"
             placeholder={t('ask.placeholder')}
             on:input={resizeComposer}
             on:keydown={handleComposerKeydown}
           />
 
-          <div class="mt-3 flex items-center justify-between gap-3 border-t border-slate-200/60 pt-2.5 dark:border-slate-700/60">
+          <div class="mt-3 flex items-center justify-between gap-3 border-t border-slate-200/60 pt-2.5 dark:border-[#30363d]/60">
             <div class="flex min-w-0 flex-1 items-center gap-2">
               <select
                 bind:value={selectedModelId}
                 on:change={handleModelChange}
-                class="h-8 min-w-[122px] max-w-[176px] cursor-pointer appearance-none rounded-lg border border-slate-200/80 bg-slate-100/90 px-3 pr-8 text-[11px] font-medium text-slate-600 outline-none transition hover:bg-slate-200/70 focus:ring-2 focus:ring-slate-300 dark:border-slate-700/80 dark:bg-slate-800/70 dark:text-slate-300 dark:hover:bg-slate-700/80 dark:focus:ring-slate-600"
+                class="h-8 min-w-[122px] max-w-[176px] cursor-pointer appearance-none rounded-lg border border-slate-200/80 bg-slate-100/90 px-3 pr-8 text-[11px] font-medium text-slate-700 outline-none transition hover:bg-slate-200/70 focus:ring-2 focus:ring-slate-300 dark:border-[#30363d]/80 dark:bg-[#21262d]/70 dark:text-[#adbac7] dark:hover:bg-[#30363d]/80 dark:focus:ring-primary-600"
                 style="background-image: url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E&quot;); background-repeat: no-repeat; background-position: right 10px center;"
                 aria-label={t('ask.modelSelector')}
               >
@@ -703,11 +703,11 @@
               </select>
 
               {#if sending}
-                <span class="shrink-0 text-[11px] text-slate-400 dark:text-slate-500">{t('ask.thinking')}</span>
+                <span class="shrink-0 text-[11px] text-slate-400 dark:text-[#636c76]">{t('ask.thinking')}</span>
               {:else}
                 <button
                   type="button"
-                  class="shrink-0 rounded-full px-2.5 py-1 text-[11px] text-slate-400 transition hover:bg-slate-100/80 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-800/70 dark:hover:text-slate-300"
+                  class="shrink-0 rounded-full px-2.5 py-1 text-[11px] text-slate-400 transition hover:bg-slate-100/80 hover:text-slate-700 dark:text-[#636c76] dark:hover:bg-[#21262d]/70 dark:hover:text-[#adbac7]"
                   on:click={clearConversation}
                   disabled={!hasConversation}
                 >
