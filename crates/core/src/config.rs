@@ -346,7 +346,7 @@ impl Default for PrivacyConfig {
                 "支付".to_string(),
             ],
             excluded_domains: vec![], // 默认无域名黑名单
-            filter_sensitive: true, // 已弃用，保留兼容
+            filter_sensitive: true,   // 已弃用，保留兼容
             excluded_apps: vec![],
         }
     }
@@ -358,7 +358,8 @@ impl PrivacyConfig {
         let normalized = crate::categorize::normalize_display_app_name(app_name).to_lowercase();
         // 先检查新的规则（规范化后精确匹配 + 包含匹配）
         for rule in &self.app_rules {
-            let rule_normalized = crate::categorize::normalize_display_app_name(&rule.app_name).to_lowercase();
+            let rule_normalized =
+                crate::categorize::normalize_display_app_name(&rule.app_name).to_lowercase();
             // 精确匹配或包含匹配（应用名包含规则名，处理 "Google Chrome" 包含 "Chrome" 的情况）
             if normalized == rule_normalized || normalized.contains(&rule_normalized) {
                 log::debug!(
@@ -372,7 +373,8 @@ impl PrivacyConfig {
         }
         // 兼容旧版 excluded_apps（视为 Ignored）
         for excluded in &self.excluded_apps {
-            let excluded_normalized = crate::categorize::normalize_display_app_name(excluded).to_lowercase();
+            let excluded_normalized =
+                crate::categorize::normalize_display_app_name(excluded).to_lowercase();
             if normalized.contains(&excluded_normalized) {
                 return PrivacyLevel::Ignored;
             }
@@ -687,6 +689,15 @@ pub struct AppConfig {
     /// 日报自动生成时间 (HH:MM)，为空时使用工作结束时间
     #[serde(default)]
     pub daily_report_auto_generate_time: Option<String>,
+    /// 日报钉选段落（永远排在最前），值为 StatsBlock 的 block_name
+    #[serde(default)]
+    pub daily_report_pinned_blocks: Vec<String>,
+    /// 日报隐藏段落（不显示），值为 StatsBlock 的 block_name
+    #[serde(default)]
+    pub daily_report_hidden_blocks: Vec<String>,
+    /// 上次 AI 编排的段落顺序（缓存，避免每次生成都调 LLM 排序）
+    #[serde(default)]
+    pub daily_report_last_ai_order: Vec<String>,
     /// 是否启用本地 localhost API
     #[serde(default)]
     pub localhost_api_enabled: bool,
@@ -923,6 +934,9 @@ impl Default for AppConfig {
             daily_report_system_prompt_override: None,
             daily_report_export_dir: None,
             daily_report_auto_export: false,
+            daily_report_pinned_blocks: Vec::new(),
+            daily_report_hidden_blocks: Vec::new(),
+            daily_report_last_ai_order: Vec::new(),
             daily_report_auto_generate_time: None,
             localhost_api_enabled: false,
             localhost_api_host: None,
@@ -1010,8 +1024,14 @@ impl AppConfig {
         normalize_custom_categories(&mut self.custom_categories);
         normalize_app_category_rules(&mut self.app_category_rules, &self.custom_categories);
         // Seed defaults BEFORE rule validation so built-in categories are present
-        seed_default_categories(&mut self.custom_categories, &self.deleted_default_categories);
-        seed_default_semantic_categories(&mut self.custom_semantic_categories, &self.deleted_default_semantic_categories);
+        seed_default_categories(
+            &mut self.custom_categories,
+            &self.deleted_default_categories,
+        );
+        seed_default_semantic_categories(
+            &mut self.custom_semantic_categories,
+            &self.deleted_default_semantic_categories,
+        );
         normalize_custom_semantic_categories(&mut self.custom_semantic_categories);
         normalize_website_semantic_rules(
             &mut self.website_semantic_rules,
@@ -1413,7 +1433,10 @@ fn seed_default_categories(categories: &mut Vec<CustomCategory>, deleted: &[Stri
     }
 }
 
-fn seed_default_semantic_categories(categories: &mut Vec<CustomSemanticCategory>, deleted: &[String]) {
+fn seed_default_semantic_categories(
+    categories: &mut Vec<CustomSemanticCategory>,
+    deleted: &[String],
+) {
     let defaults: Vec<(&str, &str)> = vec![
         ("编码开发", "编码开发"),
         ("内容撰写", "内容撰写"),
@@ -1810,7 +1833,8 @@ mod tests {
     fn 配置规范化应清理空白远程截图公开地址() {
         let mut config = AppConfig::default();
         config.remote_storage.s3.public_url_base = Some("   ".to_string());
-        config.remote_storage.webdav.public_url_base = Some(" https://cdn.example.com/base/ ".to_string());
+        config.remote_storage.webdav.public_url_base =
+            Some(" https://cdn.example.com/base/ ".to_string());
 
         config.normalize();
 

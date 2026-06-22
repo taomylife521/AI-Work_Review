@@ -2,7 +2,9 @@
 // dead_code allow 在 main.rs 的 mod 声明处设置
 use crate::avatar_engine::AvatarInputPayload;
 use once_cell::sync::Lazy;
-use std::sync::atomic::{AtomicBool, AtomicI8, AtomicU16, AtomicU32, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{
+    AtomicBool, AtomicI8, AtomicU16, AtomicU32, AtomicU64, AtomicU8, Ordering,
+};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
@@ -1016,6 +1018,9 @@ pub fn spawn_avatar_input_bridge(app: AppHandle) {
         return;
     }
 
+    let smart_click_through_polling_enabled =
+        smart_click_through_polling_enabled_for_platform(cfg!(target_os = "windows"));
+
     tauri::async_runtime::spawn(async move {
         let mut last_payload: Option<AvatarInputPayload> = None;
         let mut tick: u32 = 0;
@@ -1029,13 +1034,17 @@ pub fn spawn_avatar_input_bridge(app: AppHandle) {
 
             // 智能穿透命中测试：每 4 轮（~64ms）
             tick = tick.wrapping_add(1);
-            if tick % 4 == 0 {
+            if smart_click_through_polling_enabled && tick % 4 == 0 {
                 apply_smart_click_through(&app);
             }
 
             tokio::time::sleep(INPUT_BRIDGE_POLL_INTERVAL).await;
         }
     });
+}
+
+fn smart_click_through_polling_enabled_for_platform(is_windows: bool) -> bool {
+    !is_windows
 }
 
 /// 智能穿透：穿透开启且桌宠启用时，鼠标在桌宠窗口内→不穿透（可交互），外→穿透。
@@ -1578,6 +1587,12 @@ mod tests {
         assert!(!is_input_still_active(0, 1000, 180));
         assert!(is_input_still_active(900, 1000, 180));
         assert!(!is_input_still_active(700, 1000, 180));
+    }
+
+    #[test]
+    fn windows应禁用智能穿透自动命中轮询() {
+        assert!(!smart_click_through_polling_enabled_for_platform(true));
+        assert!(smart_click_through_polling_enabled_for_platform(false));
     }
 
     #[test]

@@ -1,6 +1,4 @@
-use crate::bot_common::{
-    build_device_list, handle_cmd, NON_TEXT_REPLY, UNKNOWN_CMD_REPLY,
-};
+use crate::bot_common::{build_device_list, handle_cmd, NON_TEXT_REPLY, UNKNOWN_CMD_REPLY};
 use crate::config::AppConfig;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use reqwest::Client;
@@ -60,8 +58,19 @@ fn decode_aes_key(encoding_aes_key: &str) -> Option<[u8; 32]> {
 }
 
 /// Verify WeCom callback signature: SHA1(sort([token, timestamp, nonce, encrypt]))
-fn verify_signature(token: &str, timestamp: &str, nonce: &str, encrypt: &str, signature: &str) -> bool {
-    let mut parts = [token.to_string(), timestamp.to_string(), nonce.to_string(), encrypt.to_string()];
+fn verify_signature(
+    token: &str,
+    timestamp: &str,
+    nonce: &str,
+    encrypt: &str,
+    signature: &str,
+) -> bool {
+    let mut parts = [
+        token.to_string(),
+        timestamp.to_string(),
+        nonce.to_string(),
+        encrypt.to_string(),
+    ];
     parts.sort();
     let joined = parts.join("");
     use sha1::{Digest, Sha1};
@@ -113,8 +122,12 @@ fn aes_decrypt_raw(key: &[u8; 32], ciphertext_b64: &str) -> Option<(String, Stri
     if plaintext.len() < 20 + msg_len {
         return None;
     }
-    let msg = std::str::from_utf8(&plaintext[20..20 + msg_len]).ok()?.to_string();
-    let receiving_id = std::str::from_utf8(&plaintext[20 + msg_len..]).ok()?.to_string();
+    let msg = std::str::from_utf8(&plaintext[20..20 + msg_len])
+        .ok()?
+        .to_string();
+    let receiving_id = std::str::from_utf8(&plaintext[20 + msg_len..])
+        .ok()?
+        .to_string();
     Some((msg, receiving_id))
 }
 
@@ -344,7 +357,12 @@ fn encrypt_reply(
     };
 
     let signature = {
-        let mut parts = [token.to_string(), ts.clone(), new_nonce.clone(), encrypted.clone()];
+        let mut parts = [
+            token.to_string(),
+            ts.clone(),
+            new_nonce.clone(),
+            encrypted.clone(),
+        ];
         parts.sort();
         let joined = parts.join("");
         use sha1::{Digest, Sha1};
@@ -369,15 +387,26 @@ mod tests {
         let joined = parts.join("");
         use sha1::{Digest, Sha1};
         let expected = hex::encode(Sha1::digest(joined.as_bytes()));
-        assert!(verify_signature(token, timestamp, nonce, encrypt, &expected));
-        assert!(!verify_signature(token, timestamp, nonce, encrypt, "wrong_signature"));
+        assert!(verify_signature(
+            token, timestamp, nonce, encrypt, &expected
+        ));
+        assert!(!verify_signature(
+            token,
+            timestamp,
+            nonce,
+            encrypt,
+            "wrong_signature"
+        ));
     }
 
     #[test]
     fn cdata提取应支持标准格式() {
         let xml = "<xml><ToUserName><![CDATA[corp123]]></ToUserName><Encrypt><![CDATA[abc123]]></Encrypt></xml>";
         assert_eq!(extract_cdata(xml, "Encrypt"), Some("abc123".to_string()));
-        assert_eq!(extract_cdata(xml, "ToUserName"), Some("corp123".to_string()));
+        assert_eq!(
+            extract_cdata(xml, "ToUserName"),
+            Some("corp123".to_string())
+        );
         assert_eq!(extract_cdata(xml, "Missing"), None);
     }
 

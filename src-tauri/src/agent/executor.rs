@@ -156,12 +156,14 @@ impl AgentExecutor {
                             let ref_base = tool_context.references_len();
 
                             // 执行工具（Stage 1）
-                            let result =
-                                match registry.execute(&tc.name, tc.arguments.clone(), &tool_context)
-                                {
-                                    Ok(r) => r,
-                                    Err(e) => format!("工具执行失败: {e}"),
-                                };
+                            let result = match registry.execute(
+                                &tc.name,
+                                tc.arguments.clone(),
+                                &tool_context,
+                            ) {
+                                Ok(r) => r,
+                                Err(e) => format!("工具执行失败: {e}"),
+                            };
 
                             // 步骤结束：推送 StepResult（携带本轮新增引用）
                             let new_refs = tool_context.drain_from(ref_base);
@@ -187,8 +189,9 @@ impl AgentExecutor {
 
                 StopReason::MaxTokens => {
                     // Token 用完了，用已有内容回答
-                    let content =
-                        response.content.unwrap_or_else(|| "回答被截断，请尝试缩短问题。".to_string());
+                    let content = response
+                        .content
+                        .unwrap_or_else(|| "回答被截断，请尝试缩短问题。".to_string());
                     let references = tool_context.take_all_references();
                     emit_done(&event_tx, &content, &references, &tool_labels);
                     return Ok(AgentResult {
@@ -254,8 +257,8 @@ fn emit_done(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::model::ToolCall;
+    use super::*;
 
     #[test]
     fn test_max_iterations_default() {

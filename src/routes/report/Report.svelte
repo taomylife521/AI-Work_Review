@@ -11,6 +11,13 @@
   import { formatLocalizedDate, formatLocalizedTime, formatDurationLocalized, locale, t } from '$lib/i18n/index.js';
   import { shouldShowPromptAppliedToast } from './reportPromptFeedback.js';
   import { resolveReportMeta } from './reportMeta.js';
+  import {
+    extractReportBlockName,
+    getVisibleReportSections,
+    parseReportSections,
+    reportSectionMarkdownForDisplay,
+    reportSectionMarkdownForStorage,
+  } from './reportSections.js';
   import LocalizedDatePicker from '../../lib/components/LocalizedDatePicker.svelte';
 
   function getLocalDateString() {
@@ -394,37 +401,12 @@
   // 结构化编辑：将 markdown 按 ## 标题拆分为段落
   let editingSection = -1; // 当前正在编辑的段落索引
   let editingContent = ''; // 编辑中的内容
-
-  function parseSections(content) {
-    if (!content) return [];
-    const lines = content.split('\n');
-    const sections = [];
-    let currentTitle = '';
-    let currentLines = [];
-
-    for (const line of lines) {
-      // <details> 块作为独立段落，与上方内容分离
-      if (line.startsWith('<details>') || line.startsWith('## ')) {
-        if (currentTitle || currentLines.length) {
-          sections.push({ title: currentTitle, body: currentLines.join('\n') });
-        }
-        currentTitle = line.startsWith('## ') ? line : '';
-        currentLines = line.startsWith('<details>') ? [line] : [];
-      } else {
-        currentLines.push(line);
-      }
-    }
-    if (currentTitle || currentLines.length) {
-      sections.push({ title: currentTitle, body: currentLines.join('\n') });
-    }
-
-    return sections;
-  }
+  let showBlockManager = false; // 段落管理弹层
 
   function startEditSection(sections, index) {
     editingSection = index;
     const section = sections[index];
-    editingContent = section.title ? section.title + '\n' + section.body : section.body;
+    editingContent = reportSectionMarkdownForStorage(section);
   }
 
   function cancelEditSection() {
@@ -435,7 +417,7 @@
   async function saveEditSection(sections, index) {
     const newContent = editingContent.trim();
     const newSections = [...sections];
-    const parsed = parseSections(newContent || '');
+    const parsed = parseReportSections(newContent || '');
     if (parsed.length > 0) {
       newSections[index] = parsed[0];
       // If user added more ## headers, merge them in
@@ -444,10 +426,7 @@
       }
     }
 
-    const fullContent = newSections.map(s => {
-      if (s.title && s.body) return s.title + '\n' + s.body;
-      return s.title || s.body;
-    }).join('\n');
+    const fullContent = newSections.map(reportSectionMarkdownForStorage).join('\n');
 
     try {
       await invoke('update_report_content', { date: selectedDate, locale: currentLocale, content: fullContent });
@@ -474,7 +453,42 @@
     loadReport(previousReport);
   }
 
-  $: reportSections = parseSections(report?.content || '');
+  $: reportSections = parseReportSections(report?.content || '');
+  // 钉选/隐藏偏好（从 config 读取，前端即时过滤）
+  $: pinnedBlocks = config?.daily_report_pinned_blocks || [];
+  $: hiddenBlocks = config?.daily_report_hidden_blocks || [];
+
+  $: visibleSections = getVisibleReportSections(reportSections, pinnedBlocks, hiddenBlocks);
+
+  async function togglePinBlock(section) {
+    const blockName = extractReportBlockName(section);
+    if (!blockName) return;
+    const newPinned = pinnedBlocks.includes(blockName)
+      ? pinnedBlocks.filter((b) => b !== blockName)
+      : [...pinnedBlocks, blockName];
+    try {
+      await invoke('set_report_block_preference', {
+        pinnedBlocks: newPinned,
+        hiddenBlocks,
+      });
+      config = { ...config, daily_report_pinned_blocks: newPinned };
+    } catch (e) { console.error('设置钉选失败:', e); }
+  }
+
+  async function toggleHideBlock(section) {
+    const blockName = extractReportBlockName(section);
+    if (!blockName) return;
+    const newHidden = hiddenBlocks.includes(blockName)
+      ? hiddenBlocks.filter((b) => b !== blockName)
+      : [...hiddenBlocks, blockName];
+    try {
+      await invoke('set_report_block_preference', {
+        pinnedBlocks,
+        hiddenBlocks: newHidden,
+      });
+      config = { ...config, daily_report_hidden_blocks: newHidden };
+    } catch (e) { console.error('设置隐藏失败:', e); }
+  }
 
   $: reportMeta = resolveReportMeta(report, config);
 
@@ -578,6 +592,19 @@
           >
             {t('report.batchExport')}
           </button>
+          {#if hiddenBlocks.length > 0}
+            <button
+              class="page-action-secondary min-h-10 px-4 py-2"
+              on:click={() => (showBlockManager = !showBlockManager)}
+              title={t('report.manageBlocks')}
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+              </svg>
+              {t('report.manageBlocks')}
+              <span class="ml-1 rounded-full bg-slate-200 dark:bg-[#484f58] px-1.5 text-[10px] font-semibold">{hiddenBlocks.length}</span>
+            </button>
+          {/if}
           <button
             class="page-action-warn"
             on:click={() => generateReport(true)}
@@ -792,6 +819,31 @@
         </div>
       </div>
     {/if}
+    {#if showBlockManager && hiddenBlocks.length > 0}
+      <div class="page-card mb-4 p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-semibold">{t('report.manageBlocksTitle')}</h3>
+          <button class="text-slate-400 hover:text-slate-600 dark:text-[#7d8590] dark:hover:text-[#c9d1d9]" on:click={() => (showBlockManager = false)}>
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          {#each hiddenBlocks as blockName}
+            <button
+              class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-[#30363d] bg-white dark:bg-[#21262d] px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-[#adbac7] hover:border-indigo-300 dark:hover:border-indigo-500 transition-colors"
+              on:click={() => {
+                const newHidden = hiddenBlocks.filter((b) => b !== blockName);
+                invoke('set_report_block_preference', { pinnedBlocks, hiddenBlocks: newHidden });
+                config = { ...config, daily_report_hidden_blocks: newHidden };
+              }}
+            >
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+              {t(`report.blockNames.${blockName}`) || blockName}
+            </button>
+          {/each}
+        </div>
+      </div>
+    {/if}
     <div class="page-card report-sheet report-article-card">
       <div class="report-sheet-content">
         <div class="report-sheet-meta text-xs text-slate-400 mb-4 flex items-center gap-2">
@@ -819,24 +871,47 @@
           </div>
         {/if}
         <div class="markdown-body report-sheet-body prose prose-slate dark:prose-invert max-w-none">
-          {#each reportSections as section, i}
-            <div class="report-section">
+          {#each visibleSections as section, i}
+            {@const blockName = extractReportBlockName(section)}
+            <div class="report-section group/section">
               <div class="report-section-header">
                 <div
                   use:interceptReportLinks
                   class="report-section-content"
                 >
-                  {@html renderMarkdown(section.title + '\n' + section.body)}
+                  {@html renderMarkdown(reportSectionMarkdownForDisplay(section, section.displaySectionIndex ?? i, currentLocale))}
                 </div>
-                <button
-                  class="report-section-edit-btn"
-                  on:click={() => startEditSection(reportSections, i)}
-                  title={t('report.editSection')}
-                >
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                  </svg>
-                </button>
+                <div class="report-section-actions flex items-center gap-1 opacity-0 group-hover/section:opacity-100 transition-opacity">
+                  {#if blockName}
+                    <button
+                      class="report-section-edit-btn"
+                      on:click={() => togglePinBlock(section)}
+                      title={pinnedBlocks.includes(blockName) ? t('report.unpinBlock') : t('report.pinBlock')}
+                    >
+                      <svg class="w-3.5 h-3.5" fill={pinnedBlocks.includes(blockName) ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                      </svg>
+                    </button>
+                    <button
+                      class="report-section-edit-btn"
+                      on:click={() => toggleHideBlock(section)}
+                      title={t('report.hideBlock')}
+                    >
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.578 7.578l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                      </svg>
+                    </button>
+                  {/if}
+                  <button
+                    class="report-section-edit-btn"
+                    on:click={() => startEditSection(reportSections, section.originalIndex ?? i)}
+                    title={t('report.editSection')}
+                  >
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                    </svg>
+                  </button>
+                </div>
               </div>
             </div>
           {/each}

@@ -521,9 +521,15 @@ mod tests {
             is_minimized: false,
         };
 
-        let suggestion =
-            find_followup_suggestion(&activities, &active_window, "assistant", &[], 1_710_020_000, 0)
-                .expect("should match");
+        let suggestion = find_followup_suggestion(
+            &activities,
+            &active_window,
+            "assistant",
+            &[],
+            1_710_020_000,
+            0,
+        )
+        .expect("should match");
 
         let expected_date = chrono::Local
             .timestamp_opt(1_710_000_000, 0)

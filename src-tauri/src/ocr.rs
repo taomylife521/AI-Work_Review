@@ -332,9 +332,17 @@ if __name__ == "__main__":
         };
 
         // 子进程已退出（或被 kill 后管道关闭），读线程结束，join 取回输出。
-        let stdout = stdout_handle.and_then(|h| h.join().ok()).unwrap_or_default();
-        let stderr = stderr_handle.and_then(|h| h.join().ok()).unwrap_or_default();
-        Ok(Output { status, stdout, stderr })
+        let stdout = stdout_handle
+            .and_then(|h| h.join().ok())
+            .unwrap_or_default();
+        let stderr = stderr_handle
+            .and_then(|h| h.join().ok())
+            .unwrap_or_default();
+        Ok(Output {
+            status,
+            stdout,
+            stderr,
+        })
     }
 
     /// 获取 Python 路径（优先使用 work_review conda 环境）
@@ -1463,8 +1471,27 @@ fn is_valid_char(c: char) -> bool {
     // 代码 / URL / 文件路径常用符号：OCR 屏幕上的代码、终端、URL 不应被这些符号破坏
     if matches!(
         c,
-        '/' | '\\' | '*' | '+' | '=' | '<' | '>' | '#' | '@' | '$' | '%' | '^' | '&'
-            | '|' | '`' | '~' | '{' | '}' | '[' | ']' | '_' | '-'
+        '/' | '\\'
+            | '*'
+            | '+'
+            | '='
+            | '<'
+            | '>'
+            | '#'
+            | '@'
+            | '$'
+            | '%'
+            | '^'
+            | '&'
+            | '|'
+            | '`'
+            | '~'
+            | '{'
+            | '}'
+            | '['
+            | ']'
+            | '_'
+            | '-'
     ) {
         return true;
     }

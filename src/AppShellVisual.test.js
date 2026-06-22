@@ -68,3 +68,13 @@ test('统一底板结构下，卡片感应集中在 frame 层，内层容器不�
   assert.match(appCssSource, /\.sidebar-editorial-shell\s*\{[\s\S]*background:\s*transparent;/);
   assert.doesNotMatch(appCssSource, /\.sidebar-editorial-shell::before/);
 });
+
+test('主内容滚动条应从圆角裁剪边界内缩，避免顶部和底部被遮住', async () => {
+  const appCssSource = await readFile(new URL('./app.css', import.meta.url), 'utf8');
+
+  assert.match(appCssSource, /\.app-shell-main\s*\{[\s\S]*padding:\s*0\.18rem/);
+  assert.match(appCssSource, /\.app-shell-main-scroll\s*\{[\s\S]*scrollbar-gutter:\s*stable/);
+  assert.match(appCssSource, /\.app-shell-main-scroll\s*\{[\s\S]*border-radius:\s*1\.72rem/);
+  assert.match(appCssSource, /\.app-shell-main-scroll\s*\{[\s\S]*padding-right:\s*0\.12rem/);
+  assert.match(appCssSource, /\.app-shell-main-scroll\s*\{[\s\S]*padding-bottom:\s*0\.12rem/);
+});

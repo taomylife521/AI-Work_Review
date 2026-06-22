@@ -3,12 +3,12 @@ use crate::analysis::{
     Analyzer, AppLocale, GeneratedReport,
 };
 use crate::database::{Activity, DailyStats};
-use std::collections::HashMap;
 use crate::error::{AppError, Result};
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use reqwest::Client;
 use serde_json::json;
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 
@@ -127,7 +127,8 @@ impl CloudAnalyzer {
         insights: &[String],
         category_overrides: &HashMap<String, String>,
     ) -> Result<String> {
-        let stats_summary = generate_stats_summary_for_locale(stats, self.locale, category_overrides);
+        let stats_summary =
+            generate_stats_summary_for_locale(stats, self.locale, category_overrides);
         let timeline = generate_session_timeline(activities, self.locale);
         let insights_text = insights
             .iter()
@@ -233,7 +234,13 @@ impl Analyzer for CloudAnalyzer {
         }
 
         let (content, used_ai, fallback_reason) = match self
-            .generate_final_report(date, stats, activities, &insights, &_category_name_overrides)
+            .generate_final_report(
+                date,
+                stats,
+                activities,
+                &insights,
+                &_category_name_overrides,
+            )
             .await
         {
             Ok(content) => (content, true, None),
@@ -249,8 +256,11 @@ impl Analyzer for CloudAnalyzer {
                             .to_string()
                     }
                 };
-                let mut base =
-                    generate_stats_summary_for_locale(stats, self.locale, &_category_name_overrides);
+                let mut base = generate_stats_summary_for_locale(
+                    stats,
+                    self.locale,
+                    &_category_name_overrides,
+                );
                 base.push_str(&format!("\n\n---\n*{reason}"));
                 (base, false, Some(reason))
             }
@@ -260,6 +270,7 @@ impl Analyzer for CloudAnalyzer {
             content,
             used_ai,
             fallback_reason,
+            ai_order: None,
         })
     }
 }

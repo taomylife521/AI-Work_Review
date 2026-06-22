@@ -165,8 +165,12 @@ pub fn derive_avatar_state_with_rules(
     let url_lower = browser_url.unwrap_or_default().trim().to_lowercase();
     let manual_base_category =
         crate::monitor::find_category_override(rules, app_name.as_str(), custom_categories);
-    let base_category =
-        crate::monitor::categorize_app_with_rules(rules, app_name.as_str(), window_title, custom_categories);
+    let base_category = crate::monitor::categorize_app_with_rules(
+        rules,
+        app_name.as_str(),
+        window_title,
+        custom_categories,
+    );
     let classification = crate::activity_classifier::classify_activity_with_base_category(
         app_name.as_str(),
         window_title,
@@ -438,7 +442,10 @@ pub fn set_avatar_click_through(app: &AppHandle, click_through: bool) {
         if let Err(e) = window.set_ignore_cursor_events(click_through) {
             log::warn!("设置桌宠鼠标穿透失败: {e}");
         } else {
-            log::info!("桌宠鼠标穿透已{}", if click_through { "开启" } else { "关闭" });
+            log::info!(
+                "桌宠鼠标穿透已{}",
+                if click_through { "开启" } else { "关闭" }
+            );
         }
     }
 }
@@ -454,10 +461,23 @@ pub fn avatar_window_hit_by_cursor(app: &AppHandle) -> bool {
     let Some(window) = app.get_webview_window(AVATAR_WINDOW_LABEL) else {
         return false;
     };
-    let Ok(pos) = window.outer_position() else { return false; };
-    let Ok(size) = window.outer_size() else { return false; };
-    let Some((cx, cy)) = crate::avatar_input::global_cursor_position(app) else { return false; };
-    point_in_rect(cx, cy, pos.x as i64, pos.y as i64, size.width as i64, size.height as i64)
+    let Ok(pos) = window.outer_position() else {
+        return false;
+    };
+    let Ok(size) = window.outer_size() else {
+        return false;
+    };
+    let Some((cx, cy)) = crate::avatar_input::global_cursor_position(app) else {
+        return false;
+    };
+    point_in_rect(
+        cx,
+        cy,
+        pos.x as i64,
+        pos.y as i64,
+        size.width as i64,
+        size.height as i64,
+    )
 }
 
 pub fn apply_avatar_window_expansion(
@@ -736,9 +756,9 @@ fn avatar_state(
 mod tests {
     use super::{
         avatar_window_size, clamp_avatar_position, clamp_avatar_position_with_size,
-        default_avatar_state, derive_avatar_state, derive_avatar_state_with_rules,
-        point_in_rect, remembered_avatar_position, resolve_avatar_position, Rect,
-        AVATAR_WINDOW_HEIGHT, AVATAR_WINDOW_WIDTH,
+        default_avatar_state, derive_avatar_state, derive_avatar_state_with_rules, point_in_rect,
+        remembered_avatar_position, resolve_avatar_position, Rect, AVATAR_WINDOW_HEIGHT,
+        AVATAR_WINDOW_WIDTH,
     };
     use crate::config::AppCategoryRule;
 

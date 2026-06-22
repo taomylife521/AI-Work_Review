@@ -1,11 +1,8 @@
 use crate::analysis::report_blocks::{
-    render_local_app_usage_list, render_local_category_list, render_local_domain_usage_list,
-    render_local_overview, wrap_block, BLOCK_LOCAL_APP_USAGE, BLOCK_LOCAL_CATEGORY,
-    BLOCK_LOCAL_DOMAIN_USAGE, BLOCK_LOCAL_OVERVIEW, BLOCK_HOURLY_SUMMARY,
+    apply_preferences, assemble_with_section_count, default_local_order, format_section_heading,
 };
 use crate::analysis::{
     append_custom_prompt_for_locale, format_duration_for_locale, generate_activity_timeline,
-    generate_hourly_activity_summary_for_locale,
     translate_semantic_category_name, Analyzer, AppLocale, GeneratedReport,
 };
 use crate::database::{Activity, DailyStats};
@@ -18,10 +15,15 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 
-fn format_domain_label(domain: &crate::database::DomainUsage, locale: AppLocale, semantic_overrides: &HashMap<String, String>) -> String {
+fn format_domain_label(
+    domain: &crate::database::DomainUsage,
+    locale: AppLocale,
+    semantic_overrides: &HashMap<String, String>,
+) -> String {
     match domain.semantic_category.as_deref().map(str::trim) {
         Some(semantic_category) if !semantic_category.is_empty() => {
-            let semantic_category = translate_semantic_category_name(semantic_category, locale, semantic_overrides);
+            let semantic_category =
+                translate_semantic_category_name(semantic_category, locale, semantic_overrides);
             match locale {
                 AppLocale::En => format!("{} ({})", domain.domain, semantic_category),
                 _ => format!("{}（{}）", domain.domain, semantic_category),
@@ -50,11 +52,20 @@ pub struct LocalAnalyzer {
     model: String,
     custom_prompt: String,
     locale: AppLocale,
+    pinned_blocks: Vec<String>,
+    hidden_blocks: Vec<String>,
     client: Client,
 }
 
 impl LocalAnalyzer {
-    pub fn new(host: &str, model: &str, custom_prompt: &str, locale: AppLocale) -> Self {
+    pub fn new(
+        host: &str,
+        model: &str,
+        custom_prompt: &str,
+        locale: AppLocale,
+        pinned_blocks: Vec<String>,
+        hidden_blocks: Vec<String>,
+    ) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(120))
             .connect_timeout(Duration::from_secs(10))
@@ -66,6 +77,8 @@ impl LocalAnalyzer {
             model: model.to_string(),
             custom_prompt: custom_prompt.to_string(),
             locale,
+            pinned_blocks,
+            hidden_blocks,
             client,
         }
     }
@@ -351,44 +364,18 @@ impl Analyzer for LocalAnalyzer {
         let mut used_ai = false;
         let mut fallback_reason = None;
 
-        report.push_str(&wrap_block(
-            BLOCK_LOCAL_OVERVIEW,
-            &render_local_overview(stats, locale),
-        ));
-
-        if !stats.category_usage.is_empty() {
-            report.push_str(&wrap_block(
-                BLOCK_LOCAL_CATEGORY,
-                &render_local_category_list(stats, locale, &category_name_overrides),
-            ));
-        }
-
-        if !stats.app_usage.is_empty() {
-            report.push_str(&wrap_block(
-                BLOCK_LOCAL_APP_USAGE,
-                &render_local_app_usage_list(stats, locale),
-            ));
-        }
-
-        if let Some(hourly_summary) = generate_hourly_activity_summary_for_locale(stats, locale) {
-            // 直接复用 summary 模式的小时活跃度块格式（标记名一致 → 读时统一替换）
-            let mut hourly_block = String::new();
-            hourly_block.push_str(match locale {
-                AppLocale::ZhCn => "## 四、按小时活跃度\n\n",
-                AppLocale::ZhTw => "## 四、按小時活躍度\n\n",
-                AppLocale::En => "## 4. Hourly Activity\n\n",
-            });
-            hourly_block.push_str(&hourly_summary);
-            hourly_block.push('\n');
-            report.push_str(&wrap_block(BLOCK_HOURLY_SUMMARY, &hourly_block));
-        }
-
-        if !stats.domain_usage.is_empty() {
-            report.push_str(&wrap_block(
-                BLOCK_LOCAL_DOMAIN_USAGE,
-                &render_local_domain_usage_list(stats, locale, &semantic_name_overrides),
-            ));
-        }
+        let (stats_sections, mut section_count) = assemble_with_section_count(
+            &apply_preferences(
+                default_local_order(),
+                &self.pinned_blocks,
+                &self.hidden_blocks,
+            ),
+            stats,
+            locale,
+            &category_name_overrides,
+            &semantic_name_overrides,
+        );
+        report.push_str(&stats_sections);
 
         match self.generate_with_ollama(date, stats, activities).await {
             Ok(ai_content) => {
@@ -418,7 +405,13 @@ impl Analyzer for LocalAnalyzer {
 
                 match locale {
                     AppLocale::ZhCn => {
-                        report.push_str("\n## 六、今日工作内容\n\n");
+                        section_count += 1;
+                        report.push('\n');
+                        report.push_str(&format_section_heading(
+                            locale,
+                            section_count,
+                            "今日工作内容",
+                        ));
                         report.push_str(&format!(
                             "今日主要使用 {} 等应用进行工作，整体推进比较稳定。\n",
                             if apps_list.is_empty() {
@@ -427,15 +420,29 @@ impl Analyzer for LocalAnalyzer {
                                 apps_list
                             }
                         ));
-                        report.push_str("\n## 七、专注度分析\n\n");
+                        section_count += 1;
+                        report.push('\n');
+                        report.push_str(&format_section_heading(
+                            locale,
+                            section_count,
+                            "专注度分析",
+                        ));
                         report.push_str("今天整体节奏较稳定，可以继续保持当前的工作推进方式。\n");
-                        report.push_str("\n## 八、明日建议\n\n");
+                        section_count += 1;
+                        report.push('\n');
+                        report.push_str(&format_section_heading(locale, section_count, "明日建议"));
                         report
                             .push_str("建议为核心任务预留更完整的连续时间段，减少被打断的次数。\n");
                         report.push_str("\n---\n*注：AI 分析暂不可用，使用基础模板生成。*");
                     }
                     AppLocale::ZhTw => {
-                        report.push_str("\n## 六、今日工作內容\n\n");
+                        section_count += 1;
+                        report.push('\n');
+                        report.push_str(&format_section_heading(
+                            locale,
+                            section_count,
+                            "今日工作內容",
+                        ));
                         report.push_str(&format!(
                             "今日主要使用 {} 等應用進行工作，整體推進相對穩定。\n",
                             if apps_list.is_empty() {
@@ -444,15 +451,29 @@ impl Analyzer for LocalAnalyzer {
                                 apps_list
                             }
                         ));
-                        report.push_str("\n## 七、專注度分析\n\n");
+                        section_count += 1;
+                        report.push('\n');
+                        report.push_str(&format_section_heading(
+                            locale,
+                            section_count,
+                            "專注度分析",
+                        ));
                         report.push_str("今天整體節奏較穩定，可以延續目前的工作推進方式。\n");
-                        report.push_str("\n## 八、明日建議\n\n");
+                        section_count += 1;
+                        report.push('\n');
+                        report.push_str(&format_section_heading(locale, section_count, "明日建議"));
                         report
                             .push_str("建議為核心任務預留更完整的連續時間段，減少被打斷的次數。\n");
                         report.push_str("\n---\n*註：AI 分析暫時不可用，目前使用基礎模板生成。*");
                     }
                     AppLocale::En => {
-                        report.push_str("\n## 6. Today's work\n\n");
+                        section_count += 1;
+                        report.push('\n');
+                        report.push_str(&format_section_heading(
+                            locale,
+                            section_count,
+                            "Today's work",
+                        ));
                         report.push_str(&format!(
                             "Today mainly involved work across {} and related tools, with a fairly steady pace overall.\n",
                             if apps_list.is_empty() {
@@ -461,9 +482,21 @@ impl Analyzer for LocalAnalyzer {
                                 apps_list
                             }
                         ));
-                        report.push_str("\n## 7. Focus assessment\n\n");
+                        section_count += 1;
+                        report.push('\n');
+                        report.push_str(&format_section_heading(
+                            locale,
+                            section_count,
+                            "Focus assessment",
+                        ));
                         report.push_str("The overall rhythm looks stable today, and the workflow stayed reasonably consistent.\n");
-                        report.push_str("\n## 8. Next-step suggestion\n\n");
+                        section_count += 1;
+                        report.push('\n');
+                        report.push_str(&format_section_heading(
+                            locale,
+                            section_count,
+                            "Next-step suggestion",
+                        ));
                         report.push_str("Reserve a longer uninterrupted block for the main task tomorrow to reduce context switching.\n");
                         report.push_str("\n---\n*Note: AI analysis is currently unavailable, so this report was generated from the base template.*");
                     }
@@ -482,6 +515,7 @@ impl Analyzer for LocalAnalyzer {
             content: report,
             used_ai,
             fallback_reason,
+            ai_order: None,
         })
     }
 }

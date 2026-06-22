@@ -591,10 +591,7 @@ impl Database {
             [],
         );
         // 迁移：添加 screenshot_url 列（远程存储 URL）
-        let _ = conn.execute(
-            "ALTER TABLE activities ADD COLUMN screenshot_url TEXT",
-            [],
-        );
+        let _ = conn.execute("ALTER TABLE activities ADD COLUMN screenshot_url TEXT", []);
 
         // === AI 工作记忆（自进化洞察） ===
         conn.execute(
@@ -1028,9 +1025,10 @@ impl Database {
 
     /// 删除指定日期之前的所有活动记录（使用时间戳范围查询以利用索引）
     pub fn delete_activities_before_date(&self, before_date: &str) -> Result<usize> {
-        let conn = self.conn.lock().map_err(|e| {
-            crate::error::AppError::Unknown(format!("数据库锁获取失败: {e}"))
-        })?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| crate::error::AppError::Unknown(format!("数据库锁获取失败: {e}")))?;
         let date_parsed = chrono::NaiveDate::parse_from_str(before_date, "%Y-%m-%d")
             .map_err(|e| crate::error::AppError::Config(e.to_string()))?;
         let upper_ts = safe_local_timestamp(date_parsed.and_hms_opt(0, 0, 0).unwrap());
@@ -1066,7 +1064,13 @@ impl Database {
 
         let activities: Vec<(i64, String, Option<String>, Option<String>, i64)> = stmt
             .query_map(params![start_ts, end_ts], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
             })?
             .filter_map(|r| r.ok())
             .collect();
@@ -1285,12 +1289,8 @@ impl Database {
 
             // 计算下班后（最后工作时段结束后）的活动时长，即加班时长
             if timestamp > last_segment_end_ts {
-                after_hours_duration += calculate_overlap_duration(
-                    timestamp,
-                    duration,
-                    last_segment_end_ts,
-                    end_ts,
-                );
+                after_hours_duration +=
+                    calculate_overlap_duration(timestamp, duration, last_segment_end_ts, end_ts);
             }
 
             let interval_start = timestamp.saturating_sub(duration);
@@ -2116,15 +2116,21 @@ impl Database {
 
         let mut apps: Vec<AppUsage> = merged
             .into_iter()
-            .map(|(app_name, (duration, count, executable_path, screenshot_url, _))| AppUsage {
-                app_name,
-                duration,
-                count,
-                executable_path,
-                screenshot_url,
-            })
+            .map(
+                |(app_name, (duration, count, executable_path, screenshot_url, _))| AppUsage {
+                    app_name,
+                    duration,
+                    count,
+                    executable_path,
+                    screenshot_url,
+                },
+            )
             .collect();
-        apps.sort_by(|a, b| b.duration.cmp(&a.duration).then_with(|| a.app_name.cmp(&b.app_name)));
+        apps.sort_by(|a, b| {
+            b.duration
+                .cmp(&a.duration)
+                .then_with(|| a.app_name.cmp(&b.app_name))
+        });
         apps.truncate(limit as usize);
         Ok(apps)
     }
@@ -2183,10 +2189,10 @@ impl Database {
             }
             if entry.screenshot_url.is_none()
                 && screenshot_url
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .is_some()
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .is_some()
             {
                 entry.screenshot_url = screenshot_url;
             }
@@ -2624,7 +2630,8 @@ impl Database {
                 archived: row.get::<_, i32>(8)? != 0,
             })
         })?;
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(AppError::Database)
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(AppError::Database)
     }
 
     /// 用户反馈：positive=true（确认）→ confidence +0.1, confirmed +1
@@ -3282,7 +3289,10 @@ mod tests {
         assert_eq!(stats.browser_usage[0].domains[0].duration, 30 * 60);
         assert_eq!(stats.browser_usage[0].domains[1].domain, "example.com");
         assert_eq!(stats.browser_usage[0].domains[1].duration, 5 * 60);
-        assert_eq!(stats.browser_usage[0].domains[0].urls[0].url, "linux.dolatest");
+        assert_eq!(
+            stats.browser_usage[0].domains[0].urls[0].url,
+            "linux.dolatest"
+        );
         assert!(stats
             .browser_usage
             .iter()

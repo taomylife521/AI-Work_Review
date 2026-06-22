@@ -10,10 +10,10 @@ use std::net::TcpListener as StdTcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use subtle::ConstantTimeEq;
 use tauri::AppHandle;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use subtle::ConstantTimeEq;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
@@ -38,7 +38,6 @@ pub struct LocalhostApiRuntime {
     pub last_error: Option<String>,
     pub shutdown_tx: Option<oneshot::Sender<()>>,
 }
-
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -271,7 +270,8 @@ pub fn get_localhost_api_status(state: &Arc<Mutex<AppState>>) -> Result<Localhos
         config.localhost_api_port
     };
     let port = runtime_port.unwrap_or(configured_port);
-    let host = runtime_host.unwrap_or_else(|| effective_api_host(config.localhost_api_host.as_deref()));
+    let host =
+        runtime_host.unwrap_or_else(|| effective_api_host(config.localhost_api_host.as_deref()));
 
     Ok(LocalhostApiStatusPayload {
         enabled: config.localhost_api_enabled,
@@ -664,11 +664,14 @@ async fn route_request(
             }
         }
         ("GET", "/v1/stats/today") => {
-            commands::get_today_stats_inner(state)
-                .map(|stats| HttpResponse::json(200, &stats))
+            commands::get_today_stats_inner(state).map(|stats| HttpResponse::json(200, &stats))
         }
         ("GET", "/v1/stats/overview") => {
-            let mode = request.query.get("mode").cloned().unwrap_or_else(|| "today".to_string());
+            let mode = request
+                .query
+                .get("mode")
+                .cloned()
+                .unwrap_or_else(|| "today".to_string());
             let date = request.query.get("date").cloned();
             let date_from = request.query.get("date_from").cloned();
             let date_to = request.query.get("date_to").cloned();
@@ -684,32 +687,30 @@ async fn route_request(
                     .map(|stats| HttpResponse::json(200, &stats))
             }
         }
-        ("GET", "/v1/apps/recent") => {
-            commands::get_recent_app_usage_inner(state).map(|items| {
-                let apps = items
-                    .iter()
-                    .map(|item| item.app_name.clone())
-                    .collect::<Vec<_>>();
-                HttpResponse::json(200, &serde_json::json!({
+        ("GET", "/v1/apps/recent") => commands::get_recent_app_usage_inner(state).map(|items| {
+            let apps = items
+                .iter()
+                .map(|item| item.app_name.clone())
+                .collect::<Vec<_>>();
+            HttpResponse::json(
+                200,
+                &serde_json::json!({
                     "apps": apps,
                     "items": items,
-                }))
-            })
-        }
-        ("GET", "/v1/apps/category-overview") => {
-            commands::get_app_category_overview_inner(state)
-                .map(|overview| HttpResponse::json(200, &overview))
-        }
-        ("GET", "/v1/categories") => {
-            commands::get_categories_inner(state)
-                .map(|categories| HttpResponse::json(200, &categories))
-        }
-        ("GET", "/v1/categories/semantic") => {
-            commands::get_semantic_categories_inner(state)
-                .map(|categories| HttpResponse::json(200, &categories))
-        }
+                }),
+            )
+        }),
+        ("GET", "/v1/apps/category-overview") => commands::get_app_category_overview_inner(state)
+            .map(|overview| HttpResponse::json(200, &overview)),
+        ("GET", "/v1/categories") => commands::get_categories_inner(state)
+            .map(|categories| HttpResponse::json(200, &categories)),
+        ("GET", "/v1/categories/semantic") => commands::get_semantic_categories_inner(state)
+            .map(|categories| HttpResponse::json(200, &categories)),
         _ if request.method == "GET" && request.path.starts_with("/v1/hourly-summaries/") => {
-            let date = request.path.trim_start_matches("/v1/hourly-summaries/").trim();
+            let date = request
+                .path
+                .trim_start_matches("/v1/hourly-summaries/")
+                .trim();
             if date.is_empty() {
                 Err(AppError::Config("日期不能为空".to_string()))
             } else {
@@ -718,8 +719,7 @@ async fn route_request(
             }
         }
         ("GET", "/v1/storage/stats") => {
-            commands::get_storage_stats_inner(state)
-                .map(|stats| HttpResponse::json(200, &stats))
+            commands::get_storage_stats_inner(state).map(|stats| HttpResponse::json(200, &stats))
         }
         ("GET", "/v1/device") => handle_device_info(state),
         ("GET", "/v1/weekly-review") => {
@@ -741,12 +741,17 @@ async fn route_request(
             }
         }
         _ if request.method == "GET" && request.path.starts_with("/v1/hourly-app-breakdown/") => {
-            let date = request.path.trim_start_matches("/v1/hourly-app-breakdown/").trim();
+            let date = request
+                .path
+                .trim_start_matches("/v1/hourly-app-breakdown/")
+                .trim();
             if date.is_empty() {
                 Err(AppError::Config("日期不能为空".to_string()))
             } else {
                 match state.lock() {
-                    Ok(s) => s.database.get_hourly_app_breakdown(date)
+                    Ok(s) => s
+                        .database
+                        .get_hourly_app_breakdown(date)
                         .map(|result| HttpResponse::json(200, &result)),
                     Err(e) => Err(AppError::Unknown(e.to_string())),
                 }
@@ -757,12 +762,15 @@ async fn route_request(
             if date.is_empty() {
                 Err(AppError::Config("日期不能为空".to_string()))
             } else {
-                let limit: usize = request.query
+                let limit: usize = request
+                    .query
                     .get("limit")
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(10000);
                 match state.lock() {
-                    Ok(s) => s.database.get_activities_in_range(Some(date), Some(date), limit)
+                    Ok(s) => s
+                        .database
+                        .get_activities_in_range(Some(date), Some(date), limit)
                         .map(|result| HttpResponse::json(200, &result)),
                     Err(e) => Err(AppError::Unknown(e.to_string())),
                 }

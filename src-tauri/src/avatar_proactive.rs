@@ -81,8 +81,11 @@ pub async fn decide_and_speak(
         }
     };
 
-    let next_check_ms =
-        now_ms + parsed.next_check_minutes.clamp(MIN_NEXT_CHECK_MIN, MAX_NEXT_CHECK_MIN) * 60_000;
+    let next_check_ms = now_ms
+        + parsed
+            .next_check_minutes
+            .clamp(MIN_NEXT_CHECK_MIN, MAX_NEXT_CHECK_MIN)
+            * 60_000;
 
     if !parsed.speak || parsed.text.trim().is_empty() {
         return ProactiveOutcome {
@@ -110,7 +113,10 @@ pub async fn decide_and_speak(
 
     let mood = tone_to_mode(&tone).map(|m| (m, now_ms + MOOD_DURATION_MS));
 
-    ProactiveOutcome { mood, next_check_ms }
+    ProactiveOutcome {
+        mood,
+        next_check_ms,
+    }
 }
 
 fn fallback(now_ms: u64) -> ProactiveOutcome {
@@ -210,10 +216,9 @@ mod tests {
 
     #[test]
     fn parse_reply_plain_json() {
-        let r = parse_reply(
-            r#"{"speak":true,"text":"休息下","tone":"tired","next_check_minutes":8}"#,
-        )
-        .expect("plain json");
+        let r =
+            parse_reply(r#"{"speak":true,"text":"休息下","tone":"tired","next_check_minutes":8}"#)
+                .expect("plain json");
         assert!(r.speak);
         assert_eq!(r.text, "休息下");
         assert_eq!(r.tone, "tired");

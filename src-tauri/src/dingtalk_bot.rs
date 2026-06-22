@@ -1,6 +1,4 @@
-use crate::bot_common::{
-    build_device_list, handle_cmd, status_payload, UNKNOWN_CMD_REPLY,
-};
+use crate::bot_common::{build_device_list, handle_cmd, status_payload, UNKNOWN_CMD_REPLY};
 use crate::config::AppConfig;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use reqwest::Client;
@@ -135,10 +133,7 @@ pub async fn handle_dingtalk_callback(
     if msg_type != "text" {
         // For non-text messages, we can't reply via sessionWebhook with a text response
         // Just return ok to acknowledge
-        return DingtalkResponse::json(
-            200,
-            &status_payload("ignored", "non_text_message", None),
-        );
+        return DingtalkResponse::json(200, &status_payload("ignored", "non_text_message", None));
     }
 
     let raw_content = event
@@ -176,10 +171,7 @@ pub async fn handle_dingtalk_callback(
         );
     }
     if !is_allowed_dingtalk_webhook(session_webhook) {
-        return DingtalkResponse::error(
-            400,
-            "sessionWebhook 域名不在钉钉白名单内，已拒绝出站请求",
-        );
+        return DingtalkResponse::error(400, "sessionWebhook 域名不在钉钉白名单内，已拒绝出站请求");
     }
 
     let reply_body = serde_json::json!({
@@ -197,10 +189,9 @@ pub async fn handle_dingtalk_callback(
             200,
             &status_payload("ok", "replied", Some("已通过 sessionWebhook 回复")),
         ),
-        Err(e) => DingtalkResponse::error(
-            500,
-            format!("failed to send reply via sessionWebhook: {e}"),
-        ),
+        Err(e) => {
+            DingtalkResponse::error(500, format!("failed to send reply via sessionWebhook: {e}"))
+        }
     }
 }
 
@@ -257,10 +248,16 @@ mod tests {
         assert!(timestamp_within_window(&now_ms.to_string(), 3600 * 1000));
         // 30 分钟前 → 允许
         let half_hour_ago = now_ms - 30 * 60 * 1000;
-        assert!(timestamp_within_window(&half_hour_ago.to_string(), 3600 * 1000));
+        assert!(timestamp_within_window(
+            &half_hour_ago.to_string(),
+            3600 * 1000
+        ));
         // 2 小时前 → 拒绝
         let two_hours_ago = now_ms - 2 * 3600 * 1000;
-        assert!(!timestamp_within_window(&two_hours_ago.to_string(), 3600 * 1000));
+        assert!(!timestamp_within_window(
+            &two_hours_ago.to_string(),
+            3600 * 1000
+        ));
         // 非法字符串 → 拒绝
         assert!(!timestamp_within_window("not_a_number", 3600 * 1000));
         // 空 → 拒绝
@@ -281,10 +278,16 @@ mod tests {
         ));
         // 内网 IP
         assert!(!is_allowed_dingtalk_webhook("https://127.0.0.1/evil"));
-        assert!(!is_allowed_dingtalk_webhook("https://169.254.169.254/latest"));
+        assert!(!is_allowed_dingtalk_webhook(
+            "https://169.254.169.254/latest"
+        ));
         // 仿冒域名
-        assert!(!is_allowed_dingtalk_webhook("https://dingtalk.com.evil.io/path"));
-        assert!(!is_allowed_dingtalk_webhook("https://oapi.dingtalk.com.evil.io/path"));
+        assert!(!is_allowed_dingtalk_webhook(
+            "https://dingtalk.com.evil.io/path"
+        ));
+        assert!(!is_allowed_dingtalk_webhook(
+            "https://oapi.dingtalk.com.evil.io/path"
+        ));
         assert!(!is_allowed_dingtalk_webhook("https://example.com/path"));
         // 非法 URL
         assert!(!is_allowed_dingtalk_webhook("not a url"));

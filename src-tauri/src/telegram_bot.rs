@@ -1,6 +1,6 @@
 use crate::bot_common::{
-    build_device_list, handle_cmd, normalize_command, progress_text_for_command,
-    DeviceEndpoint, NON_TEXT_REPLY, OUTPUT_DIVIDER,
+    build_device_list, handle_cmd, normalize_command, progress_text_for_command, DeviceEndpoint,
+    NON_TEXT_REPLY, OUTPUT_DIVIDER,
 };
 use crate::config::AppConfig;
 use crate::error::AppError;
@@ -298,8 +298,7 @@ async fn run(
                                         .map(|t| t.split_whitespace().next().unwrap_or(""))
                                         .map(normalize_command)
                                         .unwrap_or_default();
-                                    let authorized =
-                                        allowed_chat_ids.contains(&msg.chat.id);
+                                    let authorized = allowed_chat_ids.contains(&msg.chat.id);
 
                                     if !authorized {
                                         log::warn!("TG Bot 忽略未授权 chat_id: {}", msg.chat.id);

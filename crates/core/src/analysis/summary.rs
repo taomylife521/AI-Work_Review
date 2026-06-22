@@ -1,12 +1,11 @@
 use crate::analysis::report_blocks::{
-    render_app_usage_table, render_category_table, render_domain_usage_table,
-    render_hourly_summary, wrap_block, BLOCK_APP_USAGE_TABLE, BLOCK_CATEGORY_TABLE,
-    BLOCK_DOMAIN_USAGE_TABLE, BLOCK_HOURLY_SUMMARY,
+    apply_preferences, assemble_with_section_count, default_summary_order, format_section_heading,
+    merge_ai_order, wrap_block, BLOCK_AI_ANALYSIS,
 };
 use crate::analysis::{
     append_custom_prompt_for_locale, format_duration_for_locale, generate_activity_timeline,
-    generate_hourly_activity_summary_for_locale,
-    translate_semantic_category_name, Analyzer, AppLocale, GeneratedReport,
+    generate_hourly_activity_summary_for_locale, translate_semantic_category_name, Analyzer,
+    AppLocale, GeneratedReport,
 };
 use crate::config::AiProvider;
 use crate::database::{Activity, DailyStats};
@@ -38,10 +37,15 @@ fn is_local_summary_endpoint(endpoint: &str) -> bool {
         })
 }
 
-fn format_domain_label(domain: &crate::database::DomainUsage, locale: AppLocale, semantic_overrides: &HashMap<String, String>) -> String {
+fn format_domain_label(
+    domain: &crate::database::DomainUsage,
+    locale: AppLocale,
+    semantic_overrides: &HashMap<String, String>,
+) -> String {
     match domain.semantic_category.as_deref().map(str::trim) {
         Some(semantic_category) if !semantic_category.is_empty() => {
-            let semantic_category = translate_semantic_category_name(semantic_category, locale, semantic_overrides);
+            let semantic_category =
+                translate_semantic_category_name(semantic_category, locale, semantic_overrides);
             match locale {
                 AppLocale::En => format!("{} ({})", domain.domain, semantic_category),
                 _ => format!("{}（{}）", domain.domain, semantic_category),
@@ -157,6 +161,9 @@ pub struct SummaryAnalyzer {
     custom_prompt: String,
     system_prompt_override: Option<String>,
     locale: AppLocale,
+    pinned_blocks: Vec<String>,
+    hidden_blocks: Vec<String>,
+    cached_ai_order: Option<Vec<String>>,
     client: Client,
 }
 
@@ -169,6 +176,9 @@ impl SummaryAnalyzer {
         custom_prompt: &str,
         system_prompt_override: Option<&str>,
         locale: AppLocale,
+        pinned_blocks: Vec<String>,
+        hidden_blocks: Vec<String>,
+        cached_ai_order: Option<Vec<String>>,
     ) -> Self {
         let client = Client::builder()
             .timeout(summary_request_timeout(provider, endpoint))
@@ -184,6 +194,9 @@ impl SummaryAnalyzer {
             custom_prompt: custom_prompt.to_string(),
             system_prompt_override: system_prompt_override.map(|s| s.to_string()),
             locale,
+            pinned_blocks,
+            hidden_blocks,
+            cached_ai_order,
             client,
         }
     }
@@ -553,15 +566,19 @@ impl SummaryAnalyzer {
 4. 如果某项数据缺失，请明确说明未获取到，不要编造。
 
 【输出格式】
-请严格按以下四个标题输出，并使用简体中文：
+请严格按以下四个三级标题输出，并使用简体中文：
 
-**工作内容概述**
+### 观察
+用 1 段总结今天最明显的工作模式。
 
-**效率评估**
+### 证据
+列出 2 到 4 条来自应用、网站、关键词或时段分布的具体依据。
 
-**改进建议**
+### 建议
+给出 1 到 2 条可执行建议。
 
-**今日小结**"#,
+### 小结
+用 1 句话收束今天的工作状态。"#,
                 format_duration_for_locale(stats.total_duration, self.locale),
                 if apps_list.is_empty() {
                     empty_value(self.locale).to_string()
@@ -604,15 +621,19 @@ impl SummaryAnalyzer {
 4. 如果某項資料缺失，請明確說明未取得，不要編造。
 
 【輸出格式】
-請嚴格按以下四個標題輸出，並使用繁體中文：
+請嚴格按以下四個三級標題輸出，並使用繁體中文：
 
-**工作內容概述**
+### 觀察
+用 1 段總結今天最明顯的工作模式。
 
-**效率評估**
+### 證據
+列出 2 到 4 條來自應用、網站、關鍵詞或時段分布的具體依據。
 
-**改進建議**
+### 建議
+給出 1 到 2 條可執行建議。
 
-**今日小結**"#,
+### 小結
+用 1 句話收束今天的工作狀態。"#,
                 format_duration_for_locale(stats.total_duration, self.locale),
                 if apps_list.is_empty() {
                     empty_value(self.locale).to_string()
@@ -655,15 +676,19 @@ Screen-content keywords: {}
 4. If a data point is missing, say so clearly instead of making it up.
 
 [Output format]
-Write in English and use exactly these four section headings:
+Write in English and use exactly these four level-3 Markdown headings:
 
-**Work Summary**
+### Observation
+Summarize the clearest work pattern in one paragraph.
 
-**Efficiency Assessment**
+### Evidence
+List 2 to 4 concrete signals from apps, websites, keywords, or hourly distribution.
 
-**Improvement Suggestions**
+### Suggestions
+Give 1 to 2 actionable suggestions.
 
-**Daily Wrap-up**"#,
+### Wrap-up
+Close with one sentence about the day's work state."#,
                 format_duration_for_locale(stats.total_duration, self.locale),
                 if apps_list.is_empty() {
                     empty_value(self.locale).to_string()
@@ -736,18 +761,60 @@ Write in English and use exactly these four section headings:
     fn generate_fallback_ai_content(&self, apps_list: &str) -> String {
         match self.locale {
             AppLocale::ZhCn => format!(
-                "## 工作内容概述\n\n今天主要围绕 {} 等工具推进工作，整体工作主线比较清晰。\n\n## 效率评估\n\n当前记录显示今天的工作节奏相对稳定，但仍可以继续优化连续专注时间。\n\n## 改进建议\n\n建议为最重要的任务预留更完整的连续时间段，减少中途切换。\n\n## 今日小结\n\n今天保持了稳定推进，已经积累了不错的工作产出。\n\n---\n*注：由基础模板生成。配置 AI 模型后可获得更深入的智能分析。*",
+                "### 观察\n\n今天主要围绕 {} 等工具推进工作，整体工作主线比较清晰。\n\n### 证据\n\n- 记录显示主要应用集中在当前工作工具上。\n- 当天存在连续活动记录，可作为工作节奏判断依据。\n\n### 建议\n\n建议为最重要的任务预留更完整的连续时间段，减少中途切换。\n\n### 小结\n\n今天保持了稳定推进，已经积累了不错的工作产出。\n\n---\n*注：由基础模板生成。配置 AI 模型后可获得更深入的智能分析。*",
                 if apps_list.is_empty() { "多个应用".to_string() } else { apps_list.to_string() }
             ),
             AppLocale::ZhTw => format!(
-                "## 工作內容概述\n\n今天主要圍繞 {} 等工具推進工作，整體工作主線相對清晰。\n\n## 效率評估\n\n目前記錄顯示今天的工作節奏較穩定，但仍可持續優化連續專注時間。\n\n## 改進建議\n\n建議為最重要的任務預留更完整的連續時間段，減少中途切換。\n\n## 今日小結\n\n今天維持了穩定推進，已經累積了不錯的工作產出。\n\n---\n*註：目前由基礎模板生成。配置 AI 模型後可獲得更深入的智慧分析。*",
+                "### 觀察\n\n今天主要圍繞 {} 等工具推進工作，整體工作主線相對清晰。\n\n### 證據\n\n- 記錄顯示主要應用集中在目前工作工具上。\n- 當天存在連續活動記錄，可作為工作節奏判斷依據。\n\n### 建議\n\n建議為最重要的任務預留更完整的連續時間段，減少中途切換。\n\n### 小結\n\n今天維持了穩定推進，已經累積了不錯的工作產出。\n\n---\n*註：目前由基礎模板生成。配置 AI 模型後可獲得更深入的智慧分析。*",
                 if apps_list.is_empty() { "多個應用".to_string() } else { apps_list.to_string() }
             ),
             AppLocale::En => format!(
-                "## Work Summary\n\nToday's work mainly revolved around tools such as {}, and the overall direction stayed fairly clear.\n\n## Efficiency Assessment\n\nThe recorded activity suggests a steady working rhythm today, though there is still room to improve uninterrupted focus time.\n\n## Improvement Suggestions\n\nReserve a longer uninterrupted block for the most important task to reduce context switching.\n\n## Daily Wrap-up\n\nThe day moved forward at a stable pace and produced solid progress.\n\n---\n*Note: This section was generated from the base template because AI analysis was unavailable.*",
+                "### Observation\n\nToday's work mainly revolved around tools such as {}, and the overall direction stayed fairly clear.\n\n### Evidence\n\n- The recorded activity is concentrated around the main work tools.\n- The day includes continuous activity records that can support a rhythm assessment.\n\n### Suggestions\n\nReserve a longer uninterrupted block for the most important task to reduce context switching.\n\n### Wrap-up\n\nThe day moved forward at a stable pace and produced solid progress.\n\n---\n*Note: This section was generated from the base template because AI analysis was unavailable.*",
                 if apps_list.is_empty() { "several apps".to_string() } else { apps_list.to_string() }
             ),
         }
+    }
+
+    /// 让 AI 基于当天工作模式决定统计区块的最优排列顺序。
+    /// 失败时返回 None，调用方回退到默认顺序。
+    async fn decide_block_order(&self, stats: &DailyStats) -> Option<Vec<String>> {
+        let work_minutes = stats.total_duration / 60;
+        let top_category = stats
+            .category_usage
+            .first()
+            .map(|c| c.category.as_str())
+            .unwrap_or("");
+        let top_app = stats
+            .app_usage
+            .first()
+            .map(|a| a.app_name.as_str())
+            .unwrap_or("");
+        let domain_count = stats.domain_usage.len();
+
+        let prompt = format!(
+            "You are a daily report layout editor. Based on today's work pattern, decide the best order for these report sections (most important first).\n\n\
+Available sections: [\"CATEGORY_TABLE\", \"APP_USAGE_TABLE\", \"HOURLY_SUMMARY\", \"DOMAIN_USAGE_TABLE\"]\n\n\
+Today's pattern: worked {work_minutes} min; top category: {top_category}; top app: {top_app}; visited {domain_count} websites.\n\n\
+Rules:\n\
+- Put the most relevant section first\n\
+- If website usage is 0, omit DOMAIN_USAGE_TABLE\n\
+- Return ONLY a JSON array of section names, e.g. [\"APP_USAGE_TABLE\",\"CATEGORY_TABLE\",\"HOURLY_SUMMARY\"]\n\
+- Do not include sections not listed above"
+        );
+
+        let content = self.generate_ai_content(&prompt).await.ok()?;
+        let trimmed = content
+            .trim()
+            .trim_start_matches("```json")
+            .trim_start_matches("```")
+            .trim()
+            .trim_end_matches("```")
+            .trim();
+        let parsed: Vec<String> = serde_json::from_str(trimmed).ok()?;
+        if parsed.is_empty() {
+            return None;
+        }
+        Some(parsed)
     }
 }
 
@@ -779,40 +846,39 @@ impl Analyzer for SummaryAnalyzer {
             }
         }
 
-        if !stats.category_usage.is_empty() {
-            report.push_str(&wrap_block(
-                BLOCK_CATEGORY_TABLE,
-                &render_category_table(stats, locale, &category_name_overrides),
-            ));
-        }
+        // 统计区块：AI 编排顺序 + 用户偏好
+        // 有缓存顺序时直接用（记忆性），否则调 LLM 排序
+        let default_order = default_summary_order();
+        let (ai_order, order_to_cache) = if let Some(ref cached) = self.cached_ai_order {
+            if !cached.is_empty() {
+                (Some(cached.clone()), None) // 用缓存，不需要存
+            } else {
+                let decided = self.decide_block_order(stats).await;
+                (decided.clone(), decided) // 新排序，需要存
+            }
+        } else {
+            let decided = self.decide_block_order(stats).await;
+            (decided.clone(), decided)
+        };
+        let ordered = match &ai_order {
+            Some(order) => merge_ai_order(order, &default_order),
+            None => default_order,
+        };
+        let blocks = apply_preferences(ordered, &self.pinned_blocks, &self.hidden_blocks);
+        let (stats_sections, section_count) = assemble_with_section_count(
+            &blocks,
+            stats,
+            locale,
+            &category_name_overrides,
+            &semantic_name_overrides,
+        );
+        report.push_str(&stats_sections);
 
-        if !stats.app_usage.is_empty() {
-            report.push_str(&wrap_block(
-                BLOCK_APP_USAGE_TABLE,
-                &render_app_usage_table(stats, locale),
-            ));
-        }
-
-        if generate_hourly_activity_summary_for_locale(stats, locale).is_some() {
-            report.push_str(&wrap_block(
-                BLOCK_HOURLY_SUMMARY,
-                &render_hourly_summary(stats, locale),
-            ));
-        }
-
-        if !stats.domain_usage.is_empty() {
-            report.push_str(&wrap_block(
-                BLOCK_DOMAIN_USAGE_TABLE,
-                &render_domain_usage_table(stats, locale, &semantic_name_overrides),
-            ));
-        }
-
-        report.push_str(match locale {
-            AppLocale::ZhCn => "## 六、AI 分析\n\n",
-            AppLocale::ZhTw => "## 六、AI 分析\n\n",
-            AppLocale::En => "## 6. AI Analysis\n\n",
-        });
-
+        let ai_analysis_title = match locale {
+            AppLocale::ZhCn => "AI 分析",
+            AppLocale::ZhTw => "AI 分析",
+            AppLocale::En => "AI Analysis",
+        };
         let apps_list = join_list(
             locale,
             stats
@@ -846,7 +912,9 @@ impl Analyzer for SummaryAnalyzer {
             ),
         };
 
-        report.push_str(&ai_content.0);
+        let mut ai_section = format_section_heading(locale, section_count + 1, ai_analysis_title);
+        ai_section.push_str(&ai_content.0);
+        report.push_str(&wrap_block(BLOCK_AI_ANALYSIS, &ai_section));
 
         // 活动时间线放在最底部
         let timeline = generate_activity_timeline(activities, locale);
@@ -859,6 +927,7 @@ impl Analyzer for SummaryAnalyzer {
             content: report,
             used_ai: ai_content.1,
             fallback_reason: ai_content.2,
+            ai_order: order_to_cache,
         })
     }
 }
@@ -867,11 +936,62 @@ impl Analyzer for SummaryAnalyzer {
 mod tests {
     use super::{
         empty_ai_fallback_reason, openai_compatible_chat_completion_urls,
-        request_ai_fallback_reason, summary_request_timeout,
+        request_ai_fallback_reason, summary_request_timeout, SummaryAnalyzer,
     };
+    use crate::analysis::Analyzer;
     use crate::analysis::AppLocale;
     use crate::config::AiProvider;
+    use crate::database::{AppUsage, CategoryUsage, DailyStats, HourlyActivityBucket};
+    use std::collections::HashMap;
+    use std::path::Path;
     use std::time::Duration;
+
+    fn sample_stats_for_ai_structure() -> DailyStats {
+        DailyStats {
+            total_duration: 5400,
+            screenshot_count: 5,
+            app_usage: vec![AppUsage {
+                app_name: "VS Code".to_string(),
+                duration: 3600,
+                count: 2,
+                executable_path: None,
+                screenshot_url: None,
+            }],
+            category_usage: vec![CategoryUsage {
+                category: "development".to_string(),
+                duration: 5400,
+            }],
+            browser_duration: 0,
+            url_usage: vec![],
+            domain_usage: vec![],
+            browser_usage: vec![],
+            work_time_duration: 5400,
+            overtime_duration: 0,
+            hourly_activity_distribution: vec![HourlyActivityBucket {
+                hour: 10,
+                duration: 3600,
+            }],
+        }
+    }
+
+    fn test_analyzer(locale: AppLocale) -> SummaryAnalyzer {
+        SummaryAnalyzer {
+            provider: AiProvider::OpenAI,
+            endpoint: "https://example.com/v1".to_string(),
+            model: "test-model".to_string(),
+            api_key: None,
+            custom_prompt: String::new(),
+            system_prompt_override: None,
+            locale,
+            pinned_blocks: Vec::new(),
+            hidden_blocks: Vec::new(),
+            cached_ai_order: None,
+            client: reqwest::Client::builder()
+                .no_proxy()
+                .build()
+                .expect("测试 client 应可创建"),
+        }
+    }
 
     #[test]
     fn 本地_openai兼容端点应使用更长的日报生成超时() {
@@ -942,12 +1062,89 @@ mod tests {
     #[test]
     fn 已包含_chat_completions_的端点不应重复拼接() {
         assert_eq!(
-            openai_compatible_chat_completion_urls("https://ark.cn-beijing.volces.com/api/v3/chat/completions"),
+            openai_compatible_chat_completion_urls(
+                "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+            ),
             vec!["https://ark.cn-beijing.volces.com/api/v3/chat/completions".to_string()]
         );
         assert_eq!(
             openai_compatible_chat_completion_urls("https://example.com/v1/chat/completions/"),
             vec!["https://example.com/v1/chat/completions".to_string()]
         );
+    }
+
+    #[test]
+    fn ai提示词应要求固定观察证据建议小结结构() {
+        let analyzer = test_analyzer(AppLocale::ZhCn);
+        let stats = sample_stats_for_ai_structure();
+        let prompt = analyzer.build_ai_prompt("2026-06-22", &stats, &[]);
+
+        assert!(prompt.contains("### 观察"));
+        assert!(prompt.contains("### 证据"));
+        assert!(prompt.contains("### 建议"));
+        assert!(prompt.contains("### 小结"));
+        assert!(!prompt.contains("**工作内容概述**"));
+        assert!(!prompt.contains("**效率评估**"));
+    }
+
+    #[test]
+    fn ai回退内容应使用与提示词一致的固定结构() {
+        let analyzer = test_analyzer(AppLocale::ZhCn);
+        let fallback = analyzer.generate_fallback_ai_content("VS Code（1小时）");
+
+        assert!(fallback.contains("### 观察"));
+        assert!(fallback.contains("### 证据"));
+        assert!(fallback.contains("### 建议"));
+        assert!(fallback.contains("### 小结"));
+        assert!(!fallback.contains("### 工作内容概述"));
+        assert!(!fallback.contains("### 效率评估"));
+    }
+
+    #[test]
+    fn 英文ai提示词和回退内容应使用固定英文结构() {
+        let analyzer = test_analyzer(AppLocale::En);
+        let stats = sample_stats_for_ai_structure();
+        let prompt = analyzer.build_ai_prompt("2026-06-22", &stats, &[]);
+        let fallback = analyzer.generate_fallback_ai_content("VS Code (1h)");
+
+        for content in [prompt, fallback] {
+            assert!(content.contains("### Observation"));
+            assert!(content.contains("### Evidence"));
+            assert!(content.contains("### Suggestions"));
+            assert!(content.contains("### Wrap-up"));
+            assert!(!content.contains("**Work Summary**"));
+            assert!(!content.contains("### Work Summary"));
+        }
+    }
+
+    #[tokio::test]
+    async fn summary生成的ai分析应带可管理段落标记() {
+        let mut analyzer = test_analyzer(AppLocale::ZhCn);
+        analyzer.endpoint = "http://127.0.0.1:1/v1".to_string();
+        analyzer.cached_ai_order = Some(vec![
+            "CATEGORY_TABLE".to_string(),
+            "APP_USAGE_TABLE".to_string(),
+            "HOURLY_SUMMARY".to_string(),
+        ]);
+        let stats = sample_stats_for_ai_structure();
+
+        let report = analyzer
+            .generate_report(
+                "2026-06-22",
+                &stats,
+                &[],
+                Path::new(""),
+                AppLocale::ZhCn,
+                HashMap::new(),
+                HashMap::new(),
+            )
+            .await
+            .expect("网络失败时也应生成 fallback 日报");
+
+        assert!(report
+            .content
+            .contains("<!-- WR_BLOCK_START:AI_ANALYSIS -->"));
+        assert!(report.content.contains("## 四、AI 分析"));
+        assert!(report.content.contains("<!-- WR_BLOCK_END:AI_ANALYSIS -->"));
     }
 }

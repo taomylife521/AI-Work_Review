@@ -170,6 +170,14 @@ test('桌宠窗口应监听原生输入事件，并将键鼠活跃状态喂给�
   assert.match(inputSource, /GetCursorPos/);
 });
 
+test('Windows 上应禁用智能穿透自动命中轮询，避免启动期高频窗口 API 调用', () => {
+  const inputSource = readFileSync(new URL('../../../../src-tauri/src/avatar_input.rs', import.meta.url), 'utf8');
+
+  assert.match(inputSource, /smart_click_through_polling_enabled_for_platform/);
+  assert.match(inputSource, /smart_click_through_polling_enabled_for_platform\(cfg!\(target_os = "windows"\)\)/);
+  assert.match(inputSource, /fn smart_click_through_polling_enabled_for_platform\(is_windows: bool\) -> bool \{\s*!is_windows\s*\}/);
+});
+
 test('桌宠键盘模式应按原版 BongoCat 键区分组选择不同高亮层', () => {
   const source = readFileSync(new URL('./AvatarCanvas.svelte', import.meta.url), 'utf8');
   const registrySource = readFileSync(new URL('./avatarPresetRegistry.js', import.meta.url), 'utf8');

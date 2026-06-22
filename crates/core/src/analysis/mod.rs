@@ -47,6 +47,8 @@ pub struct GeneratedReport {
     pub content: String,
     pub used_ai: bool,
     pub fallback_reason: Option<String>,
+    /// 本次生成使用的 AI 段落编排顺序（如有），调用方可缓存到 config 避免下次重复调 LLM
+    pub ai_order: Option<Vec<String>>,
 }
 
 /// AI分析器 trait
@@ -107,6 +109,9 @@ pub fn create_analyzer(
     custom_prompt: &str,
     system_prompt_override: Option<&str>,
     locale: AppLocale,
+    pinned_blocks: Vec<String>,
+    hidden_blocks: Vec<String>,
+    cached_ai_order: Option<Vec<String>>,
 ) -> Box<dyn Analyzer + Send + Sync> {
     log::info!(
         "create_analyzer: mode={:?}, provider={:?}, endpoint={}, model={}, has_api_key={}",
@@ -122,6 +127,8 @@ pub fn create_analyzer(
             model,
             custom_prompt,
             locale,
+            pinned_blocks,
+            hidden_blocks,
         )),
         AiMode::Summary => Box::new(summary::SummaryAnalyzer::new(
             provider,
@@ -131,6 +138,9 @@ pub fn create_analyzer(
             custom_prompt,
             system_prompt_override,
             locale,
+            pinned_blocks,
+            hidden_blocks,
+            cached_ai_order,
         )),
         AiMode::Cloud => Box::new(cloud::CloudAnalyzer::new(
             endpoint,
@@ -600,7 +610,11 @@ mod tests {
 
     #[test]
     fn 应将附加提示词追加到基础提示词末尾() {
-        let prompt = append_custom_prompt_for_locale("基础提示".to_string(), "输出偏正式一些", AppLocale::ZhCn);
+        let prompt = append_custom_prompt_for_locale(
+            "基础提示".to_string(),
+            "输出偏正式一些",
+            AppLocale::ZhCn,
+        );
 
         assert!(prompt.contains("基础提示"));
         assert!(prompt.contains("额外要求"));

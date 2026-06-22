@@ -73,7 +73,17 @@ pub fn route_query(question: &str, has_model: bool) -> RouteDecision {
     // 没有模型可用，只能用规则兜底。fast_answer 对任何带时间范围的工作查询都给统一统计
     // （活动总览 / 分类分布 / Top 应用 / 相关记录），所以这里尽量放宽触发，让"我这周主要做了什么"
     // "今天怎么样""最近忙啥"等工作查询都能拿到统计；仅明显非工作领域（天气/股票/新闻…）放行到 Fallback。
-    let non_work_signals = ["天气", "股票", "新闻", "笑话", "写诗", "算命", "星座", "汇率", "翻译成"];
+    let non_work_signals = [
+        "天气",
+        "股票",
+        "新闻",
+        "笑话",
+        "写诗",
+        "算命",
+        "星座",
+        "汇率",
+        "翻译成",
+    ];
     if non_work_signals.iter().any(|p| q.contains(p)) {
         return RouteDecision {
             path: QueryPath::Fallback,
@@ -82,10 +92,43 @@ pub fn route_query(question: &str, has_model: bool) -> RouteDecision {
     }
     let work_signals = [
         // 时间词（工作查询常带）
-        "今天", "昨天", "前天", "本周", "这周", "上周", "本月", "这个月", "上月", "上个月", "最近", "这几天", "近期",
+        "今天",
+        "昨天",
+        "前天",
+        "本周",
+        "这周",
+        "上周",
+        "本月",
+        "这个月",
+        "上月",
+        "上个月",
+        "最近",
+        "这几天",
+        "近期",
         // 工作/统计词
-        "做了什么", "主要做了", "忙什么", "忙啥", "工作", "记录", "总结", "待办", "时长", "时间",
-        "统计", "会话", "session", "效率", "占比", "比例", "分类", "应用", "进度", "进展", "回顾", "复盘", "整理",
+        "做了什么",
+        "主要做了",
+        "忙什么",
+        "忙啥",
+        "工作",
+        "记录",
+        "总结",
+        "待办",
+        "时长",
+        "时间",
+        "统计",
+        "会话",
+        "session",
+        "效率",
+        "占比",
+        "比例",
+        "分类",
+        "应用",
+        "进度",
+        "进展",
+        "回顾",
+        "复盘",
+        "整理",
     ];
     if work_signals.iter().any(|p| q.contains(p)) {
         return RouteDecision {
@@ -168,9 +211,8 @@ impl Orchestrator {
             }
 
             QueryPath::Agent => {
-                let config = model_config.ok_or_else(|| {
-                    AppError::Analysis("Agent 路径需要模型配置".to_string())
-                })?;
+                let config = model_config
+                    .ok_or_else(|| AppError::Analysis("Agent 路径需要模型配置".to_string()))?;
 
                 // AgentPath：调用 Stage 3 的 AgentExecutor（透传事件通道）
                 match AgentExecutor::run(
@@ -265,7 +307,9 @@ pub fn fast_answer(
     ignored_apps: &[String],
     excluded_domains: &[String],
 ) -> Result<String, AppError> {
-    use work_review_core::categorize::{categorize_app, get_category_name, normalize_display_app_name};
+    use work_review_core::categorize::{
+        categorize_app, get_category_name, normalize_display_app_name,
+    };
 
     // 复用 parse_temporal_range（你在 Stage 0 修复过的函数）
     let (date_from, date_to) = crate::commands::parse_temporal_range(question);
@@ -312,7 +356,13 @@ pub fn fast_answer(
     let fmt_dur = |s: i64| -> String {
         let h = s / 3600;
         let m = (s % 3600) / 60;
-        if h > 0 { format!("{h}h{m}m") } else if m > 0 { format!("{m}m") } else { format!("{s}s") }
+        if h > 0 {
+            format!("{h}h{m}m")
+        } else if m > 0 {
+            format!("{m}m")
+        } else {
+            format!("{s}s")
+        }
     };
 
     let mut lines = vec![format!(
@@ -331,7 +381,11 @@ pub fn fast_answer(
     lines.push("分类分布：".to_string());
     for (cat_key, dur) in &sorted_cats {
         let cn = get_category_name(cat_key);
-        let pct = if total > 0 { *dur as f64 / total as f64 * 100.0 } else { 0.0 };
+        let pct = if total > 0 {
+            *dur as f64 / total as f64 * 100.0
+        } else {
+            0.0
+        };
         lines.push(format!("  - {cn}: {} ({pct:.0}%)", fmt_dur(*dur)));
     }
 

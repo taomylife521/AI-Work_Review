@@ -246,6 +246,21 @@ fn resolve_saved_report_metadata(
     }
 }
 
+fn update_daily_report_ai_order_cache(
+    config: &mut AppConfig,
+    ai_order: Option<Vec<String>>,
+) -> bool {
+    let Some(ai_order) = ai_order else {
+        return false;
+    };
+    if ai_order.is_empty() || config.daily_report_last_ai_order == ai_order {
+        return false;
+    }
+
+    config.daily_report_last_ai_order = ai_order;
+    true
+}
+
 #[allow(dead_code)]
 fn normalize_saved_report_ai_mode(value: &str) -> String {
     value.trim().to_lowercase()
@@ -282,10 +297,7 @@ fn export_daily_report_markdown(
         }
         match std::fs::write(&output_path, content) {
             Ok(()) => {
-                log::info!(
-                    "日报自动导出成功: {}",
-                    output_path.display()
-                );
+                log::info!("日报自动导出成功: {}", output_path.display());
                 return Ok(());
             }
             Err(e) => {
@@ -783,10 +795,7 @@ fn is_low_signal_reference(item: &MemorySearchItem) -> bool {
     menu_hits >= 5 || ((path_like_title || generic_title || browser_shell_title) && menu_hits >= 3)
 }
 
-fn filter_reference_items(
-    references: &[MemorySearchItem],
-    limit: usize,
-) -> Vec<&MemorySearchItem> {
+fn filter_reference_items(references: &[MemorySearchItem], limit: usize) -> Vec<&MemorySearchItem> {
     references
         .iter()
         .filter(|item| !is_low_signal_reference(item))
@@ -2018,7 +2027,11 @@ async fn generate_text_answer_with_model(
     match model_config.provider {
         AiProvider::Ollama => {
             let ollama_base = model_config.endpoint.trim().trim_end_matches('/');
-            let ollama_url = if ollama_base.ends_with("/api/chat") { ollama_base.to_string() } else { format!("{ollama_base}/api/chat") };
+            let ollama_url = if ollama_base.ends_with("/api/chat") {
+                ollama_base.to_string()
+            } else {
+                format!("{ollama_base}/api/chat")
+            };
             let response = client
                 .post(&ollama_url)
                 .json(&serde_json::json!({
@@ -2063,7 +2076,11 @@ async fn generate_text_answer_with_model(
             }
 
             let claude_base = model_config.endpoint.trim().trim_end_matches('/');
-            let claude_url = if claude_base.ends_with("/messages") { claude_base.to_string() } else { format!("{claude_base}/messages") };
+            let claude_url = if claude_base.ends_with("/messages") {
+                claude_base.to_string()
+            } else {
+                format!("{claude_base}/messages")
+            };
             let response = client
                 .post(&claude_url)
                 .header("x-api-key", api_key)
@@ -2108,7 +2125,10 @@ async fn generate_text_answer_with_model(
             }
 
             let gemini_base = model_config.endpoint.trim().trim_end_matches('/');
-            let gemini_url = format!("{}/models/{}:generateContent?key={}", gemini_base, model_config.model, api_key);
+            let gemini_url = format!(
+                "{}/models/{}:generateContent?key={}",
+                gemini_base, model_config.model, api_key
+            );
             let response = client
                 .post(&gemini_url)
                 .json(&serde_json::json!({
@@ -2150,23 +2170,21 @@ async fn generate_text_answer_with_model(
             } else {
                 format!("{endpoint}/chat/completions")
             };
-            let mut request = client
-                .post(&url)
-                .json(&serde_json::json!({
-                    "model": model_config.model,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": system_prompt
-                        },
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ],
-                    "max_tokens": 1600,
-                    "temperature": 0.2
-                }));
+            let mut request = client.post(&url).json(&serde_json::json!({
+                "model": model_config.model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": system_prompt
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                "max_tokens": 1600,
+                "temperature": 0.2
+            }));
 
             if let Some(api_key) = &model_config.api_key {
                 if !api_key.is_empty() {
@@ -3211,7 +3229,9 @@ pub async fn get_insights(
     state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<Vec<work_review_core::database::WorkInsight>, AppError> {
     let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-    Ok(state.database.get_active_insights(limit.unwrap_or(20) as usize)?)
+    Ok(state
+        .database
+        .get_active_insights(limit.unwrap_or(20) as usize)?)
 }
 
 /// 用户对洞察的反馈（确认/否认）
@@ -3233,24 +3253,40 @@ pub(crate) fn synthesize_insights_inner(
 ) -> Result<Vec<work_review_core::database::WorkInsight>, AppError> {
     let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
     let segments = state.config.effective_work_segments();
-    let stats = state.database.get_daily_stats_with_segments(date, &segments)?;
+    let stats = state
+        .database
+        .get_daily_stats_with_segments(date, &segments)?;
 
     let mut created_ids: Vec<i64> = Vec::new();
 
     // 洞察 1：高峰时段
-    if let Some(peak) = stats.hourly_activity_distribution.iter().max_by_key(|h| h.duration) {
+    if let Some(peak) = stats
+        .hourly_activity_distribution
+        .iter()
+        .max_by_key(|h| h.duration)
+    {
         if peak.duration > 0 && peak.duration >= 1800 {
             let hours = peak.duration / 3600;
             let mins = (peak.duration % 3600) / 60;
             let content = format!(
                 "今日高峰时段 {:02}:00，累计 {}{}",
                 peak.hour,
-                if hours > 0 { format!("{}小时", hours) } else { String::new() },
-                if mins > 0 { format!("{}分钟", mins) } else { String::new() },
+                if hours > 0 {
+                    format!("{}小时", hours)
+                } else {
+                    String::new()
+                },
+                if mins > 0 {
+                    format!("{}分钟", mins)
+                } else {
+                    String::new()
+                },
             );
             let keyword = format!("{:02}:00", peak.hour);
             if !state.database.has_similar_insight("peak_hours", &keyword)? {
-                let id = state.database.create_insight("peak_hours", &content, date)?;
+                let id = state
+                    .database
+                    .create_insight("peak_hours", &content, date)?;
                 created_ids.push(id);
             }
         }
@@ -3274,7 +3310,9 @@ pub(crate) fn synthesize_insights_inner(
                     cat.duration / 60
                 );
                 if !state.database.has_similar_insight("distraction", cat_key)? {
-                    let id = state.database.create_insight("distraction", &content, date)?;
+                    let id = state
+                        .database
+                        .create_insight("distraction", &content, date)?;
                     created_ids.push(id);
                 }
             }
@@ -3285,15 +3323,23 @@ pub(crate) fn synthesize_insights_inner(
     if stats.work_time_duration > 0 {
         let hours = stats.work_time_duration / 3600;
         let content = format!("今日办公时长 {} 小时", hours);
-        if !state.database.has_similar_insight("work_volume", &format!("{}小时", hours))? {
-            let id = state.database.create_insight("work_volume", &content, date)?;
+        if !state
+            .database
+            .has_similar_insight("work_volume", &format!("{}小时", hours))?
+        {
+            let id = state
+                .database
+                .create_insight("work_volume", &content, date)?;
             created_ids.push(id);
         }
     }
 
     // 返回新创建的活跃洞察
     let all = state.database.get_active_insights(20)?;
-    let new_insights = all.into_iter().filter(|i| created_ids.contains(&i.id)).collect();
+    let new_insights = all
+        .into_iter()
+        .filter(|i| created_ids.contains(&i.id))
+        .collect();
     Ok(new_insights)
 }
 
@@ -3455,6 +3501,13 @@ pub(crate) async fn generate_report_inner(
         &config.daily_report_custom_prompt,
         config.daily_report_system_prompt_override.as_deref(),
         report_locale,
+        config.daily_report_pinned_blocks.clone(),
+        config.daily_report_hidden_blocks.clone(),
+        if config.daily_report_last_ai_order.is_empty() {
+            None
+        } else {
+            Some(config.daily_report_last_ai_order.clone())
+        },
     );
 
     // 生成报告（spawn 隔离 panic，防止内部错误杀死整个 tokio 线程）
@@ -3485,30 +3538,28 @@ pub(crate) async fn generate_report_inner(
             .await
     });
 
-    let report_result = match tokio::time::timeout(
-        std::time::Duration::from_secs(300),
-        spawn_result,
-    )
-    .await
-    {
-        Ok(Ok(result)) => result,
-        Ok(Err(_)) => Err(work_review_core::error::AppError::Analysis(
-            match report_locale {
-                AppLocale::ZhCn => "日报生成过程中发生内部错误，请重试".to_string(),
-                AppLocale::ZhTw => "日報生成過程中發生內部錯誤，請重試".to_string(),
-                AppLocale::En => {
-                    "Internal error during report generation, please retry".to_string()
-                }
-            },
-        )),
-        Err(_) => Err(work_review_core::error::AppError::Analysis(
-            match report_locale {
-                AppLocale::ZhCn => "日报生成超时，请稍后重试".to_string(),
-                AppLocale::ZhTw => "日報生成逾時，請稍後重試".to_string(),
-                AppLocale::En => "Report generation timed out, please try again later".to_string(),
-            },
-        )),
-    };
+    let report_result =
+        match tokio::time::timeout(std::time::Duration::from_secs(300), spawn_result).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(work_review_core::error::AppError::Analysis(
+                match report_locale {
+                    AppLocale::ZhCn => "日报生成过程中发生内部错误，请重试".to_string(),
+                    AppLocale::ZhTw => "日報生成過程中發生內部錯誤，請重試".to_string(),
+                    AppLocale::En => {
+                        "Internal error during report generation, please retry".to_string()
+                    }
+                },
+            )),
+            Err(_) => Err(work_review_core::error::AppError::Analysis(
+                match report_locale {
+                    AppLocale::ZhCn => "日报生成超时，请稍后重试".to_string(),
+                    AppLocale::ZhTw => "日報生成逾時，請稍後重試".to_string(),
+                    AppLocale::En => {
+                        "Report generation timed out, please try again later".to_string()
+                    }
+                },
+            )),
+        };
 
     let avatar_finish_state = {
         let mut state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
@@ -3574,12 +3625,28 @@ pub(crate) async fn generate_report_inner(
         state.database.save_report(&daily_report)?;
     }
 
+    if let Some(ai_order) = generated_report.ai_order.clone() {
+        let config_to_persist = {
+            let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+            let mut next_config = state.config.clone();
+            if update_daily_report_ai_order_cache(&mut next_config, Some(ai_order)) {
+                Some(next_config)
+            } else {
+                None
+            }
+        };
+
+        if let Some(next_config) = config_to_persist {
+            if let Err(error) = persist_app_config(next_config, app.clone(), state) {
+                log::warn!("缓存 AI 段落编排顺序失败: {error}");
+            }
+        }
+    }
+
     if config.daily_report_auto_export {
         if let Some(export_dir) = config.daily_report_export_dir.as_deref() {
             if let Err(e) = export_daily_report_markdown(Path::new(export_dir), &date, &report) {
-                log::error!(
-                    "日报自动导出失败（日报已保存到数据库，仅导出文件失败）: {e:?}"
-                );
+                log::error!("日报自动导出失败（日报已保存到数据库，仅导出文件失败）: {e:?}");
                 // Do NOT propagate the error — report is already saved in the database.
                 // Export failure should not make the entire generation appear to have failed.
             }
@@ -3616,7 +3683,9 @@ pub async fn generate_report(
         }
         s.generating_report = true;
     }
-    let _guard = ReportGenerationGuard { state: state.inner().clone() };
+    let _guard = ReportGenerationGuard {
+        state: state.inner().clone(),
+    };
     generate_report_inner(date, force, locale, &app, state.inner()).await
 }
 
@@ -3638,7 +3707,10 @@ pub(crate) fn get_saved_report_inner(
     // 用最新的 stats 重新渲染统计区块，解决 issue #80：保存的 markdown 里固化的时长
     // 数字会随着工作日继续推进而变得陈旧。老报告若没有占位符标记则原样返回。
     let segments = state.config.effective_work_segments();
-    if let Ok(raw_stats) = state.database.get_daily_stats_with_segments(&date, &segments) {
+    if let Ok(raw_stats) = state
+        .database
+        .get_daily_stats_with_segments(&date, &segments)
+    {
         let (ignored_apps, excluded_domains) = collect_privacy_filters(&state);
         let live_stats = apply_excluded_domains_to_stats(
             apply_ignored_apps_to_stats(raw_stats, &ignored_apps),
@@ -3691,12 +3763,34 @@ pub async fn update_report_content(
     let existing = state
         .database
         .get_report(&date, Some(locale_code))?
-        .ok_or_else(|| AppError::Database(rusqlite::Error::InvalidParameterName("报告不存在".to_string())))?;
+        .ok_or_else(|| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(
+                "报告不存在".to_string(),
+            ))
+        })?;
     let updated = DailyReport {
         content,
         ..existing
     };
     state.database.save_report(&updated)?;
+    Ok(())
+}
+
+/// 设置日报段落的钉选/隐藏偏好
+#[tauri::command]
+pub async fn set_report_block_preference(
+    pinned_blocks: Vec<String>,
+    hidden_blocks: Vec<String>,
+    app: AppHandle,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<(), AppError> {
+    let config = {
+        let mut state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+        state.config.daily_report_pinned_blocks = pinned_blocks;
+        state.config.daily_report_hidden_blocks = hidden_blocks;
+        state.config.clone()
+    };
+    persist_app_config(config, app, state.inner())?;
     Ok(())
 }
 
@@ -4510,7 +4604,11 @@ async fn test_claude(
     let api_key = config.api_key.as_ref().ok_or("未配置 API Key")?;
 
     let claude_base = config.endpoint.trim().trim_end_matches('/');
-    let claude_url = if claude_base.ends_with("/messages") { claude_base.to_string() } else { format!("{claude_base}/messages") };
+    let claude_url = if claude_base.ends_with("/messages") {
+        claude_base.to_string()
+    } else {
+        format!("{claude_base}/messages")
+    };
     let response = client
         .post(&claude_url)
         .header("x-api-key", api_key)
@@ -5697,9 +5795,7 @@ pub async fn cleanup_old_data_dir(
         if cleanup_dir.exists() {
             format!("已清理旧目录中的 {removed_entries} 项 Work Review 数据")
         } else {
-            format!(
-                "已清理旧目录中的 {removed_entries} 项 Work Review 数据，并移除空目录"
-            )
+            format!("已清理旧目录中的 {removed_entries} 项 Work Review 数据，并移除空目录")
         }
     } else {
         format!(
@@ -6079,9 +6175,13 @@ pub async fn test_remote_storage(
         .map_err(|e| AppError::Screenshot(format!("写入测试文件失败: {e}")))?;
 
     let client = reqwest::Client::new();
-    let result =
-        crate::remote_upload::upload_screenshot(&client, &remote_config, &test_path, "test/connection-test.jpg")
-            .await;
+    let result = crate::remote_upload::upload_screenshot(
+        &client,
+        &remote_config,
+        &test_path,
+        "test/connection-test.jpg",
+    )
+    .await;
 
     let _ = tokio::fs::remove_file(&test_path).await;
 
@@ -6247,7 +6347,9 @@ pub async fn get_recent_apps(
 }
 
 /// 应用分类概览 —— 内部复用版
-pub(crate) fn get_app_category_overview_inner(state: &Arc<Mutex<AppState>>) -> Result<Vec<AppCategoryOverviewItem>, AppError> {
+pub(crate) fn get_app_category_overview_inner(
+    state: &Arc<Mutex<AppState>>,
+) -> Result<Vec<AppCategoryOverviewItem>, AppError> {
     let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
     let overview = s.database.get_app_category_overview()?;
 
@@ -6432,7 +6534,9 @@ pub struct CategoryInfo {
 }
 
 /// 分类信息 —— 内部复用版
-pub(crate) fn get_categories_inner(state: &Arc<Mutex<AppState>>) -> Result<Vec<CategoryInfo>, AppError> {
+pub(crate) fn get_categories_inner(
+    state: &Arc<Mutex<AppState>>,
+) -> Result<Vec<CategoryInfo>, AppError> {
     let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
     let mut result = Vec::new();
     for c in &s.config.custom_categories {
@@ -6574,7 +6678,9 @@ pub struct SemanticCategoryInfo {
 }
 
 /// 语义分类信息 —— 内部复用版
-pub(crate) fn get_semantic_categories_inner(state: &Arc<Mutex<AppState>>) -> Result<Vec<SemanticCategoryInfo>, AppError> {
+pub(crate) fn get_semantic_categories_inner(
+    state: &Arc<Mutex<AppState>>,
+) -> Result<Vec<SemanticCategoryInfo>, AppError> {
     let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
     let mut result = Vec::new();
     for c in &s.config.custom_semantic_categories {
@@ -6646,7 +6752,9 @@ pub async fn delete_custom_semantic_category(
     let key = key.trim().to_string();
 
     if key == "未知活动" {
-        return Err(AppError::Unknown("不能删除默认分类「未知活动」".to_string()));
+        return Err(AppError::Unknown(
+            "不能删除默认分类「未知活动」".to_string(),
+        ));
     }
 
     let affected = {
@@ -6671,9 +6779,13 @@ pub async fn delete_custom_semantic_category(
 
         // 记录已删除的内置语义分类 key，防止 seed 复活
         if crate::config::DEFAULT_SEMANTIC_CATEGORY_KEYS.contains(&key.as_str())
-            && !next_config.deleted_default_semantic_categories.contains(&key)
+            && !next_config
+                .deleted_default_semantic_categories
+                .contains(&key)
         {
-            next_config.deleted_default_semantic_categories.push(key.clone());
+            next_config
+                .deleted_default_semantic_categories
+                .push(key.clone());
         }
 
         // 重定向引用该分类的规则到"未知活动"
@@ -6853,7 +6965,9 @@ fn get_running_apps_impl() -> Result<Vec<String>, AppError> {
 }
 
 /// 获取存储统计信息 —— 内部复用版
-pub(crate) fn get_storage_stats_inner(state: &Arc<Mutex<AppState>>) -> Result<serde_json::Value, AppError> {
+pub(crate) fn get_storage_stats_inner(
+    state: &Arc<Mutex<AppState>>,
+) -> Result<serde_json::Value, AppError> {
     let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
     let stats = s
         .storage_manager
@@ -8154,15 +8268,15 @@ mod tests {
         build_fallback_assistant_answer, build_updater_manifest_candidates,
         build_windows_icon_cache_key, detect_assistant_question_kind,
         detect_assistant_question_kind_with_mode, export_daily_report_markdown,
-        parse_temporal_range,
         format_browser_url_for_display, macos_score_app_bundle_name,
         merge_windows_icon_lookup_candidates, normalize_macos_app_lookup_name,
         normalize_saved_report_ai_mode, ollama_model_names_match, ollama_model_should_be_listed,
         ollama_show_response_supports_completion, openai_compatible_chat_completion_urls,
         openai_connection_test_max_tokens, overview_week_bounds_for_date, parse_ollama_model_names,
-        resolve_saved_report_metadata, sum_daily_stats, AppLocale, AssistantChatMessage,
-        AssistantQuestionKind, AssistantReasoningMode, UPDATER_JSON_ENDPOINTS,
-        UPDATE_CONNECT_TIMEOUT_SECS, UPDATE_REQUEST_TIMEOUT_SECS,
+        parse_temporal_range, resolve_saved_report_metadata, sum_daily_stats,
+        update_daily_report_ai_order_cache, AppLocale, AssistantChatMessage, AssistantQuestionKind,
+        AssistantReasoningMode, UPDATER_JSON_ENDPOINTS, UPDATE_CONNECT_TIMEOUT_SECS,
+        UPDATE_REQUEST_TIMEOUT_SECS,
     };
     use crate::config::AiMode;
     use crate::database::{
@@ -8768,6 +8882,33 @@ mod tests {
 
         assert_eq!(ai_mode, "local");
         assert_eq!(model_name, None);
+    }
+
+    #[test]
+    fn 新_ai_段落顺序应缓存到配置且空结果不覆盖已有缓存() {
+        let mut config = crate::config::AppConfig::default();
+        let first_order = vec!["APP_USAGE_TABLE".to_string(), "CATEGORY_TABLE".to_string()];
+
+        assert!(update_daily_report_ai_order_cache(
+            &mut config,
+            Some(first_order.clone())
+        ));
+        assert_eq!(config.daily_report_last_ai_order, first_order);
+
+        assert!(!update_daily_report_ai_order_cache(&mut config, None));
+        assert_eq!(
+            config.daily_report_last_ai_order,
+            vec!["APP_USAGE_TABLE".to_string(), "CATEGORY_TABLE".to_string(),]
+        );
+
+        assert!(!update_daily_report_ai_order_cache(
+            &mut config,
+            Some(Vec::new())
+        ));
+        assert_eq!(
+            config.daily_report_last_ai_order,
+            vec!["APP_USAGE_TABLE".to_string(), "CATEGORY_TABLE".to_string(),]
+        );
     }
 
     #[test]

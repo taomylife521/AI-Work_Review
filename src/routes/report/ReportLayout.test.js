@@ -50,3 +50,16 @@ test('日报页纸面容器应复用统一 editorial surface，而不是额外�
   assert.match(appCssSource, /\.report-article-card\s*\{[\s\S]*background:\s*var\(--editorial-surface-featured\)/);
   assert.match(appCssSource, /\.report-sheet::before\s*\{[\s\S]*rgba\(99,\s*102,\s*241,\s*0\.014\)/);
 });
+
+test('日报正文段落应提供稳定动作区、导语和表格阅读样式', async () => {
+  const [reportSource, appCssSource] = await Promise.all([
+    readFile(new URL('./Report.svelte', import.meta.url), 'utf8'),
+    readFile(new URL('../../app.css', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(reportSource, /report-section-actions/);
+  assert.match(appCssSource, /\.report-section\s*\{[\s\S]*padding:/);
+  assert.match(appCssSource, /\.report-section-content\s+blockquote:first-of-type\b/);
+  assert.match(appCssSource, /\.report-section-actions\b/);
+  assert.match(appCssSource, /\.report-editorial-shell\s+\.markdown-body\s+table\s*\{[\s\S]*box-shadow:/);
+});

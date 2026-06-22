@@ -242,11 +242,7 @@ pub fn normalize_report_for_chat(content: &str) -> String {
     lines.join("\n")
 }
 
-pub async fn handle_cmd(
-    client: &Client,
-    devices: &[DeviceEndpoint],
-    text: &str,
-) -> Option<String> {
+pub async fn handle_cmd(client: &Client, devices: &[DeviceEndpoint], text: &str) -> Option<String> {
     let parts: Vec<&str> = text.split_whitespace().collect();
     let cmd = normalize_command(parts.first().copied().unwrap_or(""));
     if cmd.is_empty() {
@@ -285,9 +281,15 @@ pub async fn handle_cmd(
                     "🖥 设备状态\n{OUTPUT_DIVIDER}\n设备：{}\nID：{}\n名称：{}\n平台：{}\n录制：{}",
                     device.name,
                     data.get("deviceId").and_then(|v| v.as_str()).unwrap_or("-"),
-                    data.get("deviceName").and_then(|v| v.as_str()).unwrap_or("-"),
+                    data.get("deviceName")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("-"),
                     data.get("platform").and_then(|v| v.as_str()).unwrap_or("-"),
-                    if data.get("recording").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    if data
+                        .get("recording")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                    {
                         "是"
                     } else {
                         "否"
@@ -467,6 +469,7 @@ mod tests {
     /// 命令分支里不会真的发请求）。
     fn dummy_client() -> Client {
         Client::builder()
+            .no_proxy()
             .timeout(Duration::from_millis(50))
             .build()
             .expect("build client")

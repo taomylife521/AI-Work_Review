@@ -381,10 +381,7 @@ fn search_memory_execute(ctx: &ToolContext, args: Value) -> Result<String, Strin
             .as_deref()
             .map(|a| format!(" | {a}"))
             .unwrap_or_default();
-        lines.push(format!(
-            "  - {} | {}{} | {}",
-            r.date, r.title, app, dur
-        ));
+        lines.push(format!("  - {} | {}{} | {}", r.date, r.title, app, dur));
     }
     Ok(lines.join("\n"))
 }
@@ -409,18 +406,13 @@ fn analyze_intents_execute(ctx: &ToolContext, args: Value) -> Result<String, Str
     let activities = ctx.filter_activities(activities);
 
     if activities.is_empty() {
-        return Ok(format!(
-            "在 {date_from} ~ {date_to} 范围内无活动记录。"
-        ));
+        return Ok(format!("在 {date_from} ~ {date_to} 范围内无活动记录。"));
     }
 
     let result = work_intelligence::analyze_intents(&activities);
 
     let total: i64 = result.summary.iter().map(|s| s.duration).sum();
-    let mut lines = vec![format!(
-        "工作意图分布 ({} ~ {})：",
-        date_from, date_to
-    )];
+    let mut lines = vec![format!("工作意图分布 ({} ~ {})：", date_from, date_to)];
     for s in &result.summary {
         let hours = s.duration / 3600;
         let pct = if total > 0 {
@@ -452,8 +444,9 @@ fn aggregate_stats_execute(ctx: &ToolContext, args: Value) -> Result<String, Str
         .get("category")
         .and_then(|v| v.as_str())
         .map(|c| {
-            resolve_category_key(c)
-                .ok_or_else(|| format!("无法识别的分类: '{c}'。支持: 开发/浏览器/通讯/办公/设计/娱乐/其他"))
+            resolve_category_key(c).ok_or_else(|| {
+                format!("无法识别的分类: '{c}'。支持: 开发/浏览器/通讯/办公/设计/娱乐/其他")
+            })
         })
         .transpose()?;
 
@@ -492,7 +485,9 @@ fn aggregate_stats_execute(ctx: &ToolContext, args: Value) -> Result<String, Str
             .as_deref()
             .map(get_category_name)
             .unwrap_or("所有");
-        return Ok(format!("在 {date_from} ~ {date_to} 范围内未找到 '{cn}' 分类的活动记录。"));
+        return Ok(format!(
+            "在 {date_from} ~ {date_to} 范围内未找到 '{cn}' 分类的活动记录。"
+        ));
     }
 
     let total: i64 = app_durations.values().sum();
@@ -503,9 +498,7 @@ fn aggregate_stats_execute(ctx: &ToolContext, args: Value) -> Result<String, Str
             sorted.sort_by(|a, b| b.1.cmp(&a.1));
             sorted.truncate(limit);
 
-            let mut lines = vec![format!(
-                "应用使用时长排名 ({date_from} ~ {date_to})："
-            )];
+            let mut lines = vec![format!("应用使用时长排名 ({date_from} ~ {date_to})：")];
             for (app, dur) in &sorted {
                 lines.push(format!("  - {app}: {}", format_duration_compact(*dur)));
             }
@@ -517,9 +510,7 @@ fn aggregate_stats_execute(ctx: &ToolContext, args: Value) -> Result<String, Str
             let mut sorted: Vec<_> = category_durations.into_iter().collect();
             sorted.sort_by(|a, b| b.1.cmp(&a.1));
 
-            let mut lines = vec![format!(
-                "分类使用时长 ({date_from} ~ {date_to})："
-            )];
+            let mut lines = vec![format!("分类使用时长 ({date_from} ~ {date_to})：")];
             for (cat_key, dur) in &sorted {
                 let cn = get_category_name(cat_key);
                 let pct = if total > 0 {
@@ -545,9 +536,7 @@ fn aggregate_stats_execute(ctx: &ToolContext, args: Value) -> Result<String, Str
             let mut sorted_cats: Vec<_> = category_durations.into_iter().collect();
             sorted_cats.sort_by(|a, b| b.1.cmp(&a.1));
 
-            let mut lines = vec![format!(
-                "时间总览 ({date_from} ~ {date_to})："
-            )];
+            let mut lines = vec![format!("时间总览 ({date_from} ~ {date_to})：")];
             lines.push(format!("  总活动时长: {}", format_duration_compact(total)));
             let top_str: Vec<String> = top_apps
                 .iter()
@@ -583,9 +572,7 @@ fn category_search_execute(ctx: &ToolContext, args: Value) -> Result<String, Str
     let limit = args["limit"].as_u64().unwrap_or(20) as usize;
 
     let cat_key = resolve_category_key(category_input).ok_or_else(|| {
-        format!(
-            "无法识别的分类: '{category_input}'。支持: 开发/浏览器/通讯/办公/设计/娱乐/其他"
-        )
+        format!("无法识别的分类: '{category_input}'。支持: 开发/浏览器/通讯/办公/设计/娱乐/其他")
     })?;
 
     let activities = ctx
@@ -607,23 +594,19 @@ fn category_search_execute(ctx: &ToolContext, args: Value) -> Result<String, Str
             (Some(f), Some(t)) => format!("{f} ~ {t}"),
             _ => "指定范围".to_string(),
         };
-        return Ok(format!("在 {range} 范围内未找到 '{cn_name}' 类别的活动记录。"));
+        return Ok(format!(
+            "在 {range} 范围内未找到 '{cn_name}' 类别的活动记录。"
+        ));
     }
 
     // 按应用聚合
     let mut app_entries: HashMap<String, (i64, String)> = HashMap::new();
     for activity in &filtered {
         let display = normalize_display_app_name(&activity.app_name);
-        let entry = app_entries
-            .entry(display)
-            .or_insert((0, String::new()));
+        let entry = app_entries.entry(display).or_insert((0, String::new()));
         entry.0 += activity.duration;
         if entry.1.is_empty() {
-            entry.1 = activity
-                .window_title
-                .chars()
-                .take(60)
-                .collect();
+            entry.1 = activity.window_title.chars().take(60).collect();
         }
     }
 
@@ -721,11 +704,7 @@ fn trend_comparison_execute(ctx: &ToolContext, args: Value) -> Result<String, St
     }
 
     // 合并所有分类 key 并排序
-    let mut all_keys: Vec<String> = cats_a
-        .keys()
-        .chain(cats_b.keys())
-        .cloned()
-        .collect();
+    let mut all_keys: Vec<String> = cats_a.keys().chain(cats_b.keys()).cloned().collect();
     all_keys.sort();
     all_keys.dedup();
 
@@ -891,7 +870,10 @@ mod tests {
         assert!(names.contains(&"analyze_intents"), "应包含 analyze_intents");
         assert!(names.contains(&"aggregate_stats"), "应包含 aggregate_stats");
         assert!(names.contains(&"category_search"), "应包含 category_search");
-        assert!(names.contains(&"trend_comparison"), "应包含 trend_comparison");
+        assert!(
+            names.contains(&"trend_comparison"),
+            "应包含 trend_comparison"
+        );
     }
 
     #[test]
@@ -994,22 +976,40 @@ mod tests {
 
     #[test]
     fn test_resolve_category_key_english() {
-        assert_eq!(resolve_category_key("development"), Some("development".to_string()));
+        assert_eq!(
+            resolve_category_key("development"),
+            Some("development".to_string())
+        );
         assert_eq!(resolve_category_key("BROWSER"), Some("browser".to_string()));
-        assert_eq!(resolve_category_key("Communication"), Some("communication".to_string()));
+        assert_eq!(
+            resolve_category_key("Communication"),
+            Some("communication".to_string())
+        );
     }
 
     #[test]
     fn test_resolve_category_key_chinese_exact() {
-        assert_eq!(resolve_category_key("开发工具"), Some("development".to_string()));
-        assert_eq!(resolve_category_key("通讯协作"), Some("communication".to_string()));
+        assert_eq!(
+            resolve_category_key("开发工具"),
+            Some("development".to_string())
+        );
+        assert_eq!(
+            resolve_category_key("通讯协作"),
+            Some("communication".to_string())
+        );
         assert_eq!(resolve_category_key("办公软件"), Some("office".to_string()));
     }
 
     #[test]
     fn test_resolve_category_key_chinese_partial() {
-        assert_eq!(resolve_category_key("开发"), Some("development".to_string()));
-        assert_eq!(resolve_category_key("通讯"), Some("communication".to_string()));
+        assert_eq!(
+            resolve_category_key("开发"),
+            Some("development".to_string())
+        );
+        assert_eq!(
+            resolve_category_key("通讯"),
+            Some("communication".to_string())
+        );
         assert_eq!(resolve_category_key("办公"), Some("office".to_string()));
         assert_eq!(resolve_category_key("浏览"), Some("browser".to_string()));
         assert_eq!(resolve_category_key("设计"), Some("design".to_string()));

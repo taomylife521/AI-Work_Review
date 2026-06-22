@@ -491,12 +491,17 @@ fn handle_tool_call(name: &str, args: &Value, state: &Arc<Mutex<AppState>>) -> V
         }),
         "generate_report" => with_policy_check(state, name, Permission::WriteReport, |s| {
             let date = args["date"].as_str().unwrap_or("");
-            let locale = work_review_core::analysis::AppLocale::from_option(args["locale"].as_str());
+            let locale =
+                work_review_core::analysis::AppLocale::from_option(args["locale"].as_str());
             // 使用用户配置的工作时段，而不是默认值（默认 9-18，会与 UI 显示对不上）。
             let segments = s.config.effective_work_segments();
             match s.db.get_daily_stats_with_segments(date, &segments) {
                 Ok(stats) => {
-                    let summary = work_review_core::analysis::generate_stats_summary_for_locale(&stats, locale, &std::collections::HashMap::new());
+                    let summary = work_review_core::analysis::generate_stats_summary_for_locale(
+                        &stats,
+                        locale,
+                        &std::collections::HashMap::new(),
+                    );
                     json!({
                         "content": [{ "type": "text", "text": format!("工作日报 - {}\n\n{}", date, summary) }]
                     })
@@ -781,9 +786,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tools_list_应包含已注册的11个工具() {
+    fn tools_list_应包含已注册的12个工具() {
         let tools = tools_list();
-        assert_eq!(tools.len(), 11);
+        assert_eq!(tools.len(), 12);
         let names: Vec<&str> = tools
             .iter()
             .filter_map(|t| t.get("name").and_then(|v| v.as_str()))
@@ -844,10 +849,7 @@ mod tests {
 
     #[test]
     fn handle_prompt_get_应正确填充模板参数() {
-        let res = handle_prompt_get(
-            "project_time_audit",
-            &json!({ "project": "Work Review" }),
-        );
+        let res = handle_prompt_get("project_time_audit", &json!({ "project": "Work Review" }));
         assert_eq!(res["description"], json!("项目时间审计"));
         let text = res["messages"][0]["content"]["text"].as_str().unwrap();
         assert!(text.contains("Work Review"));

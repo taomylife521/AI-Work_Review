@@ -11,11 +11,11 @@ mod agent;
 mod analysis;
 mod autostart;
 mod avatar_engine;
-mod avatar_proactive;
 mod avatar_followup;
-mod bot_common;
 #[allow(dead_code)]
 mod avatar_input;
+mod avatar_proactive;
+mod bot_common;
 mod commands;
 mod config;
 mod database;
@@ -903,7 +903,10 @@ pub(crate) fn resolve_activity_classification(
     );
     // 分类被删除时回退到 "other"
     if base_category != "other"
-        && !config.custom_categories.iter().any(|c| c.key == base_category)
+        && !config
+            .custom_categories
+            .iter()
+            .any(|c| c.key == base_category)
     {
         base_category = "other".to_string();
     }
@@ -1463,7 +1466,10 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
         if goal_check_counter % 60 == 0 && avatar_enabled {
             let (goal_minutes, goal_notify) = {
                 let s = state.lock().unwrap_or_else(|e| e.into_inner());
-                (s.config.daily_work_goal_minutes, s.config.goal_notifications)
+                (
+                    s.config.daily_work_goal_minutes,
+                    s.config.goal_notifications,
+                )
             };
             if goal_notify {
                 if let Some(goal) = goal_minutes {
@@ -1472,14 +1478,17 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
                         let work_secs = {
                             let s = state.lock().unwrap_or_else(|e| e.into_inner());
                             let segments = s.config.effective_work_segments();
-                            s.database.get_daily_stats_with_segments(&today, &segments)
+                            s.database
+                                .get_daily_stats_with_segments(&today, &segments)
                                 .map(|st| st.work_time_duration)
                                 .unwrap_or(0)
                         };
                         if work_secs >= (goal as i64 * 60) {
                             avatar_engine::emit_avatar_bubble(
                                 &app,
-                                &avatar_engine::AvatarBubblePayload::success("🎉 今日工作目标达成！继续保持！"),
+                                &avatar_engine::AvatarBubblePayload::success(
+                                    "🎉 今日工作目标达成！继续保持！",
+                                ),
                             );
                             goal_celebrated_date = today;
                         }
@@ -2274,7 +2283,9 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                         }
                         // 条件 2: 已有记录有 URL 但当前没有 → URL 采集失败，不合并
                         // 防止把时长归到错误的 URL 上
-                        else if latest.browser_url.is_some() && active_window.browser_url.is_none() {
+                        else if latest.browser_url.is_some()
+                            && active_window.browser_url.is_none()
+                        {
                             merge = false;
                         }
                     }
@@ -2289,7 +2300,10 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                     let latest = latest_activity.unwrap();
                     let latest_id = match latest.id {
                         Some(id) => id,
-                        None => { log::error!("合并活动记录缺少 id，跳过"); continue; }
+                        None => {
+                            log::error!("合并活动记录缺少 id，跳过");
+                            continue;
+                        }
                     };
                     let previous_screenshot_path = latest.screenshot_path.clone();
 
@@ -2660,7 +2674,8 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                                         // 异步远程上传截图
                                         {
                                             let remote_cfg = {
-                                                let g = state.lock().unwrap_or_else(|e| e.into_inner());
+                                                let g =
+                                                    state.lock().unwrap_or_else(|e| e.into_inner());
                                                 g.config.remote_storage.clone()
                                             };
                                             if remote_cfg.provider != work_review_core::config::RemoteStorageProvider::None {
@@ -3080,7 +3095,11 @@ async fn main() {
     if is_version_changed {
         #[cfg(target_os = "macos")]
         if config.last_app_version.is_some() {
-            log::info!("检测到版本更新 ({} → {})，重置录屏权限引导标记", config.last_app_version.as_deref().unwrap_or("-"), current_version);
+            log::info!(
+                "检测到版本更新 ({} → {})，重置录屏权限引导标记",
+                config.last_app_version.as_deref().unwrap_or("-"),
+                current_version
+            );
             config.macos_screen_capture_permission_prompted = false;
         }
         config.last_app_version = Some(current_version);
@@ -3230,7 +3249,9 @@ async fn main() {
                 log::warn!("初始化开机自启功能失败: {e}");
             }
 
-            let window = app.get_webview_window("main").expect("main window should exist at setup");
+            let window = app
+                .get_webview_window("main")
+                .expect("main window should exist at setup");
             configure_main_window(&window);
             let launch_args = std::env::args().collect::<Vec<_>>();
             // 获取 Arc<Mutex<AppState>> 并克隆以便在异步任务中使用
@@ -3299,8 +3320,7 @@ async fn main() {
             avatar_input::start_avatar_input_monitor(app.handle());
             avatar_input::spawn_avatar_input_bridge(app.handle().clone());
 
-            if let Err(e) = localhost_api::sync_localhost_api_runtime(app.handle(), state.inner())
-            {
+            if let Err(e) = localhost_api::sync_localhost_api_runtime(app.handle(), state.inner()) {
                 log::warn!("初始化本地 API 失败: {e}");
             }
             if let Err(e) = telegram_bot::sync_telegram_bot_runtime(state.inner()) {
@@ -3495,6 +3515,7 @@ async fn main() {
             commands::generate_report,
             commands::get_saved_report,
             commands::update_report_content,
+            commands::set_report_block_preference,
             commands::export_report_markdown,
             commands::export_timeline_json,
             commands::export_reports_range,

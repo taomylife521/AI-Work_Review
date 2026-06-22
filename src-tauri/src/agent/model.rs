@@ -197,9 +197,7 @@ async fn chat_openai_compatible(
     let response = request.send().await?;
     if !response.status().is_success() {
         let error_text = response.text().await.unwrap_or_default();
-        return Err(AppError::Analysis(format!(
-            "LLM 调用失败: {error_text}"
-        )));
+        return Err(AppError::Analysis(format!("LLM 调用失败: {error_text}")));
     }
 
     let result: Value = response.json().await?;
@@ -342,19 +340,14 @@ async fn chat_claude(
         .post(&url)
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")
-        .header(
-            "x-api-key",
-            api_key,
-        )
+        .header("x-api-key", api_key)
         .json(&body)
         .send()
         .await?;
 
     if !response.status().is_success() {
         let error_text = response.text().await.unwrap_or_default();
-        return Err(AppError::Analysis(format!(
-            "Claude 调用失败: {error_text}"
-        )));
+        return Err(AppError::Analysis(format!("Claude 调用失败: {error_text}")));
     }
 
     let result: Value = response.json().await?;
@@ -401,8 +394,9 @@ async fn chat_gemini(
                 if let Some(calls) = msg["tool_calls"].as_array() {
                     for call in calls {
                         let args: Value = serde_json::from_str(
-                            call["function"]["arguments"].as_str().unwrap_or("{}")
-                        ).unwrap_or(json!({}));
+                            call["function"]["arguments"].as_str().unwrap_or("{}"),
+                        )
+                        .unwrap_or(json!({}));
                         parts.push(json!({
                             "functionCall": {
                                 "name": call["function"]["name"],
@@ -423,7 +417,10 @@ async fn chat_gemini(
             }
             Some("tool") => {
                 // tool result → Gemini functionResponse
-                let fn_name = msg.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+                let fn_name = msg
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
                 contents.push(json!({
                     "role": "function",
                     "parts": [{

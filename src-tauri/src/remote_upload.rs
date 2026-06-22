@@ -2,7 +2,9 @@ use hmac::{Hmac, Mac};
 use reqwest::Client;
 use sha2::{Digest, Sha256};
 use std::path::Path;
-use work_review_core::config::{RemoteStorageConfig, RemoteStorageProvider, S3Config, WebDavConfig};
+use work_review_core::config::{
+    RemoteStorageConfig, RemoteStorageProvider, S3Config, WebDavConfig,
+};
 use work_review_core::error::{AppError, Result};
 
 type HmacSha256 = Hmac<Sha256>;
@@ -18,7 +20,9 @@ pub async fn upload_screenshot(
         .map_err(|e| AppError::Screenshot(format!("读取截图文件失败: {e}")))?;
 
     match config.provider {
-        RemoteStorageProvider::S3 => upload_s3(client, &config.s3, &file_bytes, relative_path).await,
+        RemoteStorageProvider::S3 => {
+            upload_s3(client, &config.s3, &file_bytes, relative_path).await
+        }
         RemoteStorageProvider::WebDav => {
             upload_webdav(client, &config.webdav, &file_bytes, relative_path).await
         }
@@ -38,8 +42,8 @@ async fn upload_s3(
     let object_key = remote_object_path(&config.path_prefix, relative_path);
 
     let url = format!("{}/{}/{}", endpoint, &config.bucket, &object_key);
-    let parsed = reqwest::Url::parse(&url)
-        .map_err(|e| AppError::Config(format!("S3 URL 解析失败: {e}")))?;
+    let parsed =
+        reqwest::Url::parse(&url).map_err(|e| AppError::Config(format!("S3 URL 解析失败: {e}")))?;
     let host = parsed
         .host_str()
         .ok_or_else(|| AppError::Config("S3 endpoint 缺少 host".into()))?;
@@ -55,11 +59,7 @@ async fn upload_s3(
 
     let payload_hash = hex::encode(Sha256::digest(file_bytes));
 
-    let canonical_uri = format!(
-        "/{}/{}",
-        &config.bucket,
-        url_encode_path(&object_key)
-    );
+    let canonical_uri = format!("/{}/{}", &config.bucket, url_encode_path(&object_key));
     let canonical_querystring = "";
 
     let canonical_headers = format!(
@@ -125,8 +125,7 @@ fn derive_signing_key(secret_key: &str, date_stamp: &str, region: &str, service:
 }
 
 fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
-    let mut mac =
-        HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
+    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
     mac.update(data);
     mac.finalize().into_bytes().to_vec()
 }
@@ -161,8 +160,14 @@ async fn upload_webdav(
     let base = config.url.trim_end_matches('/');
     let object_path = remote_object_path(&config.path_prefix, relative_path);
 
-    ensure_webdav_directories(client, base, &object_path, &config.username, &config.password)
-        .await?;
+    ensure_webdav_directories(
+        client,
+        base,
+        &object_path,
+        &config.username,
+        &config.password,
+    )
+    .await?;
 
     let put_url = format!("{}/{}", base, &object_path);
     let resp = client
@@ -184,7 +189,8 @@ async fn upload_webdav(
         )));
     }
 
-    let public_url = public_url_or_fallback(config.public_url_base.as_deref(), &object_path, &put_url);
+    let public_url =
+        public_url_or_fallback(config.public_url_base.as_deref(), &object_path, &put_url);
 
     Ok(public_url)
 }
@@ -238,7 +244,10 @@ fn remote_object_path(prefix: &str, relative_path: &str) -> String {
 }
 
 fn public_url_or_fallback(base_url: Option<&str>, object_path: &str, fallback: &str) -> String {
-    let Some(base_url) = base_url.map(str::trim).filter(|base_url| !base_url.is_empty()) else {
+    let Some(base_url) = base_url
+        .map(str::trim)
+        .filter(|base_url| !base_url.is_empty())
+    else {
         return fallback.to_string();
     };
     format!("{}/{}", base_url.trim_end_matches('/'), object_path)

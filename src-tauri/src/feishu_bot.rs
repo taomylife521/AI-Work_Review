@@ -65,9 +65,7 @@ async fn get_tenant_token(client: &Client, app_id: &str, app_secret: &str) -> Op
 }
 
 async fn reply_message(client: &Client, token: &str, message_id: &str, text: &str) -> Option<()> {
-    let url = format!(
-        "https://open.feishu.cn/open-apis/im/v1/messages/{message_id}/reply"
-    );
+    let url = format!("https://open.feishu.cn/open-apis/im/v1/messages/{message_id}/reply");
     let content = serde_json::json!({"text": text}).to_string();
     client
         .post(&url)
@@ -164,7 +162,11 @@ pub async fn handle_feishu_webhook(
             _ => {
                 return FeishuResponse::json(
                     200,
-                    &status_payload("ignored", "non_text_message", Some("feishu_app_secret 未配置")),
+                    &status_payload(
+                        "ignored",
+                        "non_text_message",
+                        Some("feishu_app_secret 未配置"),
+                    ),
                 )
             }
         };
@@ -228,7 +230,10 @@ pub async fn handle_feishu_webhook(
     };
 
     match reply_message(&client, &tenant_token, message_id, &reply).await {
-        Some(_) => FeishuResponse::json(200, &status_payload("ok", "replied", Some("已发送回复消息"))),
+        Some(_) => FeishuResponse::json(
+            200,
+            &status_payload("ok", "replied", Some("已发送回复消息")),
+        ),
         None => FeishuResponse::error(500, "failed to send reply"),
     }
 }
