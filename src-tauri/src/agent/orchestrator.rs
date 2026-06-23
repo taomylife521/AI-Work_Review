@@ -35,6 +35,7 @@ pub enum QueryPath {
 #[derive(Debug)]
 pub struct RouteDecision {
     pub path: QueryPath,
+    #[allow(dead_code)] // 路由原因：保留用于调试输出，业务逻辑未读取
     pub reason: String,
 }
 

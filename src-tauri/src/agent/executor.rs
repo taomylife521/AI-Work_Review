@@ -271,7 +271,7 @@ mod tests {
         assert_eq!(user_msg.role, "user");
         assert_eq!(user_msg.content.as_deref(), Some("今天做了什么"));
 
-        let tool_msg = Message::tool_result("call_123", "结果");
+        let tool_msg = Message::tool_result_named("call_123", "结果", None);
         assert_eq!(tool_msg.role, "tool");
         assert_eq!(tool_msg.tool_call_id.as_deref(), Some("call_123"));
 

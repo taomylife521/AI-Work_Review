@@ -847,11 +847,6 @@ impl ToolRegistry {
             .ok_or_else(|| format!("未知的工具: {tool_name}"))?;
         (tool.execute_fn)(ctx, arguments)
     }
-
-    /// 获取所有已注册的工具名称
-    pub fn tool_names(&self) -> Vec<&'static str> {
-        self.tools.keys().copied().collect()
-    }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -865,13 +860,13 @@ mod tests {
     #[test]
     fn test_registry_has_builtin_tools() {
         let registry = ToolRegistry::new();
-        let names = registry.tool_names();
-        assert!(names.contains(&"search_memory"), "应包含 search_memory");
-        assert!(names.contains(&"analyze_intents"), "应包含 analyze_intents");
-        assert!(names.contains(&"aggregate_stats"), "应包含 aggregate_stats");
-        assert!(names.contains(&"category_search"), "应包含 category_search");
+        let json_str = serde_json::to_string(&registry.to_openai_tools()).unwrap();
+        assert!(json_str.contains("search_memory"), "应包含 search_memory");
+        assert!(json_str.contains("analyze_intents"), "应包含 analyze_intents");
+        assert!(json_str.contains("aggregate_stats"), "应包含 aggregate_stats");
+        assert!(json_str.contains("category_search"), "应包含 category_search");
         assert!(
-            names.contains(&"trend_comparison"),
+            json_str.contains("trend_comparison"),
             "应包含 trend_comparison"
         );
     }
@@ -946,8 +941,8 @@ mod tests {
     #[test]
     fn test_execute_unknown_tool_returns_error() {
         let registry = ToolRegistry::new();
-        let names = registry.tool_names();
-        assert!(!names.contains(&"nonexistent_tool"));
+        let json_str = serde_json::to_string(&registry.to_openai_tools()).unwrap();
+        assert!(!json_str.contains("nonexistent_tool"));
     }
 
     #[test]

@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
+
+async function readCommandsSource() {
+  // commands.rs 已按领域拆分为 commands/*.rs，这里拼接所有子模块以保持断言语义不变。
+  const dir = new URL('../src-tauri/src/commands/', import.meta.url);
+  const files = (await readdir(dir)).filter((f) => f.endsWith('.rs'));
+  const parts = await Promise.all(files.map((f) => readFile(new URL(f, dir), 'utf8')));
+  return parts.join('\n');
+}
 
 test('应用壳层应监听录制状态变更事件并同步侧边栏状态', async () => {
   const source = await readFile(new URL('./App.svelte', import.meta.url), 'utf8');
@@ -18,7 +26,7 @@ test('托盘和设置的配置变更应回推到前端缓存与设置页', async
   );
   const rustSource = (
     await Promise.all([
-      readFile(new URL('../src-tauri/src/commands.rs', import.meta.url), 'utf8'),
+      readCommandsSource(),
       readFile(new URL('../src-tauri/src/main.rs', import.meta.url), 'utf8'),
     ])
   ).join('\n');

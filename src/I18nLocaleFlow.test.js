@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
+
+async function readCommandsSource() {
+  // commands.rs 已按领域拆分为 commands/*.rs，这里拼接所有子模块以保持断言语义不变。
+  const dir = new URL('../src-tauri/src/commands/', import.meta.url);
+  const files = (await readdir(dir)).filter((f) => f.endsWith('.rs'));
+  const parts = await Promise.all(files.map((f) => readFile(new URL(f, dir), 'utf8')));
+  return parts.join('\n');
+}
 
 test('前端应向日报生成与工作助手透传当前 locale，并让日期输入跟随语言切换', async () => {
   const [appSource, reportSource, askSource, timelineSource, summarySource] = await Promise.all([
@@ -42,7 +50,7 @@ test('助手页展示层不应继续依赖写死中文的工作智能工具函�
 
 test('后端日报模板与助手提示词应支持按 locale 输出', async () => {
   const [commandsSource, summarySource, localSource] = await Promise.all([
-    readFile(new URL('../src-tauri/src/commands.rs', import.meta.url), 'utf8'),
+    readCommandsSource(),
     readFile(new URL('../crates/core/src/analysis/summary.rs', import.meta.url), 'utf8'),
     readFile(new URL('../crates/core/src/analysis/local.rs', import.meta.url), 'utf8'),
   ]);

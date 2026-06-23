@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
+
+async function readCommandsSource() {
+  // commands.rs 已按领域拆分为 commands/*.rs，这里拼接所有子模块以保持断言语义不变。
+  const dir = new URL('./src/commands/', import.meta.url);
+  const files = (await readdir(dir)).filter((f) => f.endsWith('.rs'));
+  const parts = await Promise.all(files.map((f) => readFile(new URL(f, dir), 'utf8')));
+  return parts.join('\n');
+}
 
 test('Linux 后端应识别 X11 与 Wayland 会话类型', async () => {
   const source = await readFile(new URL('./src/linux_session.rs', import.meta.url), 'utf8');
@@ -29,7 +37,7 @@ test('Linux 截图应按会话类型分流，Wayland 优先尝试原生工具', 
 });
 
 test('手动截图在 Linux Wayland 下不应强依赖活动窗口检测', async () => {
-  const source = await readFile(new URL('./src/commands.rs', import.meta.url), 'utf8');
+  const source = await readCommandsSource();
 
   assert.match(source, /let active_window = crate::monitor::get_active_window\(\)\.ok\(\);/);
   assert.match(source, /capture_for_window\(active_window\.as_ref\(\)\)/);
@@ -60,7 +68,7 @@ test('Linux 活动窗口检测应为 GNOME Wayland 单独提供 provider 分流'
 
 test('GNOME Wayland 桌宠联动应内置专用扩展并通过 D-Bus 暴露指针信息', async () => {
   const inputSource = await readFile(new URL('./src/avatar_input.rs', import.meta.url), 'utf8');
-  const commandSource = await readFile(new URL('./src/commands.rs', import.meta.url), 'utf8');
+  const commandSource = await readCommandsSource();
   const metadata = await readFile(
     new URL('../scripts/gnome-shell/work-review-avatar-input@workreview.app/metadata.json', import.meta.url),
     'utf8'

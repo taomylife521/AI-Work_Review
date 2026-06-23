@@ -71,8 +71,8 @@
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE5RTJFOUZBREEwMTA5RjIKUldUeUNRSGErdW5pcVdnajJvT3B2Vm9wdXlwb0QvVTBoQUZTTGYvSHJ2emhma3BWdnE3Q3dJTnkK",
       "endpoints": [
         "https://github.com/wm94i/Work-Review/releases/latest/download/updater.json",
-        "https://ghproxy.cn/https://github.com/wm94i/Work-Review/releases/latest/download/updater-ghproxy.json",
-        "https://ghp.ci/https://github.com/wm94i/Work-Review/releases/latest/download/updater-ghp.json"
+        "https://gh-proxy.cn/https://github.com/wm94i/Work-Review/releases/latest/download/updater-ghproxy.json",
+        "https://gh-proxy.com/https://github.com/wm94i/Work-Review/releases/latest/download/updater-ghp.json"
       ],
       "windows": {
         "installMode": "passive"
@@ -99,7 +99,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: asset: https://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* https://api.github.com https://ghproxy.cn https://ghp.ci"
+      "csp": "default-src 'self'; img-src 'self' data: asset: https://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* https://api.github.com https://gh-proxy.cn https://gh-proxy.com"
     }
   }
 }

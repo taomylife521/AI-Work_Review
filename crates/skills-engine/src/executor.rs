@@ -242,7 +242,7 @@ impl SkillExecutor {
     ) -> Result<Value> {
         match transform {
             TransformStep::Filter {
-                field,
+                field: _field,
                 operator: _,
                 value: _,
             } => {
@@ -296,7 +296,7 @@ impl SkillExecutor {
             }
             OutputStep::AiGenerate {
                 prompt_template,
-                model,
+                model: _model,
             } => {
                 // AI 生成输出
                 let rendered = Self::render_template(prompt_template, data);

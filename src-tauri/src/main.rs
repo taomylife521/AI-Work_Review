@@ -3149,8 +3149,49 @@ fn get_platform() -> &'static str {
     return "unknown";
 }
 
+/// 安装崩溃捕获：panic 时把版本、时间、panic 信息与完整调用栈写入
+/// `<数据目录>/crashes/crash-<时间>.log`，方便用户回传后定位闪退根因。
+fn install_crash_handler() {
+    std::panic::set_hook(Box::new(|info| {
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let payload = info.payload();
+        let message = payload
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| payload.downcast_ref::<String>().map(|s| s.as_str()))
+            .unwrap_or("<无法获取 panic 信息>");
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "<未知位置>".to_string());
+        let now = chrono::Local::now();
+        let report = format!(
+            "Work Review crash report\n版本: {}\n时间: {}\nPanic: {}\n位置: {}\n\n调用栈:\n{}\n",
+            env!("CARGO_PKG_VERSION"),
+            now.format("%Y-%m-%d %H:%M:%S"),
+            message,
+            location,
+            backtrace
+        );
+        let crash_dir = default_data_dir().join("crashes");
+        match std::fs::create_dir_all(&crash_dir).and_then(|_| {
+            std::fs::write(
+                crash_dir.join(format!("crash-{}.log", now.format("%Y%m%d_%H%M%S"))),
+                &report,
+            )
+        }) {
+            Ok(()) => eprintln!("崩溃日志已写入 {}/", crash_dir.display()),
+            Err(e) => eprintln!("写入崩溃日志失败: {e}"),
+        }
+        eprintln!("{report}");
+    }));
+}
+
 #[tokio::main]
 async fn main() {
+    // 安装崩溃捕获（最早执行，确保后续任何 panic 都能记录调用栈）
+    install_crash_handler();
+
     // 初始化日志
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 

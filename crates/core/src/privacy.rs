@@ -1,4 +1,5 @@
-use crate::config::{PrivacyConfig, PrivacyLevel};
+use crate::config::{AppConfig, PrivacyConfig, PrivacyLevel};
+use crate::database::DailyStats;
 use regex::Regex;
 
 /// 隐私检查结果
@@ -136,6 +137,138 @@ impl PrivacyFilter {
     pub fn update_config(&mut self, config: &PrivacyConfig) {
         self.config = config.clone();
     }
+}
+
+/// 判断 app 是否命中忽略名单。匹配前先经过 `normalize_display_app_name` 归一化，
+/// 再做大小写不敏感的子串/包含匹配。归一化是防御性的：即便上游传入的是裸可执行名
+/// （如 `chrome.exe`），也能与配置里以显示名（如 `Google Chrome`）登记的规则对齐。
+/// 对于上游已经归一化好的显示名，归一化是幂等的，行为保持一致。
+pub fn matches_ignored_app(app_name: &str, ignored_apps: &[String]) -> bool {
+    let app_lower = crate::categorize::normalize_display_app_name(app_name)
+        .to_lowercase()
+        .trim()
+        .to_string();
+    if app_lower.is_empty() {
+        return false;
+    }
+
+    ignored_apps
+        .iter()
+        .any(|ignored| app_lower.contains(ignored) || ignored.contains(&app_lower))
+}
+
+/// 判断目标 URL/域名是否命中排除域名名单。先提取域名，再做精确后缀匹配或
+/// 合并域名（merged domain）的兼容匹配。
+pub fn matches_excluded_domain(target: &str, excluded_domains: &[String]) -> bool {
+    let domain = PrivacyConfig::extract_domain(target);
+    if domain.is_empty() {
+        return false;
+    }
+
+    excluded_domains.iter().any(|excluded| {
+        let excluded_domain = PrivacyConfig::extract_domain(excluded);
+        !excluded_domain.is_empty()
+            && (PrivacyConfig::domain_matches(&domain, &excluded_domain)
+                || merged_domain_matches_excluded(&domain, &excluded_domain))
+    })
+}
+
+/// 合并域名（merged domain）兼容匹配：当目标域名本身是一个「合并入口」
+/// （如 `github.com` 被合并成 `github.io` 之类的二级入口）时，允许与排除名单中
+/// 的同类入口做前缀匹配。
+pub fn merged_domain_matches_excluded(domain: &str, excluded_domain: &str) -> bool {
+    if !crate::categorize::is_merged_domain(domain) {
+        return false;
+    }
+
+    let domain = domain.trim_end_matches('.').to_lowercase();
+    let excluded_domain = excluded_domain.trim_end_matches('.').to_lowercase();
+    let domain_labels: Vec<&str> = domain.split('.').collect();
+    let excluded_labels: Vec<&str> = excluded_domain.split('.').collect();
+
+    domain_labels.len() == 2
+        && excluded_labels.len() == 2
+        && domain_labels[0] == excluded_labels[0]
+        && domain_labels[1].starts_with(excluded_labels[1])
+        && domain_labels[1].len() > excluded_labels[1].len()
+}
+
+/// 从 `AppConfig` 收集隐私过滤所需的两组名单：
+/// 返回 `(ignored_apps, excluded_domains)`。
+pub fn collect_privacy_filters(config: &AppConfig) -> (Vec<String>, Vec<String>) {
+    (
+        config.privacy.collect_ignored_app_names(),
+        config.privacy.collect_excluded_domains(),
+    )
+}
+
+/// 把忽略应用名单应用到 `DailyStats`：移除命中名单的应用/浏览器，并重算合计时长。
+pub fn apply_ignored_apps_to_stats(mut stats: DailyStats, ignored_apps: &[String]) -> DailyStats {
+    if ignored_apps.is_empty() {
+        return stats;
+    }
+
+    let filtered_app_usage: Vec<_> = stats
+        .app_usage
+        .into_iter()
+        .filter(|app| !matches_ignored_app(&app.app_name, ignored_apps))
+        .collect();
+
+    stats.total_duration = filtered_app_usage.iter().map(|app| app.duration).sum();
+    stats.app_usage = filtered_app_usage;
+    stats
+        .browser_usage
+        .retain(|browser| !matches_ignored_app(&browser.browser_name, ignored_apps));
+    stats.browser_duration = stats
+        .browser_usage
+        .iter()
+        .map(|browser| browser.duration)
+        .sum();
+
+    if stats.work_time_duration > stats.total_duration {
+        stats.work_time_duration = stats.total_duration;
+    }
+
+    stats
+}
+
+/// 把排除域名名单应用到 `DailyStats`：移除命中名单的 URL/域名/浏览器子域名，
+/// 重算浏览器时长并丢弃时长归零的浏览器。
+pub fn apply_excluded_domains_to_stats(
+    mut stats: DailyStats,
+    excluded_domains: &[String],
+) -> DailyStats {
+    if excluded_domains.is_empty() {
+        return stats;
+    }
+
+    stats
+        .url_usage
+        .retain(|url| !matches_excluded_domain(&url.domain, excluded_domains));
+    stats
+        .domain_usage
+        .retain(|domain| !matches_excluded_domain(&domain.domain, excluded_domains));
+
+    for browser in &mut stats.browser_usage {
+        browser
+            .domains
+            .retain(|domain| !matches_excluded_domain(&domain.domain, excluded_domains));
+        browser.duration = browser.domains.iter().map(|domain| domain.duration).sum();
+    }
+    stats.browser_usage.retain(|browser| browser.duration > 0);
+    stats.browser_usage.sort_by(|left, right| {
+        right
+            .duration
+            .cmp(&left.duration)
+            .then_with(|| left.browser_name.cmp(&right.browser_name))
+    });
+    stats.browser_duration = stats
+        .browser_usage
+        .iter()
+        .map(|browser| browser.duration)
+        .sum();
+
+    stats
 }
 
 #[cfg(test)]

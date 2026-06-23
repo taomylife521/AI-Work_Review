@@ -2,9 +2,12 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::sync::{Arc, Mutex};
-use work_review_core::config::{AppConfig, PrivacyConfig};
+use work_review_core::config::AppConfig;
 use work_review_core::database::{Activity, DailyStats, Database, MemorySearchItem};
 use work_review_core::policy::{CallSource, Permission, PolicyDecision, PolicyEnforcer};
+use work_review_core::privacy::{
+    collect_privacy_filters, matches_excluded_domain, matches_ignored_app,
+};
 use work_review_skills_engine::engine::SkillEngine;
 use work_review_skills_engine::executor::{ExecutionContext, OutputContentType};
 use work_review_skills_engine::model::Permission as SkillPermission;
@@ -427,132 +430,6 @@ fn sanitize_value(value: &mut Value) {
         }
         _ => {}
     }
-}
-
-fn matches_ignored_app(app_name: &str, ignored_apps: &[String]) -> bool {
-    let app_lower = work_review_core::categorize::normalize_display_app_name(app_name)
-        .to_lowercase()
-        .trim()
-        .to_string();
-    if app_lower.is_empty() {
-        return false;
-    }
-
-    ignored_apps
-        .iter()
-        .any(|ignored| app_lower.contains(ignored) || ignored.contains(&app_lower))
-}
-
-fn matches_excluded_domain(target: &str, excluded_domains: &[String]) -> bool {
-    let domain = PrivacyConfig::extract_domain(target);
-    if domain.is_empty() {
-        return false;
-    }
-
-    excluded_domains.iter().any(|excluded| {
-        let excluded_domain = PrivacyConfig::extract_domain(excluded);
-        !excluded_domain.is_empty()
-            && (PrivacyConfig::domain_matches(&domain, &excluded_domain)
-                || merged_domain_matches_excluded(&domain, &excluded_domain))
-    })
-}
-
-fn merged_domain_matches_excluded(domain: &str, excluded_domain: &str) -> bool {
-    if !work_review_core::categorize::is_merged_domain(domain) {
-        return false;
-    }
-
-    let domain = domain.trim_end_matches('.').to_lowercase();
-    let excluded_domain = excluded_domain.trim_end_matches('.').to_lowercase();
-    let domain_labels: Vec<&str> = domain.split('.').collect();
-    let excluded_labels: Vec<&str> = excluded_domain.split('.').collect();
-
-    domain_labels.len() == 2
-        && excluded_labels.len() == 2
-        && domain_labels[0] == excluded_labels[0]
-        && domain_labels[1].starts_with(excluded_labels[1])
-        && domain_labels[1].len() > excluded_labels[1].len()
-}
-
-fn collect_privacy_filters(config: &AppConfig) -> (Vec<String>, Vec<String>) {
-    (
-        config.privacy.collect_ignored_app_names(),
-        config.privacy.collect_excluded_domains(),
-    )
-}
-
-fn apply_ignored_apps_to_stats(mut stats: DailyStats, ignored_apps: &[String]) -> DailyStats {
-    if ignored_apps.is_empty() {
-        return stats;
-    }
-
-    let filtered_app_usage: Vec<_> = stats
-        .app_usage
-        .into_iter()
-        .filter(|app| !matches_ignored_app(&app.app_name, ignored_apps))
-        .collect();
-
-    stats.total_duration = filtered_app_usage.iter().map(|app| app.duration).sum();
-    stats.app_usage = filtered_app_usage;
-    stats
-        .browser_usage
-        .retain(|browser| !matches_ignored_app(&browser.browser_name, ignored_apps));
-    stats.browser_duration = stats
-        .browser_usage
-        .iter()
-        .map(|browser| browser.duration)
-        .sum();
-
-    if stats.work_time_duration > stats.total_duration {
-        stats.work_time_duration = stats.total_duration;
-    }
-
-    stats
-}
-
-fn apply_excluded_domains_to_stats(
-    mut stats: DailyStats,
-    excluded_domains: &[String],
-) -> DailyStats {
-    if excluded_domains.is_empty() {
-        return stats;
-    }
-
-    stats
-        .url_usage
-        .retain(|url| !matches_excluded_domain(&url.domain, excluded_domains));
-    stats
-        .domain_usage
-        .retain(|domain| !matches_excluded_domain(&domain.domain, excluded_domains));
-
-    for browser in &mut stats.browser_usage {
-        browser
-            .domains
-            .retain(|domain| !matches_excluded_domain(&domain.domain, excluded_domains));
-        browser.duration = browser.domains.iter().map(|domain| domain.duration).sum();
-    }
-    stats.browser_usage.retain(|browser| browser.duration > 0);
-    stats.browser_usage.sort_by(|left, right| {
-        right
-            .duration
-            .cmp(&left.duration)
-            .then_with(|| left.browser_name.cmp(&right.browser_name))
-    });
-    stats.browser_duration = stats
-        .browser_usage
-        .iter()
-        .map(|browser| browser.duration)
-        .sum();
-
-    stats
-}
-
-fn apply_privacy_to_stats(stats: DailyStats, config: &AppConfig) -> DailyStats {
-    let (ignored_apps, excluded_domains) = collect_privacy_filters(config);
-    apply_excluded_domains_to_stats(
-        apply_ignored_apps_to_stats(stats, &ignored_apps),
-        &excluded_domains,
-    )
 }
 
 fn load_daily_stats_for_mcp(
@@ -982,6 +859,7 @@ fn tool_error(message: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use work_review_core::privacy::{apply_excluded_domains_to_stats, apply_ignored_apps_to_stats};
 
     #[test]
     fn tools_list_应包含已注册的12个工具() {
@@ -1129,7 +1007,13 @@ mod tests {
             ..Default::default()
         };
 
-        let filtered = apply_privacy_to_stats(stats, &config);
+        let filtered = {
+            let (ignored_apps, excluded_domains) = collect_privacy_filters(&config);
+            apply_excluded_domains_to_stats(
+                apply_ignored_apps_to_stats(stats, &ignored_apps),
+                &excluded_domains,
+            )
+        };
 
         assert_eq!(filtered.total_duration, 120);
         assert_eq!(filtered.app_usage.len(), 1);

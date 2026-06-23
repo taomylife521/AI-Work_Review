@@ -459,8 +459,8 @@ jobs:
           # 格式: "前缀 文件名"（前缀为空表示直连 GitHub）
           PROXY_VARIANTS=(
             " updater.json"
-            "https://ghproxy.cn/ updater-ghproxy.json"
-            "https://ghp.ci/ updater-ghp.json"
+            "https://gh-proxy.cn/ updater-ghproxy.json"
+            "https://gh-proxy.com/ updater-ghp.json"
           )
 
           for variant in "${PROXY_VARIANTS[@]}"; do

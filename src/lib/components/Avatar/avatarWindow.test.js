@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+
+function readCommandsSource() {
+  // commands.rs 已按领域拆分为 commands/*.rs，这里拼接所有子模块以保持断言语义不变。
+  const dir = new URL('../../../../src-tauri/src/commands/', import.meta.url);
+  const files = readdirSync(dir).filter((f) => f.endsWith('.rs'));
+  return files.map((f) => readFileSync(new URL(f, dir), 'utf8')).join('\n');
+}
 
 test('桌宠窗口应强制网页根节点透明，避免轮廓外出现白底', () => {
   const source = readFileSync(new URL('../../../routes/avatar/AvatarWindow.svelte', import.meta.url), 'utf8');
@@ -272,7 +279,7 @@ test('桌宠鼠标模式应按上游标准模式生成动态左手，并叠加�
 test('Linux 外观设置页应展示桌宠联动能力，并区分完整联动与仅鼠标联动', () => {
   const systemSource = readFileSync(new URL('../../../routes/settings/components/SettingsSystem.svelte', import.meta.url), 'utf8');
   const i18nSource = readFileSync(new URL('../../../lib/i18n/locales/zh-CN.js', import.meta.url), 'utf8');
-  const commandsSource = readFileSync(new URL('../../../../src-tauri/src/commands.rs', import.meta.url), 'utf8');
+  const commandsSource = readCommandsSource();
   const inputSource = readFileSync(new URL('../../../../src-tauri/src/avatar_input.rs', import.meta.url), 'utf8');
 
   assert.match(systemSource, /get_linux_session_support/);
@@ -311,7 +318,7 @@ test('设置页顶部权限区仅在 macOS 显示，并提供 mac 权限跳转',
   const settingsSource = readFileSync(new URL('../../../routes/settings/Settings.svelte', import.meta.url), 'utf8');
   const systemSource = readFileSync(new URL('../../../routes/settings/components/SettingsSystem.svelte', import.meta.url), 'utf8');
   const i18nSource = readFileSync(new URL('../../../lib/i18n/locales/zh-CN.js', import.meta.url), 'utf8');
-  const commandsSource = readFileSync(new URL('../../../../src-tauri/src/commands.rs', import.meta.url), 'utf8');
+  const commandsSource = readCommandsSource();
   const screenshotSource = readFileSync(new URL('../../../../src-tauri/src/screenshot.rs', import.meta.url), 'utf8');
   const mainSource = readFileSync(new URL('../../../../src-tauri/src/main.rs', import.meta.url), 'utf8');
 
@@ -358,7 +365,7 @@ test('设置页顶部权限区仅在 macOS 显示，并提供 mac 权限跳转',
 
 test('关闭桌面助手前应主动持久化当前位置，避免重新显示时回到左上角', () => {
   const appearanceSource = readFileSync(new URL('../../../routes/settings/components/SettingsAppearance.svelte', import.meta.url), 'utf8');
-  const commandsSource = readFileSync(new URL('../../../../src-tauri/src/commands.rs', import.meta.url), 'utf8');
+  const commandsSource = readCommandsSource();
   const mainSource = readFileSync(new URL('../../../../src-tauri/src/main.rs', import.meta.url), 'utf8');
 
   assert.match(appearanceSource, /invoke\('persist_avatar_position'\)/);
@@ -390,7 +397,7 @@ test('外观设置页应提供三种桌宠互动风格切换，并持久化 avat
 test('桌宠窗口应监听接上次继续事件，并提供继续任务、开始专注、记一下与稍后动作', () => {
   const windowSource = readFileSync(new URL('../../../routes/avatar/AvatarWindow.svelte', import.meta.url), 'utf8');
   const cardSource = readFileSync(new URL('./AvatarFollowupCard.svelte', import.meta.url), 'utf8');
-  const commandSource = readFileSync(new URL('../../../../src-tauri/src/commands.rs', import.meta.url), 'utf8');
+  const commandSource = readCommandsSource();
   const mainSource = readFileSync(new URL('../../../../src-tauri/src/main.rs', import.meta.url), 'utf8');
   const followupSource = readFileSync(new URL('../../../../src-tauri/src/avatar_followup.rs', import.meta.url), 'utf8');
   const i18nSource = readFileSync(new URL('../../../lib/i18n/locales/zh-CN.js', import.meta.url), 'utf8');
@@ -495,7 +502,7 @@ test('外观设置页不应再提供桌宠风格切换', () => {
 
 test('桌宠配置应支持官方预设字段，并在设置页仅展示当前可用的原版标准卡片', () => {
   const configSource = readFileSync(new URL('../../../../crates/core/src/config.rs', import.meta.url), 'utf8');
-  const commandsSource = readFileSync(new URL('../../../../src-tauri/src/commands.rs', import.meta.url), 'utf8');
+  const commandsSource = readCommandsSource();
   const appearanceSource = readFileSync(new URL('../../../routes/settings/components/SettingsAppearance.svelte', import.meta.url), 'utf8');
   const registrySource = readFileSync(new URL('./avatarPresetRegistry.js', import.meta.url), 'utf8');
   const i18nSource = readFileSync(new URL('../../../lib/i18n/locales/zh-CN.js', import.meta.url), 'utf8');
@@ -743,7 +750,7 @@ test('桌宠继续提醒卡片应纵向排列三个次要动作，并为按钮�
 
 test('桌宠窗口应在继续提醒卡片出现/消失时动态扩展原生窗口尺寸', () => {
   const windowSource = readFileSync(new URL('../../../routes/avatar/AvatarWindow.svelte', import.meta.url), 'utf8');
-  const commandsSource = readFileSync(new URL('../../../../src-tauri/src/commands.rs', import.meta.url), 'utf8');
+  const commandsSource = readCommandsSource();
   const mainSource = readFileSync(new URL('../../../../src-tauri/src/main.rs', import.meta.url), 'utf8');
   const engineSource = readFileSync(new URL('../../../../src-tauri/src/avatar_engine.rs', import.meta.url), 'utf8');
 

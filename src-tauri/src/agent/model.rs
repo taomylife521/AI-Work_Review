@@ -99,10 +99,6 @@ impl Message {
         }
     }
 
-    pub fn tool_result(tool_call_id: &str, content: &str) -> Self {
-        Self::tool_result_named(tool_call_id, content, None)
-    }
-
     pub fn tool_result_named(tool_call_id: &str, content: &str, name: Option<&str>) -> Self {
         Self {
             role: "tool".into(),
@@ -650,7 +646,7 @@ mod tests {
 
     #[test]
     fn test_message_tool_result() {
-        let msg = Message::tool_result("call_123", "结果数据");
+        let msg = Message::tool_result_named("call_123", "结果数据", None);
         assert_eq!(msg.role, "tool");
         assert_eq!(msg.tool_call_id.as_deref(), Some("call_123"));
     }
