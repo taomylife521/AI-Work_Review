@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.52] - 2026-06-23
+### 新增
+- **AI 编排日报区块**：日报改为 AI 依据当日工作模式决定区块顺序，每区块支持固定（pin）/隐藏（hide），用户偏好始终覆盖 AI 顺序；AI 排序缓存到配置避免重复 LLM 调用；区块按顺序动态编号（一、二、…）。
+- **主动式桌宠**：由模型自定开口节奏/内容/情绪（`next_check_minutes`），跟进卡片裁剪，卡片或气泡显示期间窗口拖拽兜底。
+- **动态开场提示**：配置 AI 模型后，工作助手依工作上下文动态生成开场提示（新增 `generate_text_with_model` 命令）。
+- **小时活跃度多模式**：概览支持按周 / 今日 / 日期范围查看每小时应用分布。
+- **Windows 便携版**：release 资产新增 Windows portable zip（#106）。
+
+### 修复
+- **统计口径不一致**（根因）：隐私过滤前移到聚合入口 `get_daily_stats_with_segments_filtered`，总时长 / 应用 / 分类 / 小时分布 / 网站统计从此同口径（概览、MCP、日报生成、旧报重渲染统一走前置过滤，替换各处后置过滤）。
+- **每小时分布可能超过 60 分钟**：跨小时活动改为按小时切片、重叠区间只计一次（归最新观测），小时桶不再溢出。
+- **切应用时长丢失**：上一应用无历史记录时也创建轻量回补记录，不再丢弃 `duration_delta`。
+- **MCP 读接口未过滤隐私**：timeline / memory / sessions / current_context / weekly 资源统一应用"忽略应用 / 排除域名"过滤。
+- **MCP notifications/initialized 返回无效空响应**（#107）。
+- **Linux CI apt 抖动**：azure 镜像换回 archive.ubuntu.com 主源，`apt-get update` 加 180s 超时 + 3 次退避重试（曾导致 v1.0.51 一次 6 小时的取消）。
+
+### 优化
+- **统一明暗主题色彩**：浅色文字从 8 级 slate 收敛到 4 级；深色全面迁移到 GitHub Dark 调色板（`#0d1117/#161b22/#21262d/#30363d/#484f58`），`text-white`→`#e6edf3`，所有阴影补 `dark:` 覆盖；移除设置保存坞渐变、关于页更新横幅居中、移除更新 toast。
+- **语言切换展示**：语言按钮显示语言全称（不再只是 ZH/EN/TW 短码）、选中项加 ✓、顺序统一为 ZH/EN/TW。
+- **界面细节**：滚动条与卡片圆角细化、小时活跃度图改 24 列网格对齐（首尾刻度不再溢出）、无数据时摘要显示占位、深色白底高光清理、设置 chip 形状、侧栏导航激活态（#108）。
+- **README 重写**：三语言（EN/ZH/TW）引言与特性文案重写更准确，新增 Localhost API 措辞守护测试，群组资源压缩。
+
 ## [1.0.51] - 2026-06-18
 ### 修复
 - 活动采集误判（根因）：`normalize_electron_app_name` 的浏览器标题推断缺少进程名守卫，对所有进程生效。当窗口标题含浏览器关键词（如 PyCharm 打开 `test_edge_cloud.py`，文件名含 "edge"）时，明确进程名被强制改写成浏览器名（PyCharm → Microsoft Edge），导致 `app_name` 与 `executable_path` 不一致落库——这正是"浏览器活动却显示编译器图标"的源头。现仅在 Electron / Helper 类通用进程上才用标题推断，明确进程名直接保留。

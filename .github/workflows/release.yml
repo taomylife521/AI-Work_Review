@@ -224,7 +224,8 @@ jobs:
           fi
           DIR="$(dirname "$EXE")"
           printf 'Work Review 便携版\n\n- 双击 Work_Review.exe 直接运行，无需安装\n- 需要 WebView2 运行时（Windows 10/11 已自带；旧系统请自行安装）\n- 数据保存在 %%APPDATA%%\\work-review\n' > "$DIR/PORTABLE_README.txt"
-          (cd "$DIR" && rm -f Work_Review_portable_x64.zip && zip -j Work_Review_portable_x64.zip Work_Review.exe PORTABLE_README.txt)
+          # Windows runner 不带 zip 命令，用 PowerShell 的 Compress-Archive 打包（行为等同 zip -j，文件平铺到 zip 根）
+          (cd "$DIR" && rm -f Work_Review_portable_x64.zip && powershell.exe -NoProfile -Command "Compress-Archive -Path Work_Review.exe,PORTABLE_README.txt -DestinationPath Work_Review_portable_x64.zip -Force")
 
       - name: Rename Linux bundle assets
         if: startsWith(matrix.platform, 'ubuntu')
