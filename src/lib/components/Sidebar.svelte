@@ -220,12 +220,11 @@
               {#each localeOptions as option}
                 <button
                   type="button"
-                  class="flex w-full items-center gap-2.5 whitespace-nowrap rounded-xl px-3 py-2 text-left text-xs font-medium transition-colors {currentLocale === option.value ? 'bg-slate-100 text-slate-900 dark:bg-[#21262d] dark:text-[#e6edf3]' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900 dark:text-[#adbac7] dark:hover:bg-[#21262d]/80 dark:hover:text-[#e6edf3]'}"
+                  class="flex w-full items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 text-left text-xs font-medium transition-colors {currentLocale === option.value ? 'bg-slate-200/80 text-slate-900 dark:bg-[#30363d] dark:text-[#e6edf3]' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900 dark:text-[#adbac7] dark:hover:bg-[#21262d]/80 dark:hover:text-[#e6edf3]'}"
                   role="menuitemradio"
                   aria-checked={currentLocale === option.value}
                   on:click={() => selectLocale(option.value)}
                 >
-                  <span class="w-3.5 shrink-0 text-center text-slate-900 dark:text-[#e6edf3]">{currentLocale === option.value ? '✓' : ''}</span>
                   <span class="font-semibold tracking-[0.08em] text-slate-500 dark:text-[#7d8590]">{option.label}</span>
                   <span class="text-slate-700 dark:text-[#c9d1d9]">{option.fullLabel}</span>
                 </button>

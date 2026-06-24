@@ -890,7 +890,7 @@
                 cancelDomainSemanticEdit();
               }}
             >
-              <div class="flex items-center gap-2 mb-1.5">
+              <div class="flex min-w-0 items-center gap-2 mb-1.5">
                 {#if getAppIconSrc(browser.browser_name, browser.executable_path)}
                   <img src={getAppIconSrc(browser.browser_name, browser.executable_path)} alt="" class="w-6 h-6 rounded-md object-cover" />
                 {:else}

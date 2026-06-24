@@ -741,7 +741,7 @@
           </div>
           {#each config.node_devices || [] as device, i}
           <div class="flex items-start gap-2 rounded-lg bg-white/70 px-3 py-2 ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
-            <div class="flex-1 grid gap-x-2 gap-y-1 grid-cols-[1fr_2fr]">
+            <div class="flex-1 min-w-0 grid gap-x-2 gap-y-1 grid-cols-[1fr_2fr]">
               <label class="block">
                 <span class="text-[10px] text-slate-500 dark:text-[#7d8590]">{t('nodeGatewayPage.deviceNameCol')}</span>
                 <input
@@ -857,7 +857,7 @@
                     ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400'
                     : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400'}"
                 >{example.method}</span>
-                <span class="text-xs font-mono font-medium text-slate-700 dark:text-[#c9d1d9] truncate">{example.path}</span>
+                <span class="min-w-0 text-xs font-mono font-medium text-slate-700 dark:text-[#c9d1d9] truncate">{example.path}</span>
                 <span class="ml-auto shrink-0">
                   <button type="button" class="rounded-md px-2 py-0.5 text-[10px] font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-[#7d8590] dark:hover:bg-[#30363d] dark:hover:text-[#c9d1d9] transition-colors" on:click={() => copyCurl(example.cmd)}>
                     {t('nodeGatewayPage.copyCurl')}
