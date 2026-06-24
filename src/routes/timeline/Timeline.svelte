@@ -84,7 +84,11 @@
       return null;
     }
 
-    const nextDate = new URLSearchParams(window.location.search).get('date');
+    // hash 路由：query 在 location.hash（如 #/timeline?date=2026-06-22），不在 location.search
+    const hash = window.location.hash;
+    const queryIndex = hash.indexOf('?');
+    const search = queryIndex >= 0 ? hash.slice(queryIndex + 1) : '';
+    const nextDate = new URLSearchParams(search).get('date');
     return nextDate && DATE_PARAM_PATTERN.test(nextDate) ? nextDate : null;
   }
 
@@ -974,7 +978,7 @@
         </div>
 
         <a
-          href="#/timeline/summary"
+          href="#/timeline/summary/{selectedDate}"
           class="page-control-btn timeline-summary-action"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

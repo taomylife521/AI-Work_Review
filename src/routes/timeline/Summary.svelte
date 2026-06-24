@@ -1,6 +1,7 @@
 <script>
   import { invoke } from '@tauri-apps/api/core';
-  import { link } from 'svelte-spa-router';
+  import { onMount } from 'svelte';
+  import { link, params } from 'svelte-spa-router';
   import { formatDurationLocalized, locale, t } from '$lib/i18n/index.js';
   import LocalizedDatePicker from '../../lib/components/LocalizedDatePicker.svelte';
   import {
@@ -19,7 +20,18 @@
   let summaries = [];
   let loading = true;
   let error = null;
-  let selectedDate = getLocalDateString();
+  let selectedDate = null;
+  // 路由 /timeline/summary/:date 带日期时用之（从时间线跳转过来保留查看的日期），否则默认今天。
+  // 直接从 location.hash 解析，避免依赖 router params 的时序/版本差异。
+  onMount(() => {
+    const hash = typeof window !== 'undefined' ? window.location.hash : '';
+    const match = hash.match(/summary\/(\d{4}-\d{2}-\d{2})(?:[/?#]|$)/);
+    const routeDate = match?.[1] ?? $params?.date;
+    selectedDate =
+      typeof routeDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(routeDate)
+        ? routeDate
+        : getLocalDateString();
+  });
   let lastLoadedDate = null;
   let expandedHours = new Set();
   $: currentLocale = $locale;
@@ -72,7 +84,7 @@
 <div class="page-shell summary-page-shell" data-locale={currentLocale}>
   <div class="page-header">
     <div class="page-title-group summary-page-title-group">
-      <a href="/timeline" use:link class="summary-back-btn" aria-label={t('timeline.title')}>
+      <a href={'/timeline' + (selectedDate ? '?date=' + selectedDate : '')} use:link class="summary-back-btn" aria-label={t('timeline.title')}>
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
         </svg>

@@ -780,6 +780,9 @@ pub struct AppConfig {
     pub last_app_version: Option<String>,
     /// 主题模式: system, light, dark
     pub theme: String,
+    /// 界面风格: a=Quiet Pro, b=当前柔和层次, c=Compact Data
+    #[serde(default = "default_ui_visual_style")]
+    pub ui_visual_style: String,
     /// 上班开始时间（0-23）
     #[serde(default = "default_work_start")]
     pub work_start_hour: u8,
@@ -910,6 +913,9 @@ fn default_avatar_preset() -> String {
 fn default_avatar_persona() -> String {
     "assistant".to_string()
 }
+fn default_ui_visual_style() -> String {
+    "b".to_string()
+}
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -966,6 +972,7 @@ impl Default for AppConfig {
             macos_screen_capture_permission_prompted: false,
             last_app_version: None,
             theme: "system".to_string(),
+            ui_visual_style: default_ui_visual_style(),
             work_start_hour: 9,
             work_end_hour: 18,
             work_start_minute: 0,
@@ -1039,6 +1046,7 @@ impl AppConfig {
         );
         self.screenshot_interval = normalize_screenshot_interval(self.screenshot_interval);
         self.idle_threshold_minutes = normalize_idle_threshold_minutes(self.idle_threshold_minutes);
+        self.ui_visual_style = normalize_ui_visual_style(&self.ui_visual_style);
         self.avatar_scale = normalize_avatar_scale(self.avatar_scale);
         self.avatar_opacity = normalize_avatar_opacity(self.avatar_opacity);
         self.avatar_preset = normalize_avatar_preset(&self.avatar_preset);
@@ -1504,6 +1512,13 @@ fn normalize_avatar_persona(value: &str) -> String {
     }
 }
 
+fn normalize_ui_visual_style(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "a" | "b" | "c" => value.trim().to_ascii_lowercase(),
+        _ => default_ui_visual_style(),
+    }
+}
+
 fn normalize_avatar_followups(items: &mut Vec<AvatarFollowupItem>) {
     let mut seen = std::collections::HashSet::new();
     items.retain_mut(|item| {
@@ -1574,10 +1589,11 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
 mod tests {
     use super::{
         default_avatar_opacity, default_avatar_persona, default_avatar_preset,
-        default_avatar_scale, normalize_app_category_rules, normalize_avatar_followups,
-        normalize_avatar_opacity, normalize_avatar_persona, normalize_avatar_preset,
-        normalize_avatar_scale, AiProvider, AppCategoryRule, AppConfig, AvatarFollowupItem,
-        ScreenshotDisplayMode, WebsiteSemanticRule, DEFAULT_LOCALHOST_API_PORT,
+        default_avatar_scale, default_ui_visual_style, normalize_app_category_rules,
+        normalize_avatar_followups, normalize_avatar_opacity, normalize_avatar_persona,
+        normalize_avatar_preset, normalize_avatar_scale, normalize_ui_visual_style, AiProvider,
+        AppCategoryRule, AppConfig, AvatarFollowupItem, ScreenshotDisplayMode, WebsiteSemanticRule,
+        DEFAULT_LOCALHOST_API_PORT,
     };
 
     #[test]
@@ -1610,6 +1626,18 @@ mod tests {
 
         assert_eq!(config.avatar_persona, default_avatar_persona());
         assert_eq!(config.avatar_persona, "assistant");
+    }
+
+    #[test]
+    fn 界面风格默认应保持当前柔和层次且只允许三套方案() {
+        let config = AppConfig::default();
+
+        assert_eq!(config.ui_visual_style, default_ui_visual_style());
+        assert_eq!(config.ui_visual_style, "b");
+        assert_eq!(normalize_ui_visual_style(" a "), "a");
+        assert_eq!(normalize_ui_visual_style("B"), "b");
+        assert_eq!(normalize_ui_visual_style("c"), "c");
+        assert_eq!(normalize_ui_visual_style("unknown"), "b");
     }
 
     #[test]

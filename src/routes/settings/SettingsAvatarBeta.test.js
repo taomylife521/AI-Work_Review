@@ -9,5 +9,9 @@ test('桌面化身 Beta 应显示在外层标签栏而不是内容卡内部', as
   ]);
 
   assert.match(settingsSource, /id:\s*'avatar'[^\n]*beta:\s*true/);
-  assert.doesNotMatch(appearanceSource, />\s*Beta\s*</);
+  // 桌面化身区用 avatarBetaHint 文案、不应硬编码 Beta 徽标；
+  // 界面风格区的 Beta 徽标是独立功能，不受此约束。
+  const avatarBlock =
+    appearanceSource.match(/\{#if showAvatarControls\}[\s\S]*?\{\/if\}/)?.[0] ?? appearanceSource;
+  assert.doesNotMatch(avatarBlock, />\s*Beta\s*</);
 });

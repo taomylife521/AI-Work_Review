@@ -6,6 +6,7 @@
   import { showToast } from '../../lib/stores/toast.js';
 
   import SettingsGeneral from './components/SettingsGeneral.svelte';
+  import SettingsAppearance from './components/SettingsAppearance.svelte';
   import SettingsAI from './components/SettingsAI.svelte';
   import SettingsAvatar from './components/SettingsAvatar.svelte';
   import SettingsNodeGateway from './components/SettingsNodeGateway.svelte';
@@ -33,6 +34,7 @@
 
   const tabs = [
     { id: 'general', labelKey: 'settings.tabs.general', icon: 'general' },
+    { id: 'appearance', labelKey: 'settings.tabs.appearance', icon: 'appearance' },
     { id: 'ai', labelKey: 'settings.tabs.ai', icon: 'ai' },
     { id: 'avatar', labelKey: 'settings.tabs.avatar', icon: 'avatar', beta: true },
     { id: 'privacy', labelKey: 'settings.tabs.privacy', icon: 'privacy' },
@@ -92,6 +94,9 @@
       }
       if (typeof config.localhost_api_host !== 'string' && config.localhost_api_host !== null) {
         config.localhost_api_host = null;
+      }
+      if (!['a', 'b', 'c'].includes(config.ui_visual_style)) {
+        config.ui_visual_style = 'b';
       }
       if (typeof config.telegram_bot_enabled !== 'boolean') {
         config.telegram_bot_enabled = false;
@@ -355,6 +360,8 @@
               <span class="settings-tab-rail-icon">
                 {#if tab.icon === 'general'}
                   <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                {:else if tab.icon === 'appearance'}
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 3.75a8.25 8.25 0 100 16.5h1.15a1.85 1.85 0 001.05-3.37 1.15 1.15 0 01.64-2.1h1.01A4.4 4.4 0 0020.25 10.4 6.65 6.65 0 0013.6 3.75H12z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7.8 10.1h.01M9.75 7.4h.01M13 7.05h.01M15.9 9.25h.01" /></svg>
                 {:else if tab.icon === 'ai'}
                   <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
                 {:else if tab.icon === 'node'}
@@ -382,6 +389,8 @@
         <div class="settings-stage-shell">
         {#if activeTab === 'general'}
           <SettingsGeneral bind:config on:change={() => dirty = true} />
+        {:else if activeTab === 'appearance'}
+          <SettingsAppearance bind:config mode="background-only" on:change={() => dirty = true} />
         {:else if activeTab === 'node'}
           <SettingsNodeGateway bind:config {dataDir} on:change={() => dirty = true} />
         {:else if activeTab === 'ai'}

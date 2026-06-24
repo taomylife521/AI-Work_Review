@@ -25,6 +25,7 @@
   const dispatch = createEventDispatcher();
   $: currentLocale = $locale;
   $: showAvatarControls = mode === 'full' || mode === 'avatar-only';
+  $: showInterfaceStyleSettings = mode === 'full' || mode === 'background-only';
   $: showBackgroundSettings = mode === 'full' || mode === 'background-only';
 
   let avatarSaving = false;
@@ -32,9 +33,30 @@
   let avatarOpacitySaving = false;
   let avatarPersonaSaving = false;
   let avatarPresetSaving = false;
+  let uiVisualStyleSaving = false;
   let avatarScaleTimer = null;
   let avatarOpacityTimer = null;
   const breakReminderIntervals = [30, 45, 50, 60, 90, 120];
+  const UI_VISUAL_STYLE_OPTIONS = [
+    {
+      id: 'a',
+      titleKey: 'settingsAppearance.uiStyleATitle',
+      descriptionKey: 'settingsAppearance.uiStyleADesc',
+      badgeKey: 'settingsAppearance.uiStyleABadge',
+    },
+    {
+      id: 'b',
+      titleKey: 'settingsAppearance.uiStyleBTitle',
+      descriptionKey: 'settingsAppearance.uiStyleBDesc',
+      badgeKey: 'settingsAppearance.uiStyleBBadge',
+    },
+    {
+      id: 'c',
+      titleKey: 'settingsAppearance.uiStyleCTitle',
+      descriptionKey: 'settingsAppearance.uiStyleCDesc',
+      badgeKey: 'settingsAppearance.uiStyleCBadge',
+    },
+  ];
   const AVATAR_PERSONA_OPTIONS = [
     {
       id: 'companion',
@@ -219,6 +241,34 @@
       showToast(t('settingsAppearance.avatarPersonaSaveFailed', { error: e }), 'error');
     } finally {
       avatarPersonaSaving = false;
+    }
+  }
+
+  async function selectUiVisualStyle(styleId) {
+    if (uiVisualStyleSaving || config.ui_visual_style === styleId) {
+      return;
+    }
+
+    const previousStyle = config.ui_visual_style || 'b';
+    uiVisualStyleSaving = true;
+    config.ui_visual_style = styleId;
+    dispatch('change', config);
+    window.dispatchEvent(new CustomEvent('ui-visual-style-changed', {
+      detail: { style: styleId },
+    }));
+
+    try {
+      await invoke('save_config', { config });
+    } catch (e) {
+      config.ui_visual_style = previousStyle;
+      dispatch('change', config);
+      window.dispatchEvent(new CustomEvent('ui-visual-style-changed', {
+        detail: { style: previousStyle },
+      }));
+      console.error('保存界面风格失败:', e);
+      showToast(t('settingsAppearance.uiVisualStyleSaveFailed', { error: e }), 'error');
+    } finally {
+      uiVisualStyleSaving = false;
     }
   }
 
@@ -531,6 +581,51 @@
         </select>
       </div>
     {/if}
+  </div>
+</div>
+{/if}
+
+{#if showInterfaceStyleSettings}
+<div class="settings-card" data-locale={currentLocale}>
+  <div class="flex items-start justify-between gap-4">
+    <div>
+      <h3 class="settings-card-title">
+        {t('settingsAppearance.uiVisualStyle')}
+        <span class="ml-1.5 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1 py-px text-[8px] font-semibold uppercase tracking-[0.06em] text-amber-700 align-middle dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">Beta</span>
+      </h3>
+      <p class="settings-muted mt-1">{t('settingsAppearance.uiVisualStyleDesc')}</p>
+    </div>
+    {#if uiVisualStyleSaving}
+      <span class="text-xs text-slate-400 dark:text-[#636c76]">{t('settingsAppearance.syncing')}</span>
+    {/if}
+  </div>
+
+  <div class="mt-4 grid gap-3 md:grid-cols-3">
+    {#each UI_VISUAL_STYLE_OPTIONS as option}
+      <button
+        type="button"
+        class="settings-style-option {config.ui_visual_style === option.id ? 'settings-style-option-active' : ''}"
+        on:click={() => selectUiVisualStyle(option.id)}
+        aria-pressed={config.ui_visual_style === option.id}
+      >
+        <div class="settings-style-preview settings-style-preview--{option.id}">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div class="mt-3 flex items-center justify-between gap-2">
+          <div class="text-sm font-semibold text-slate-900 dark:text-[#e6edf3]">
+            {t(option.titleKey)}
+          </div>
+          <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:bg-[#30363d] dark:text-[#adbac7]">
+            {t(option.badgeKey)}
+          </span>
+        </div>
+        <p class="mt-2 text-xs leading-5 text-slate-500 dark:text-[#7d8590]">
+          {t(option.descriptionKey)}
+        </p>
+      </button>
+    {/each}
   </div>
 </div>
 {/if}

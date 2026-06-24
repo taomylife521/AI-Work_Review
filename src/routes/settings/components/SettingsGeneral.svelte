@@ -2,7 +2,6 @@
   import { createEventDispatcher, onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { formatDurationLocalized, locale, t } from '$lib/i18n/index.js';
-  import SettingsAppearance from './SettingsAppearance.svelte';
   import CollapsibleSection from '../../../lib/components/CollapsibleSection.svelte';
 
   export let config;
@@ -471,5 +470,3 @@
     </div>
   </div>
 </div>
-
-<SettingsAppearance bind:config mode="background-only" on:change={handleChange} />

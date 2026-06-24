@@ -18,7 +18,7 @@ test('桌宠窗口应强制网页根节点透明，避免轮廓外出现白底',
   assert.match(source, /background:\s*transparent !important/);
 });
 
-test('设置页应在顶部单独展示权限区，并将背景外观并回常规页', () => {
+test('设置页应在顶部单独展示权限区，并将背景外观放入独立外观页', () => {
   const settingsSource = readFileSync(new URL('../../../routes/settings/Settings.svelte', import.meta.url), 'utf8');
   const avatarSource = readFileSync(new URL('../../../routes/settings/components/SettingsAvatar.svelte', import.meta.url), 'utf8');
   const generalSource = readFileSync(new URL('../../../routes/settings/components/SettingsGeneral.svelte', import.meta.url), 'utf8');
@@ -26,18 +26,20 @@ test('设置页应在顶部单独展示权限区，并将背景外观并回常�
   const appearanceSource = readFileSync(new URL('../../../routes/settings/components/SettingsAppearance.svelte', import.meta.url), 'utf8');
 
   assert.match(settingsSource, /settings\.tabs\.avatar/);
+  assert.match(settingsSource, /settings\.tabs\.appearance/);
   assert.match(settingsSource, /import SettingsAvatar/);
+  assert.match(settingsSource, /import SettingsAppearance/);
   assert.match(settingsSource, /import SettingsSystem/);
   assert.match(settingsSource, /invoke\('get_runtime_platform'\)/);
   assert.match(settingsSource, /activeTab === 'avatar'/);
+  assert.match(settingsSource, /activeTab === 'appearance'/);
   assert.match(settingsSource, /<SettingsAvatar bind:config on:change=\{\(\) => dirty = true\} \/>/);
+  assert.match(settingsSource, /<SettingsAppearance bind:config mode="background-only" on:change=\{\(\) => dirty = true\} \/>/);
   assert.match(settingsSource, /\{#if settingsRuntimePlatform === 'macos'\}/);
   assert.match(settingsSource, /<SettingsSystem \/>/);
   assert.match(settingsSource, /settings-top-status-zone/);
-  assert.doesNotMatch(settingsSource, /activeTab === 'appearance'/);
-  assert.doesNotMatch(settingsSource, /settings\.tabs\.appearance/);
-  assert.match(generalSource, /import SettingsAppearance/);
-  assert.match(generalSource, /<SettingsAppearance bind:config mode="background-only" on:change=\{handleChange\} \/>/);
+  assert.doesNotMatch(generalSource, /import SettingsAppearance/);
+  assert.doesNotMatch(generalSource, /<SettingsAppearance/);
   assert.doesNotMatch(generalSource, /import SettingsSystem/);
   assert.doesNotMatch(generalSource, /<SettingsSystem \/>/);
   assert.match(avatarSource, /mode="avatar-only"/);
@@ -65,7 +67,11 @@ test('桌面化身 Beta 应展示在外层标签栏，设置内容卡内不再�
   assert.match(settingsSource, /id:\s*'avatar'[\s\S]*beta:\s*true/);
   assert.match(appearanceSource, /settingsAppearance\.avatar/);
   assert.match(appearanceSource, /settingsAppearance\.avatarBetaHint/);
-  assert.doesNotMatch(appearanceSource, />\s*Beta\s*</);
+  // 桌面化身区用 avatarBetaHint 文案、不应硬编码 Beta 徽标；
+  // 界面风格区的 Beta 徽标是独立功能，不受此约束。
+  const avatarBlock =
+    appearanceSource.match(/\{#if showAvatarControls\}[\s\S]*?\{\/if\}/)?.[0] ?? appearanceSource;
+  assert.doesNotMatch(avatarBlock, />\s*Beta\s*</);
 });
 
 test('桌宠控制项应迁移到外观页独立区域，并提供猫体透明度滑杆', () => {
@@ -443,7 +449,7 @@ test('桌宠窗口应监听接上次继续事件，并提供继续任务、开�
   assert.match(appSource, /push\('\/timeline'\)/);
   assert.match(appSource, /timeline-focus-date/);
   assert.match(timelineSource, /timeline-focus-date/);
-  assert.match(timelineSource, /window\.location\.search/);
+  assert.match(timelineSource, /window\.location\.hash/);
 });
 
 test('桌宠输入链应维护按住键集合，并支持多键同时显示与释放', () => {
