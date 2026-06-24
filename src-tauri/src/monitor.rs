@@ -843,6 +843,17 @@ pub fn find_website_semantic_override(
     })
 }
 
+/// 归一化基础分类 key，但保留自定义分类 key（不强制收敛到 other）。
+fn normalize_category_keeping_custom(fallback_category: &str) -> String {
+    let fallback = fallback_category.trim().to_lowercase();
+    let normalized = normalize_category_key(&fallback);
+    if normalized == "other" && !fallback.is_empty() && fallback != "other" {
+        fallback
+    } else {
+        normalized
+    }
+}
+
 /// 将网站语义分类映射到基础分类，便于工作/休息时长统计直接生效。
 /// 对无法识别的语义分类，保留原有基础分类。
 pub fn semantic_category_to_base_category(
@@ -851,7 +862,7 @@ pub fn semantic_category_to_base_category(
 ) -> String {
     let semantic = semantic_category.trim();
     if semantic.is_empty() {
-        return normalize_category_key(fallback_category);
+        return normalize_category_keeping_custom(fallback_category);
     }
 
     let mapped = match semantic {
@@ -870,14 +881,7 @@ pub fn semantic_category_to_base_category(
         return category.to_string();
     }
 
-    let fallback = fallback_category.trim().to_lowercase();
-    let normalized = normalize_category_key(&fallback);
-    if normalized == "other" && !fallback.is_empty() && fallback != "other" {
-        // 保留可能存在的自定义分类 key。
-        fallback
-    } else {
-        normalized
-    }
+    normalize_category_keeping_custom(fallback_category)
 }
 
 fn firefox_family_profile_dir_from_ini(base_dir: &Path, ini_content: &str) -> Option<PathBuf> {

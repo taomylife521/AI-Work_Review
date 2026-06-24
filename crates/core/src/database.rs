@@ -1443,7 +1443,9 @@ impl Database {
                 entry.4 = timestamp;
             }
 
-            let norm_cat = crate::categorize::normalize_category_key(&category);
+            // 保留自定义类别 key（trim/lowercase 归一化即可，不强制收敛到基础分类）。
+            // 之前用 normalize_category_key 会把自定义类别一律归到 "other"，导致日报时间分配看不到自定义类别。
+            let norm_cat = category.trim().to_lowercase();
             *category_usage_map.entry(norm_cat).or_insert(0) += day_duration;
 
             if let Some((normalized_browser_name, domain, page_hint)) = browser_page {
@@ -3793,6 +3795,49 @@ mod tests {
         assert_eq!(stats.hourly_activity_distribution[10].duration, 20 * 60);
         assert_eq!(stats.browser_duration, 0);
         assert!(stats.domain_usage.is_empty());
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 自定义分类不应在时间分配里被归并到其他() {
+        let db_path = temp_db_path("custom-category-not-other");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let date = "2026-03-27";
+
+        db.insert_activity(&Activity {
+            id: None,
+            timestamp: local_ts(date, 10, 10),
+            app_name: "MyApp".to_string(),
+            window_title: "work".to_string(),
+            screenshot_path: "a.jpg".to_string(),
+            ocr_text: None,
+            category: "design_custom".to_string(),
+            duration: 20 * 60,
+            browser_url: None,
+            executable_path: None,
+            semantic_category: None,
+            semantic_confidence: None,
+            screenshot_url: None,
+        })
+        .expect("插入测试数据失败");
+
+        let stats = db
+            .get_daily_stats_with_work_time(date, 9, 18, 0, 0)
+            .expect("读取统计失败");
+
+        // 自定义分类 key 应原样保留，不应被归到 "other"（回归 #109）
+        assert!(
+            stats.category_usage.iter().any(|c| c.category == "design_custom"),
+            "自定义分类应出现在时间分配里，而不是被吞掉"
+        );
+        assert!(
+            !stats
+                .category_usage
+                .iter()
+                .any(|c| c.category == "other" && c.duration > 0),
+            "自定义分类的时长不应被算到 other"
+        );
 
         let _ = std::fs::remove_file(db_path);
     }
