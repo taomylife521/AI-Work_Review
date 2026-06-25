@@ -4,7 +4,7 @@
   import { invoke, Channel } from '@tauri-apps/api/core';
   import { marked } from 'marked';
   import { assistantStore, BASIC_ASSISTANT_MODEL_ID } from '../../lib/stores/assistant.js';
-  import { formatDurationLocalized, locale, t, tm } from '$lib/i18n/index.js';
+  import { formatDurationLocalized, locale, t, tm, translateCategoryLabel } from '$lib/i18n/index.js';
 
   marked.use({
     gfm: true,
@@ -513,12 +513,16 @@
     }
     try {
       const stats = await invoke('get_today_stats');
-      const recentApps = (stats?.app_usage || []).slice(0, 3).map((a) => a.app_name).join('、');
-      const topCategory = stats?.category_usage?.[0]?.category || '';
+      const recentApps = (stats?.app_usage || []).slice(0, 3).map((a) => a.app_name).join(t('common.listSeparator'));
+      const topCategory = translateCategoryLabel(stats?.category_usage?.[0]?.category || '');
       const workMinutes = Math.round((stats?.total_work_duration || 0) / 60);
 
-      const systemPrompt = `你是工作助手的 starter prompt 生成器。根据用户当前的工作状态，生成 4 个用户最可能想问的问题。每个问题不超过 20 字，口语化、具体、能直接用工作记录回答。只返回 JSON 数组，如 ["问题1","问题2","问题3","问题4"]，不要其他文字。`;
-      const userPrompt = `当前状态：已工作 ${workMinutes} 分钟；最近用的应用：${recentApps || '暂无'}；主要分类：${topCategory || '暂无'}。生成 4 个 starter prompt。`;
+      const systemPrompt = t('ask.starterSystemPrompt');
+      const userPrompt = t('ask.starterUserPrompt', {
+        workMinutes,
+        recentApps: recentApps || t('common.none'),
+        topCategory: topCategory || t('common.none'),
+      });
 
       const result = await invoke('generate_text_with_model', {
         modelConfig: profile.model_config,

@@ -671,12 +671,12 @@
                             }
                             await savePresets();
                           }}
-                        >{t('common.confirm') || '确定'}</button>
+                        >{t('common.confirm')}</button>
                         <button
                           type="button"
                           class="px-2.5 py-0.5 text-xs font-medium text-slate-500 dark:text-[#7d8590] hover:text-slate-700 dark:hover:text-[#adbac7] rounded-md border border-slate-200 dark:border-[#484f58] transition-colors"
                           on:click|stopPropagation={() => { pendingDeletePreset = -1; }}
-                        >{t('common.cancel') || '取消'}</button>
+                        >{t('common.cancel')}</button>
                       </div>
                     </div>
                   {:else}
@@ -701,7 +701,7 @@
                       <button
                         type="button"
                         class="p-1 text-slate-400 hover:text-rose-500 dark:text-[#484f58] dark:hover:text-rose-400 rounded-md hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors shrink-0 opacity-0 group-hover:opacity-100"
-                        title="删除"
+                        title={t('common.delete')}
                         on:click|stopPropagation={() => { pendingDeletePreset = i; }}
                       >
                         <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>

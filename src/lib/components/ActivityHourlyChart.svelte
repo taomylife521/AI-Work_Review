@@ -303,7 +303,7 @@
         <div class="mt-3 rounded-2xl bg-sky-50 px-3.5 py-3 text-left dark:bg-sky-500/10">
           <div class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
             <span class="inline-flex items-center rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold tracking-[0.08em] text-sky-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-[#161b22]/80 dark:text-sky-300 dark:shadow-none">
-              当前选中
+              {t('chart.currentlySelected')}
             </span>
             <span class="min-w-0 truncate text-sm font-medium text-slate-700 dark:text-[#c9d1d9]">
               {formatHourRangeLabel(selectedBucket.hour)}

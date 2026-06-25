@@ -12,6 +12,22 @@ export default {
       retry: '重試',
       previous: '上一個',
       next: '下一個',
+      delete: '刪除',
+      minutes: '分鐘',
+      none: '暫無',
+      listSeparator: '、',
+    },
+    window: {
+      minimize: '最小化',
+      maximize: '最大化',
+      close: '關閉',
+    },
+    avatar: {
+      sceneAlt: '{name} 桌寵',
+      dismissReminder: '關閉提醒',
+    },
+    chart: {
+      currentlySelected: '目前所選',
     },
     datePicker: {
       today: '今天',
@@ -50,6 +66,7 @@ export default {
       },
     },
     overview: {
+      unresolvedPage: '未識別網頁',
       title: '概覽',
       live: '即時',
       modeToday: '今天',
@@ -594,6 +611,8 @@ export default {
       mcpServerPathCopied: '{label} 已複製',
     },
     ask: {
+      starterSystemPrompt: '你是工作助手的 starter prompt 生成器。根據使用者當前的工作狀態，生成 4 個使用者最可能想問的問題。每個問題不超過 20 字，口語化、具體、能直接用工作記錄回答。只回傳 JSON 陣列，如 ["問題1","問題2","問題3","問題4"]，不要其他文字。',
+      starterUserPrompt: '當前狀態：已工作 {workMinutes} 分鐘；最近用的應用：{recentApps}；主要分類：{topCategory}。生成 4 個 starter prompt。',
       title: '工作助手',
       subtitle: '基於你的工作記錄回答問題，也可以先試試下面這些話題',
       starterPrompts: [
@@ -716,6 +735,20 @@ export default {
       },
     },
     settingsAI: {
+      testError: {
+        invalidKey: 'API 金鑰無效或已過期，請檢查金鑰是否正確',
+        forbidden: '無存取權限，請確認金鑰擁有該模型的呼叫權限',
+        notFound: '介面位址或模型不存在，請檢查 Endpoint 和模型名稱',
+        rateLimit: '請求頻率超限，請稍後重試或升級 API 套餐',
+        serverError: '伺服器內部錯誤，請稍後重試',
+        badGateway: '服務閘道錯誤，請檢查 Endpoint 位址是否正確',
+        unavailable: '服務暫時不可用，請稍後重試',
+        modelNotFound: '模型不存在，請確認模型名稱拼寫正確',
+        quota: 'API 額度不足，請儲值後重試',
+        connection: '網路連線失敗，請檢查網路或 Endpoint 位址',
+        ssl: 'SSL 憑證錯誤，請檢查 Endpoint 是否使用 HTTPS',
+        notActivated: '模型未開通，請先在服務商主控台開通該模型',
+      },
       modeLegend: '日報模式',
       modeLocal: '基礎模板',
       modeLocalDesc: '固定格式統計報告',

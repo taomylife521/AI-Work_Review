@@ -12,6 +12,22 @@ export default {
       retry: '重试',
       previous: '上一个',
       next: '下一个',
+      delete: '删除',
+      minutes: '分钟',
+      none: '暂无',
+      listSeparator: '、',
+    },
+    window: {
+      minimize: '最小化',
+      maximize: '最大化',
+      close: '关闭',
+    },
+    avatar: {
+      sceneAlt: '{name} 桌宠',
+      dismissReminder: '关闭提醒',
+    },
+    chart: {
+      currentlySelected: '当前选中',
     },
     datePicker: {
       today: '今天',
@@ -50,6 +66,7 @@ export default {
       },
     },
     overview: {
+      unresolvedPage: '未识别网页',
       title: '概览',
       live: '实时',
       modeToday: '今日',
@@ -594,6 +611,8 @@ export default {
       breakReminderHint: '首次触发后缓冲 5 分钟开始下一轮。',
     },
     ask: {
+      starterSystemPrompt: '你是工作助手的 starter prompt 生成器。根据用户当前的工作状态，生成 4 个用户最可能想问的问题。每个问题不超过 20 字，口语化、具体、能直接用工作记录回答。只返回 JSON 数组，如 ["问题1","问题2","问题3","问题4"]，不要其他文字。',
+      starterUserPrompt: '当前状态：已工作 {workMinutes} 分钟；最近用的应用：{recentApps}；主要分类：{topCategory}。生成 4 个 starter prompt。',
       title: '工作助手',
       subtitle: '基于你的工作记录回答问题，试试下面的话题',
       starterPrompts: [
@@ -716,6 +735,20 @@ export default {
       },
     },
     settingsAI: {
+      testError: {
+        invalidKey: 'API 密钥无效或已过期，请检查密钥是否正确',
+        forbidden: '无访问权限，请确认密钥拥有该模型的调用权限',
+        notFound: '接口地址或模型不存在，请检查 Endpoint 和模型名称',
+        rateLimit: '请求频率超限，请稍后重试或升级 API 套餐',
+        serverError: '服务端内部错误，请稍后重试',
+        badGateway: '服务网关错误，请检查 Endpoint 地址是否正确',
+        unavailable: '服务暂时不可用，请稍后重试',
+        modelNotFound: '模型不存在，请确认模型名称拼写正确',
+        quota: 'API 额度不足，请充值后重试',
+        connection: '网络连接失败，请检查网络或 Endpoint 地址',
+        ssl: 'SSL 证书错误，请检查 Endpoint 是否使用 HTTPS',
+        notActivated: '模型未开通，请先在服务商控制台开通该模型',
+      },
       modeLegend: '日报模式',
       modeLocal: '基础模板',
       modeLocalDesc: '固定格式统计报告',

@@ -149,7 +149,7 @@ test('休息提醒气泡应支持常驻显示和手动关闭', () => {
   assert.match(source, /class="absolute inset-0 z-20 overflow-visible pointer-events-none"/);
   assert.match(source, /class="pointer-events-auto relative rounded-\[16px\]/);
   assert.match(source, /<button[\s\S]*type="button"[\s\S]*on:click=\{onClose\}/);
-  assert.match(source, /aria-label="关闭提醒"/);
+  assert.match(source, /aria-label=\{t\('avatar\.dismissReminder'\)\}/);
   assert.match(source, /class="absolute inset-0 rounded-\[16px\]"/);
   assert.match(source, /class="bubble-tail-dot absolute/);
   assert.match(windowSource, /<AvatarPopover \{bubble\} onClose=\{dismissBubble\} \/>/);

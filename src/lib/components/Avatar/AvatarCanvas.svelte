@@ -7,6 +7,7 @@
     normalizeAvatarPresetId,
   } from './avatarPresetRegistry.js';
   import { getAvatarIdleMotionMeta, getAvatarModeMeta } from './avatarStateMeta.js';
+  import { t } from '$lib/i18n/index.js';
 
   const dispatch = createEventDispatcher();
   const SCENE_WIDTH = 612;
@@ -334,7 +335,7 @@
   $: sceneSrc = preset.sceneSrc;
   $: contentTransform = preset.contentTransform ?? '';
   $: staticCoverSrc = preset.staticCoverSrc ?? null;
-  $: sceneAlt = `${state.appName || 'Work Review'} 桌宠`;
+  $: sceneAlt = t('avatar.sceneAlt', { name: state.appName || 'Work Review' });
   $: frameIndex = Math.floor(motionBeat / 2);
   $: useSourceKeyboardMode = renderMode === 'source-keyboard';
   $: standardHandSrc = keyboardActive

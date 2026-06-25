@@ -12,6 +12,22 @@ export default {
       retry: 'Retry',
       previous: 'Previous',
       next: 'Next',
+      delete: 'Delete',
+      minutes: 'min',
+      none: 'None',
+      listSeparator: ', ',
+    },
+    window: {
+      minimize: 'Minimize',
+      maximize: 'Maximize',
+      close: 'Close',
+    },
+    avatar: {
+      sceneAlt: '{name} avatar',
+      dismissReminder: 'Dismiss reminder',
+    },
+    chart: {
+      currentlySelected: 'Currently selected',
     },
     datePicker: {
       today: 'Today',
@@ -50,6 +66,7 @@ export default {
       },
     },
     overview: {
+      unresolvedPage: 'Unrecognized page',
       title: 'Overview',
       live: 'Live',
       modeToday: 'Today',
@@ -594,6 +611,8 @@ export default {
       mcpServerPathCopied: '{label} copied',
     },
     ask: {
+      starterSystemPrompt: 'You are the starter prompt generator for a work assistant. Based on the user\'s current work state, generate 4 questions the user is most likely to ask. Each question must be at most 20 words, conversational, specific, and answerable directly from work records. Write all questions in English. Return only a JSON array such as ["question1","question2","question3","question4"], with no extra text.',
+      starterUserPrompt: 'Current state: worked {workMinutes} minutes; recent apps: {recentApps}; main category: {topCategory}. Generate 4 starter prompts.',
       title: 'Work Assistant',
       subtitle: 'Ask questions from your work records, or try one of these prompts',
       starterPrompts: [
@@ -716,6 +735,20 @@ export default {
       },
     },
     settingsAI: {
+      testError: {
+        invalidKey: 'API key is invalid or expired. Please check the key.',
+        forbidden: 'Access denied. Make sure the key has permission to call this model.',
+        notFound: 'Endpoint or model not found. Check the Endpoint URL and model name.',
+        rateLimit: 'Rate limit exceeded. Retry later or upgrade your API plan.',
+        serverError: 'Internal server error. Please retry later.',
+        badGateway: 'Bad gateway. Check that the Endpoint URL is correct.',
+        unavailable: 'Service temporarily unavailable. Please retry later.',
+        modelNotFound: 'Model does not exist. Check the model name spelling.',
+        quota: 'API quota insufficient. Top up and retry.',
+        connection: 'Network connection failed. Check your network or Endpoint URL.',
+        ssl: 'SSL certificate error. Check that the Endpoint uses HTTPS.',
+        notActivated: 'Model not activated. Activate it in the provider console first.',
+      },
       modeLegend: 'Report Mode',
       modeLocal: 'Template',
       modeLocalDesc: 'Stable structured statistics report',

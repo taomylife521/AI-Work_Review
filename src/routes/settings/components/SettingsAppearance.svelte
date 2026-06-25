@@ -576,7 +576,7 @@
           disabled={!config.avatar_enabled}
         >
           {#each breakReminderIntervals as interval}
-            <option value={interval}>{interval} 分钟</option>
+            <option value={interval}>{interval} {t('common.minutes')}</option>
           {/each}
         </select>
       </div>

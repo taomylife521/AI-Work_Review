@@ -1,5 +1,6 @@
 <script>
   import { formatBubbleMessage } from './bubbleMessage.js';
+  import { t } from '$lib/i18n/index.js';
 
   export let bubble = null;
   export let onClose = () => {};
@@ -37,7 +38,7 @@
             <button
               type="button"
               class="absolute inset-0 rounded-[16px]"
-              aria-label="关闭提醒"
+              aria-label={t('avatar.dismissReminder')}
               on:click={onClose}
             ></button>
           {/if}
@@ -49,7 +50,7 @@
             <button
               type="button"
               class="absolute right-1.5 top-1.5 z-10 inline-flex h-5 w-5 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-900/6 hover:text-slate-700"
-              aria-label="关闭提醒"
+              aria-label={t('avatar.dismissReminder')}
               on:click={onClose}
             >
               ×

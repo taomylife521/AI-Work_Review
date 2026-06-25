@@ -214,31 +214,31 @@
 
     // HTTP 状态码匹配
     if (/\b401\b/.test(msg) || /unauthorized|invalid.api.?key|authentication/i.test(lower))
-      return 'API 密钥无效或已过期，请检查密钥是否正确';
+      return t('settingsAI.testError.invalidKey');
     if (/\b403\b/.test(msg) || /forbidden/i.test(lower))
-      return '无访问权限，请确认密钥拥有该模型的调用权限';
+      return t('settingsAI.testError.forbidden');
     if (/\b404\b/.test(msg) || /not.?found/i.test(lower))
-      return '接口地址或模型不存在，请检查 Endpoint 和模型名称';
+      return t('settingsAI.testError.notFound');
     if (/\b429\b/.test(msg) || /rate.?limit|too.?many.?request/i.test(lower))
-      return '请求频率超限，请稍后重试或升级 API 套餐';
+      return t('settingsAI.testError.rateLimit');
     if (/\b500\b/.test(msg) || /internal.?server.?error/i.test(lower))
-      return '服务端内部错误，请稍后重试';
+      return t('settingsAI.testError.serverError');
     if (/\b502\b/.test(msg) || /bad.?gateway/i.test(lower))
-      return '服务网关错误，请检查 Endpoint 地址是否正确';
+      return t('settingsAI.testError.badGateway');
     if (/\b503\b/.test(msg) || /service.?unavailable/i.test(lower))
-      return '服务暂时不可用，请稍后重试';
+      return t('settingsAI.testError.unavailable');
 
     // 常见文本匹配
     if (/model.*not.*found|model.*does.*not.*exist|没有这个?模型/i.test(lower))
-      return '模型不存在，请确认模型名称拼写正确';
+      return t('settingsAI.testError.modelNotFound');
     if (/insufficient.*quota|余额不足|out.?of.?credit/i.test(lower))
-      return 'API 额度不足，请充值后重试';
+      return t('settingsAI.testError.quota');
     if (/connection|网络|timeout|超时|econnrefused|dns/i.test(lower))
-      return '网络连接失败，请检查网络或 Endpoint 地址';
+      return t('settingsAI.testError.connection');
     if (/ssl|tls|certificate|证书/i.test(lower))
-      return 'SSL 证书错误，请检查 Endpoint 是否使用 HTTPS';
+      return t('settingsAI.testError.ssl');
     if (/未开通|not.?activated|model.*not.?available/i.test(lower))
-      return '模型未开通，请先在服务商控制台开通该模型';
+      return t('settingsAI.testError.notActivated');
 
     return null;
   }

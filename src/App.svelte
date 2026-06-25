@@ -16,7 +16,7 @@
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { cache, getLocalDate } from './lib/stores/cache.js';
-  import { applyLocaleToDocument, initializeLocale, locale } from '$lib/i18n/index.js';
+  import { applyLocaleToDocument, initializeLocale, locale, t } from '$lib/i18n/index.js';
   import { preloadAppIcons } from './lib/stores/iconCache.js';
   import { runUpdateFlow } from './lib/utils/updater.js';
 
@@ -526,7 +526,7 @@
       <button
         on:click={minimizeWindow}
         class="app-shell-window-btn"
-        title="最小化"
+        title={t('window.minimize')}
       >
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14" />
@@ -537,7 +537,7 @@
       <button
         on:click={maximizeWindow}
         class="app-shell-window-btn"
-        title="最大化"
+        title={t('window.maximize')}
       >
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <rect x="4" y="4" width="16" height="16" rx="1" />
@@ -548,7 +548,7 @@
       <button
         on:click={closeWindow}
         class="app-shell-window-btn app-shell-window-btn-close"
-        title="关闭"
+        title={t('window.close')}
       >
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />

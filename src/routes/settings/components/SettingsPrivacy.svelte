@@ -187,7 +187,7 @@
                 type="text"
                 bind:value={appSearchQuery}
                 class="control-input text-xs"
-                placeholder={t('settingsPrivacy.searchApps') || '搜索应用...'}
+                placeholder={t('settingsPrivacy.searchApps')}
               />
             </div>
             {/if}
@@ -216,8 +216,8 @@
                   class="text-xs text-primary-600 hover:text-primary-600 mt-1"
                 >
                   {showAllRunningApps
-                    ? t('settingsPrivacy.collapse') || '收起'
-                    : `+${runningApps.length - 8} ${t('settingsPrivacy.moreApps') || '更多'}`}
+                    ? t('settingsPrivacy.collapse')
+                    : `+${runningApps.length - 8} ${t('settingsPrivacy.moreApps')}`}
                 </button>
               {/if}
             </div>
@@ -247,8 +247,8 @@
                   class="text-xs text-primary-600 hover:text-primary-600 mt-1"
                 >
                   {showAllRecentApps
-                    ? t('settingsPrivacy.collapse') || '收起'
-                    : `+${recentApps.length - 12} ${t('settingsPrivacy.moreApps') || '更多'}`}
+                    ? t('settingsPrivacy.collapse')
+                    : `+${recentApps.length - 12} ${t('settingsPrivacy.moreApps')}`}
                 </button>
               {/if}
             </div>

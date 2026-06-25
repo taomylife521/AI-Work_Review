@@ -28,7 +28,7 @@ test('按小时活跃度图表应在图表下方显示当前选中时段信息�
 
   assert.match(source, /selectedBucket = buckets\[selectedHour\] \|\| null/);
   assert.match(source, /\{#if selectedBucket\}/);
-  assert.match(source, /当前选中/);
+  assert.match(source, /chart\.currentlySelected/);
   assert.match(source, /\{formatHourRangeLabel\(selectedBucket\.hour\)\}/);
   assert.match(source, /\{formatCompact\(selectedBucket\.duration\)\}/);
 });

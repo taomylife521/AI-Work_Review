@@ -1082,7 +1082,7 @@
             <div class="flex items-center gap-2">
               {#if isUnresolvedBrowserDomain(domain)}
                 <span class="text-xs px-2 py-1 rounded-full bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-                  未识别网页
+                  {t('overview.unresolvedPage')}
                 </span>
               {:else}
                 <span class="text-xs px-2 py-1 rounded-full bg-primary-50 text-primary-700 dark:bg-primary-900/20 dark:text-primary-300">
