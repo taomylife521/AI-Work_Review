@@ -818,8 +818,7 @@
     height: 100%;
     width: 100%;
     user-select: none;
-    filter: drop-shadow(0 10px 18px rgba(15, 23, 42, 0.06));
-    will-change: transform, opacity;
+    filter: drop-shadow(0 8px 12px rgba(15, 23, 42, 0.06));
   }
 
   .scene-base {
