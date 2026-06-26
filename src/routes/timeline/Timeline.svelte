@@ -23,6 +23,7 @@
   import { formatBrowserUrlForDisplay } from '../../lib/utils/browserUrl.js';
   import { prepareTimelineActivities, upsertTimelineActivity } from './timelineData.js';
   import LocalizedDatePicker from '../../lib/components/LocalizedDatePicker.svelte';
+  import { confirm } from '../../lib/stores/confirm.js';
 
   // 获取本地日期（避免 UTC 时区问题）
   function getLocalDateString() {
@@ -821,6 +822,146 @@
     pendingDeleteCategory = null;
   }
 
+  // 删除单条活动记录（连带截图）
+  async function deleteActivity(activity) {
+    if (!activity?.id) return;
+    const ok = await confirm({
+      tone: 'warning',
+      title: t('timeline.deleteActivityTitle'),
+      message: t('timeline.deleteActivityMessage', {
+        appName: getPreferredTimelineAppName(activity) || activity.app_name,
+        time: formatTimelineAnchor(activity.timestamp),
+      }),
+      confirmText: t('timeline.confirmDelete'),
+      cancelText: t('timeline.cancel'),
+    });
+    if (!ok) return;
+    try {
+      await invoke('delete_activity', { id: activity.id });
+      closeDetail();
+      cache.invalidate('overview');
+      await loadTimeline();
+      showToast(t('timeline.activityDeleted'), 'success');
+    } catch (e) {
+      showToast(e.toString(), 'error');
+    }
+  }
+
+  // ===== 批量清理记录（日期 / 时间段 / 应用）=====
+  let showCleanupPanel = false;
+  let cleanupMode = 'date'; // 'date' | 'range' | 'app'
+  let cleanupRangeStart = '';
+  let cleanupRangeEnd = '';
+  let cleanupRangeStartTime = '';
+  let cleanupRangeEndTime = '';
+  let cleanupApp = '';
+  let cleanupBusy = false;
+
+  // 从已加载活动提取候选应用名（去重排序）
+  $: cleanupAppCandidates = Array.from(
+    new Set(activities.map((a) => getPreferredTimelineAppName(a) || a.app_name)),
+  )
+    .filter(Boolean)
+    .sort();
+
+  // 本地时区的“日期 + 可选时刻”→ Unix 秒
+  function localDateToTs(dateStr, timeStr) {
+    if (!dateStr) return 0;
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const hh = timeStr ? Number(timeStr.split(':')[0]) : 0;
+    const mm = timeStr ? Number(timeStr.split(':')[1]) : 0;
+    return Math.floor(new Date(y, m - 1, d, hh, mm, 0).getTime() / 1000);
+  }
+
+  async function doCleanupByDate() {
+    if (!selectedDate || cleanupBusy) return;
+    const ok = await confirm({
+      tone: 'warning',
+      title: t('timeline.deleteByDateTitle'),
+      message: t('timeline.deleteByDateMessage', { date: selectedDate }),
+      confirmText: t('timeline.confirmDelete'),
+      cancelText: t('timeline.cancel'),
+    });
+    if (!ok) return;
+    cleanupBusy = true;
+    try {
+      const res = await invoke('delete_activities_by_date', { date: selectedDate });
+      cache.invalidate('overview');
+      await loadTimeline();
+      showToast(
+        t('timeline.deletedByDate', { count: res?.deleted ?? 0, date: selectedDate }),
+        'success',
+      );
+    } catch (e) {
+      showToast(e.toString(), 'error');
+    } finally {
+      cleanupBusy = false;
+    }
+  }
+
+  async function doCleanupByRange() {
+    if (cleanupBusy) return;
+    if (!cleanupRangeStart || !cleanupRangeEnd) {
+      showToast(t('timeline.noActivitiesToDelete'), 'error');
+      return;
+    }
+    const startTs = localDateToTs(cleanupRangeStart, cleanupRangeStartTime);
+    const endBase = localDateToTs(cleanupRangeEnd, cleanupRangeEndTime);
+    const endTs = cleanupRangeEndTime ? endBase + 59 : endBase + 86399;
+    if (endTs <= startTs) {
+      showToast(t('timeline.noActivitiesToDelete'), 'error');
+      return;
+    }
+    const ok = await confirm({
+      tone: 'warning',
+      title: t('timeline.deleteByRangeTitle'),
+      message: t('timeline.deleteByRangeMessage', {
+        start: `${cleanupRangeStart}${cleanupRangeStartTime ? ' ' + cleanupRangeStartTime : ''}`,
+        end: `${cleanupRangeEnd}${cleanupRangeEndTime ? ' ' + cleanupRangeEndTime : ''}`,
+      }),
+      confirmText: t('timeline.confirmDelete'),
+      cancelText: t('timeline.cancel'),
+    });
+    if (!ok) return;
+    cleanupBusy = true;
+    try {
+      const res = await invoke('delete_activities_by_range', { startTs, endTs });
+      cache.invalidate('overview');
+      await loadTimeline();
+      showToast(t('timeline.deletedByRange', { count: res?.deleted ?? 0 }), 'success');
+    } catch (e) {
+      showToast(e.toString(), 'error');
+    } finally {
+      cleanupBusy = false;
+    }
+  }
+
+  async function doCleanupByApp() {
+    if (cleanupBusy || !cleanupApp) return;
+    const ok = await confirm({
+      tone: 'warning',
+      title: t('timeline.deleteByAppTitle'),
+      message: t('timeline.deleteByAppMessage', { appName: cleanupApp }),
+      confirmText: t('timeline.confirmDelete'),
+      cancelText: t('timeline.cancel'),
+    });
+    if (!ok) return;
+    cleanupBusy = true;
+    try {
+      const res = await invoke('delete_activities_by_app', { appName: cleanupApp });
+      cache.invalidate('overview');
+      await loadTimeline();
+      showToast(
+        t('timeline.deletedByApp', { count: res?.deleted ?? 0, appName: cleanupApp }),
+        'success',
+      );
+    } catch (e) {
+      showToast(e.toString(), 'error');
+    } finally {
+      cleanupBusy = false;
+    }
+  }
+
   // 记录上次加载的日期
   let lastLoadedDate = null;
   let featuredActivityIds = new Set();
@@ -927,6 +1068,15 @@
           triggerClass="page-control-input w-auto"
         />
       {/key}
+      <button
+        class="page-control-btn-icon text-rose-500 hover:text-rose-600 dark:text-rose-400"
+        on:click={() => (showCleanupPanel = true)}
+        title={t('timeline.cleanupRecords')}
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+        </svg>
+      </button>
       <button class="page-control-btn-icon" on:click={loadTimeline} title={t('timeline.refreshTitle')}>
         <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -1146,11 +1296,22 @@
               <p class="text-sm text-slate-500 dark:text-[#7d8590]">{info.name}</p>
             </div>
           </div>
-          <button class="btn btn-ghost" on:click={closeDetail}>
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <div class="flex items-center gap-1">
+            <button
+              class="btn btn-ghost text-rose-500 hover:text-rose-600 dark:text-rose-400"
+              title={t('timeline.deleteActivity')}
+              on:click={() => deleteActivity(selectedActivity)}
+            >
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+              </svg>
+            </button>
+            <button class="btn btn-ghost" on:click={closeDetail}>
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1386,6 +1547,106 @@
             >
               {formatBrowserUrlForDisplay(selectedActivity.browser_url)}
             </button>
+          </div>
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- 批量清理记录面板（z-index 高于详情弹窗） -->
+{#if showCleanupPanel}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <div
+    class="fixed inset-0 z-[150] bg-slate-950/40 backdrop-blur-sm flex items-center justify-center animate-fadeIn p-4"
+    role="button"
+    tabindex="0"
+    on:click|self={() => !cleanupBusy && (showCleanupPanel = false)}
+    on:keydown={(e) => e.key === 'Escape' && !cleanupBusy && (showCleanupPanel = false)}
+  >
+    <div class="w-full max-w-lg rounded-2xl border border-slate-200 dark:border-[#30363d] bg-white dark:bg-[#161b22] shadow-2xl">
+      <div class="flex items-center justify-between p-5 border-b border-slate-200 dark:border-[#30363d]">
+        <h3 class="text-base font-semibold text-slate-900 dark:text-[#e6edf3]">{t('timeline.cleanupRecordsTitle')}</h3>
+        <button class="btn btn-ghost" on:click={() => (showCleanupPanel = false)} disabled={cleanupBusy}>
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div class="p-5 space-y-4">
+        <p class="text-xs text-slate-500 dark:text-[#7d8590] leading-relaxed">{t('timeline.cleanupRecordsHint')}</p>
+
+        <div class="flex gap-2">
+          {#each [{ key: 'date', label: t('timeline.deleteByDate') }, { key: 'range', label: t('timeline.deleteByRange') }, { key: 'app', label: t('timeline.deleteByApp') }] as tab}
+            <button
+              class="flex-1 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors {cleanupMode === tab.key ? 'border-rose-400 bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-300 dark:border-rose-700' : 'border-slate-200 dark:border-[#30363d] text-slate-600 dark:text-[#adbac7] hover:bg-slate-50 dark:hover:bg-[#21262d]'}"
+              on:click={() => (cleanupMode = tab.key)}
+            >
+              {tab.label}
+            </button>
+          {/each}
+        </div>
+
+        {#if cleanupMode === 'date'}
+          <div class="space-y-3">
+            <p class="text-sm text-slate-700 dark:text-[#adbac7] leading-relaxed">
+              {t('timeline.deleteByDateMessage', { date: selectedDate })}
+            </p>
+            <button
+              class="w-full px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+              on:click={doCleanupByDate}
+              disabled={cleanupBusy}
+            >
+              {t('timeline.deleteByDate')}
+            </button>
+          </div>
+        {:else if cleanupMode === 'range'}
+          <div class="space-y-3">
+            <LocalizedDatePicker
+              mode="range"
+              bind:startDate={cleanupRangeStart}
+              bind:endDate={cleanupRangeEnd}
+              localeCode={currentLocale}
+              triggerClass="page-control-input w-auto"
+            />
+            <div class="grid grid-cols-2 gap-3">
+              <label class="text-xs text-slate-500 dark:text-[#7d8590] flex flex-col gap-1">
+                <span>{t('datePicker.startDate')}</span>
+                <input type="time" bind:value={cleanupRangeStartTime} class="page-control-input" />
+              </label>
+              <label class="text-xs text-slate-500 dark:text-[#7d8590] flex flex-col gap-1">
+                <span>{t('datePicker.endDate')}</span>
+                <input type="time" bind:value={cleanupRangeEndTime} class="page-control-input" />
+              </label>
+            </div>
+            <button
+              class="w-full px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+              on:click={doCleanupByRange}
+              disabled={cleanupBusy || !cleanupRangeStart || !cleanupRangeEnd}
+            >
+              {t('timeline.deleteByRange')}
+            </button>
+          </div>
+        {:else}
+          <div class="space-y-3">
+            {#if cleanupAppCandidates.length === 0}
+              <p class="text-sm text-slate-500 dark:text-[#7d8590]">{t('timeline.noActivitiesToDelete')}</p>
+            {:else}
+              <select class="page-control-input w-full" bind:value={cleanupApp}>
+                <option value="">{t('timeline.selectApp')}</option>
+                {#each cleanupAppCandidates as app}
+                  <option value={app}>{app}</option>
+                {/each}
+              </select>
+              <button
+                class="w-full px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                on:click={doCleanupByApp}
+                disabled={cleanupBusy || !cleanupApp}
+              >
+                {t('timeline.deleteByApp')}
+              </button>
+            {/if}
           </div>
         {/if}
       </div>

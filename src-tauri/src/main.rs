@@ -3187,6 +3187,19 @@ fn install_crash_handler() {
     }));
 }
 
+/// Linux: 注入 WebKit/Wayland 兼容性环境变量，规避 webkit2gtk 在 Wayland（尤其
+/// KDE Plasma / NVIDIA）下启动即崩的问题（"Error 71 (Protocol error) dispatching
+/// to Wayland display"，上游 Tauri #10702 / GTK WebKitGTK）。必须在 GTK/WebKit
+/// 初始化前调用；仅当用户未显式设置时注入，便于自行覆盖或换用 GDK_BACKEND=x11。
+#[cfg(target_os = "linux")]
+fn apply_linux_webkit_wayland_workarounds() {
+    // webkit2gtk 的 DMA-BUF 渲染器在部分 Wayland compositor 上会触发协议错误，
+    // 关闭后回退到传统渲染路径，是 Tauri 社区对 #10702 最普遍有效的 workaround。
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+}
+
 #[tokio::main]
 async fn main() {
     // 安装崩溃捕获（最早执行，确保后续任何 panic 都能记录调用栈）
@@ -3198,6 +3211,12 @@ async fn main() {
     // Linux: 修复 sudo 下丢失的 Wayland/DBus 环境变量
     #[cfg(target_os = "linux")]
     linux_session::fix_wayland_env_if_sudo();
+
+    // Linux: 注入 WebKit/Wayland 兼容性 workaround，规避 KDE Plasma / NVIDIA 等环境下
+    // webkit2gtk 启动即崩（"Error 71 (Protocol error) dispatching to Wayland display"）。
+    // 上游追踪：https://github.com/tauri-apps/tauri/issues/10702 。仅当用户未显式设置时注入。
+    #[cfg(target_os = "linux")]
+    apply_linux_webkit_wayland_workarounds();
 
     log::info!("work回顾助手启动中...");
 
@@ -3734,6 +3753,10 @@ async fn main() {
             commands::generate_weekly_review,
             commands::extract_todo_items,
             commands::clear_old_activities,
+            commands::delete_activity,
+            commands::delete_activities_by_date,
+            commands::delete_activities_by_range,
+            commands::delete_activities_by_app,
             commands::get_ocr_log,
             commands::is_screen_locked,
             commands::check_permissions,

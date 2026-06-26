@@ -1194,6 +1194,193 @@ impl Database {
         Ok((total_deleted, all_paths))
     }
 
+    /// Unix 时间戳 → 本地时区日期字符串（YYYY-MM-DD）
+    fn ts_to_local_date(ts: i64) -> String {
+        chrono::Local
+            .timestamp_opt(ts, 0)
+            .single()
+            .map(|dt| dt.format("%Y-%m-%d").to_string())
+            .unwrap_or_default()
+    }
+
+    /// 失效指定日期集合的日报与小时摘要缓存（删除活动后调用，确保下次显示基于剩余数据重算）
+    fn invalidate_daily_cache(conn: &Connection, dates: &std::collections::HashSet<String>) {
+        for date in dates {
+            let _ = conn.execute("DELETE FROM daily_reports WHERE date = ?1", params![date]);
+            let _ = conn.execute("DELETE FROM daily_reports_localized WHERE date = ?1", params![date]);
+            let _ = conn.execute("DELETE FROM hourly_summaries WHERE date = ?1", params![date]);
+        }
+    }
+
+    /// 删除单条活动记录，返回删除数量和截图路径（供上层删截图文件）
+    pub fn delete_activity_by_id(&self, id: i64) -> Result<(usize, Vec<String>)> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let tx = conn.unchecked_transaction()?;
+
+        // 先取出该条记录的截图路径与时间戳
+        let row: (String, i64) = conn
+            .query_row(
+                "SELECT screenshot_path, timestamp FROM activities WHERE id = ?1",
+                params![id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap_or_default();
+        let paths: Vec<String> = if row.0.is_empty() {
+            Vec::new()
+        } else {
+            vec![row.0]
+        };
+        let mut dates = std::collections::HashSet::new();
+        if row.1 > 0 {
+            dates.insert(Self::ts_to_local_date(row.1));
+        }
+
+        let deleted = conn.execute("DELETE FROM activities WHERE id = ?1", params![id])?;
+        Self::invalidate_daily_cache(&conn, &dates);
+        tx.commit()?;
+        Ok((deleted, paths))
+    }
+
+    /// 删除指定日期全天（本地时区）的活动记录，返回删除数量和截图路径
+    pub fn delete_activities_by_date(&self, date: &str) -> Result<(usize, Vec<String>)> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let tx = conn.unchecked_transaction()?;
+
+        let date_parsed = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+            .map_err(|e| AppError::Config(e.to_string()))?;
+        let start_ts = safe_local_timestamp(date_parsed.and_hms_opt(0, 0, 0).unwrap());
+        let end_ts = start_ts + 86400;
+
+        let mut stmt = conn.prepare(
+            "SELECT screenshot_path FROM activities WHERE timestamp >= ?1 AND timestamp < ?2",
+        )?;
+        let paths: Vec<String> = stmt
+            .query_map(params![start_ts, end_ts], |row| row.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .filter(|p| !p.is_empty())
+            .collect();
+
+        let deleted = conn.execute(
+            "DELETE FROM activities WHERE timestamp >= ?1 AND timestamp < ?2",
+            params![start_ts, end_ts],
+        )?;
+        let mut dates = std::collections::HashSet::new();
+        dates.insert(date.to_string());
+        Self::invalidate_daily_cache(&conn, &dates);
+        tx.commit()?;
+        Ok((deleted, paths))
+    }
+
+    /// 删除指定时间段 [start_ts, end_ts)（Unix 秒）内的活动记录，返回删除数量和截图路径
+    pub fn delete_activities_by_range(
+        &self,
+        start_ts: i64,
+        end_ts: i64,
+    ) -> Result<(usize, Vec<String>)> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let tx = conn.unchecked_transaction()?;
+
+        let mut stmt = conn.prepare(
+            "SELECT screenshot_path, timestamp FROM activities WHERE timestamp >= ?1 AND timestamp < ?2",
+        )?;
+        let rows: Vec<(String, i64)> = stmt
+            .query_map(params![start_ts, end_ts], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .filter_map(|r| r.ok())
+            .collect();
+        let paths: Vec<String> = rows
+            .iter()
+            .filter(|(p, _)| !p.is_empty())
+            .map(|(p, _)| p.clone())
+            .collect();
+        let dates: std::collections::HashSet<String> = rows
+            .iter()
+            .map(|(_, ts)| Self::ts_to_local_date(*ts))
+            .filter(|d| !d.is_empty())
+            .collect();
+
+        let deleted = conn.execute(
+            "DELETE FROM activities WHERE timestamp >= ?1 AND timestamp < ?2",
+            params![start_ts, end_ts],
+        )?;
+        Self::invalidate_daily_cache(&conn, &dates);
+        tx.commit()?;
+        Ok((deleted, paths))
+    }
+
+    /// 删除指定应用的所有活动记录；date_range 为 Some 时限定时间段，返回删除数量和截图路径
+    pub fn delete_activities_by_app(
+        &self,
+        app_name: &str,
+        date_range: Option<(i64, i64)>,
+    ) -> Result<(usize, Vec<String>)> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let tx = conn.unchecked_transaction()?;
+
+        let (paths, dates, deleted) = match date_range {
+            Some((start_ts, end_ts)) => {
+                let mut stmt = conn.prepare(
+                    "SELECT screenshot_path, timestamp FROM activities
+                     WHERE app_name = ?1 AND timestamp >= ?2 AND timestamp < ?3",
+                )?;
+                let rows: Vec<(String, i64)> = stmt
+                    .query_map(params![app_name, start_ts, end_ts], |row| {
+                        Ok((row.get(0)?, row.get(1)?))
+                    })?
+                    .filter_map(|r| r.ok())
+                    .collect();
+                let paths: Vec<String> = rows
+                    .iter()
+                    .filter(|(p, _)| !p.is_empty())
+                    .map(|(p, _)| p.clone())
+                    .collect();
+                let dates: std::collections::HashSet<String> = rows
+                    .iter()
+                    .map(|(_, ts)| Self::ts_to_local_date(*ts))
+                    .filter(|d| !d.is_empty())
+                    .collect();
+                let deleted = conn.execute(
+                    "DELETE FROM activities
+                     WHERE app_name = ?1 AND timestamp >= ?2 AND timestamp < ?3",
+                    params![app_name, start_ts, end_ts],
+                )?;
+                (paths, dates, deleted)
+            }
+            None => {
+                let mut stmt = conn.prepare(
+                    "SELECT screenshot_path, timestamp FROM activities WHERE app_name = ?1",
+                )?;
+                let rows: Vec<(String, i64)> = stmt
+                    .query_map(params![app_name], |row| Ok((row.get(0)?, row.get(1)?)))?
+                    .filter_map(|r| r.ok())
+                    .collect();
+                let paths: Vec<String> = rows
+                    .iter()
+                    .filter(|(p, _)| !p.is_empty())
+                    .map(|(p, _)| p.clone())
+                    .collect();
+                let dates: std::collections::HashSet<String> = rows
+                    .iter()
+                    .map(|(_, ts)| Self::ts_to_local_date(*ts))
+                    .filter(|d| !d.is_empty())
+                    .collect();
+                let deleted =
+                    conn.execute("DELETE FROM activities WHERE app_name = ?1", params![app_name])?;
+                (paths, dates, deleted)
+            }
+        };
+        Self::invalidate_daily_cache(&conn, &dates);
+        tx.commit()?;
+        Ok((deleted, paths))
+    }
+
     /// 获取指定日期的统计数据
     /// work_start_hour: 工作开始时间（0-23），默认 9
     /// work_end_hour: 工作结束时间（0-23），默认 18

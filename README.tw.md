@@ -165,6 +165,12 @@ bash scripts/deb/reinstall.sh --dry-run  # 預覽操作
 
 詳見 [scripts/ubuntu-wayland-README.md](scripts/ubuntu-wayland-README.md)。
 
+**KDE Plasma / Wayland 啟動崩潰（Fedora、Arch、openSUSE 等）：** 若應用啟動後立即退出並報 `Gdk-Message: Error 71 (Protocol error) dispatching to Wayland display.`，這是 webkit2gtk/GTK 在 Wayland 下的上游缺陷（見 [tauri#10702](https://github.com/tauri-apps/tauri/issues/10702)），在 KDE Plasma + NVIDIA 上最常見。新版本已在啟動時自動注入 `WEBKIT_DISABLE_DMABUF_RENDERER=1`。舊版本若仍崩潰，可強制走 X11 後端兜底：
+
+```bash
+GDK_BACKEND=x11 ./Work_Review
+```
+
 ---
 
 ## 擴展能力（Beta）

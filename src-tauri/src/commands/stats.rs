@@ -787,6 +787,95 @@ pub async fn clear_old_activities(
     }))
 }
 
+/// 按相对 data_dir 的路径删除截图文件，返回成功删除的文件数（单文件失败只 log，不中断）
+fn remove_screenshot_files(data_dir: &std::path::Path, paths: Vec<String>) -> usize {
+    let mut removed = 0usize;
+    for p in paths {
+        if p.is_empty() {
+            continue;
+        }
+        let path = data_dir.join(&p);
+        if path.exists() {
+            match std::fs::remove_file(&path) {
+                Ok(_) => removed += 1,
+                Err(e) => log::warn!("删除截图文件失败 {}: {e}", path.display()),
+            }
+        }
+    }
+    removed
+}
+
+/// 删除单条活动记录（连带删除对应截图文件，OCR 文本随行删除）
+#[tauri::command]
+pub async fn delete_activity(
+    id: i64,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<serde_json::Value, AppError> {
+    let (data_dir, paths, deleted) = {
+        let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+        let (deleted, paths) = s.database.delete_activity_by_id(id)?;
+        (s.data_dir.clone(), paths, deleted)
+    };
+    let removed = remove_screenshot_files(&data_dir, paths);
+    log::info!("删除单条活动 id={id}: {deleted} 条记录, {removed} 张截图");
+    Ok(serde_json::json!({ "deleted": deleted, "removed_screenshots": removed }))
+}
+
+/// 删除指定日期（本地时区全天）的全部活动记录（连带截图）
+#[tauri::command]
+pub async fn delete_activities_by_date(
+    date: String,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<serde_json::Value, AppError> {
+    let (data_dir, paths, deleted) = {
+        let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+        let (deleted, paths) = s.database.delete_activities_by_date(&date)?;
+        (s.data_dir.clone(), paths, deleted)
+    };
+    let removed = remove_screenshot_files(&data_dir, paths);
+    log::info!("按日期删除 {date}: {deleted} 条记录, {removed} 张截图");
+    Ok(serde_json::json!({ "deleted": deleted, "removed_screenshots": removed }))
+}
+
+/// 删除指定时间段 [start_ts, end_ts)（Unix 秒）内的全部活动记录（连带截图）
+#[tauri::command]
+pub async fn delete_activities_by_range(
+    start_ts: i64,
+    end_ts: i64,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<serde_json::Value, AppError> {
+    let (data_dir, paths, deleted) = {
+        let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+        let (deleted, paths) = s.database.delete_activities_by_range(start_ts, end_ts)?;
+        (s.data_dir.clone(), paths, deleted)
+    };
+    let removed = remove_screenshot_files(&data_dir, paths);
+    log::info!("按时间段删除 [{start_ts}, {end_ts}): {deleted} 条记录, {removed} 张截图");
+    Ok(serde_json::json!({ "deleted": deleted, "removed_screenshots": removed }))
+}
+
+/// 删除指定应用的活动记录；start_ts/end_ts 同时给定时只删该时间段内的，否则删该应用全部（连带截图）
+#[tauri::command]
+pub async fn delete_activities_by_app(
+    app_name: String,
+    start_ts: Option<i64>,
+    end_ts: Option<i64>,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<serde_json::Value, AppError> {
+    let date_range = match (start_ts, end_ts) {
+        (Some(s), Some(e)) => Some((s, e)),
+        _ => None,
+    };
+    let (data_dir, paths, deleted) = {
+        let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+        let (deleted, paths) = s.database.delete_activities_by_app(&app_name, date_range)?;
+        (s.data_dir.clone(), paths, deleted)
+    };
+    let removed = remove_screenshot_files(&data_dir, paths);
+    log::info!("按应用删除 {app_name}: {deleted} 条记录, {removed} 张截图");
+    Ok(serde_json::json!({ "deleted": deleted, "removed_screenshots": removed }))
+}
+
 /// 检查是否在工作时间内
 #[tauri::command]
 pub async fn is_work_time(state: State<'_, Arc<Mutex<AppState>>>) -> Result<bool, AppError> {
