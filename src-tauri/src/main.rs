@@ -335,7 +335,7 @@ pub(crate) fn refresh_tray_menu(app: &AppHandle) {
 
 /// 前端切换语言时同步到后端 config，并刷新托盘菜单文案
 #[tauri::command]
-pub async fn set_app_locale(
+async fn set_app_locale(
     locale: String,
     app: AppHandle,
     state: tauri::State<'_, Arc<Mutex<AppState>>>,
