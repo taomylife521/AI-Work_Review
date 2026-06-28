@@ -336,7 +336,9 @@
   }
 
   function getCategoryDisplayName(cat) {
-    return cat.name || translateCategoryLabel(cat.key);
+    const translatedCategoryName = translateCategoryLabel(cat.key);
+    const isKnownSystemCategory = cat.is_system || translatedCategoryName !== cat.key;
+    return isKnownSystemCategory ? translatedCategoryName : (cat.name || translatedCategoryName);
   }
 
   function iconStyle(info) {

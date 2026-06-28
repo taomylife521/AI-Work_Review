@@ -22,11 +22,13 @@ function createCategoryStore() {
 
     const found = cats.find(c => c.key === key);
     if (found) {
+      const translatedCategoryName = translateCategoryLabel(found.key);
+      const isKnownSystemCategory = found.is_system || translatedCategoryName !== found.key;
       result = {
         color: found.color,
         icon: found.icon,
-        name: found.name || translateCategoryLabel(found.key),
-        isSystem: found.is_system || false,
+        name: isKnownSystemCategory ? translatedCategoryName : (found.name || translatedCategoryName),
+        isSystem: isKnownSystemCategory,
       };
     } else {
       result.name = translateCategoryLabel(key);
@@ -65,7 +67,9 @@ function createSemanticCategoryStore() {
 
     const found = cats.find(c => c.key === key);
     if (found) {
-      return found.name || translateSemanticCategoryLabel(found.key);
+      const translatedSemanticCategoryName = translateSemanticCategoryLabel(found.key);
+      const isKnownSemanticCategory = found.is_system || translatedSemanticCategoryName !== found.key;
+      return isKnownSemanticCategory ? translatedSemanticCategoryName : (found.name || translatedSemanticCategoryName);
     }
     return translateSemanticCategoryLabel(key) || key;
   }

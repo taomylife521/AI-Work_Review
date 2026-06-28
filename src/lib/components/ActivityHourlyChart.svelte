@@ -40,28 +40,19 @@
   }
 
   function formatAxisTickLabel(seconds) {
-    const minutes = Math.round(seconds / 60);
-    if (minutes === 0) {
+    if (!seconds || seconds <= 0) {
       return '0';
     }
-    if (minutes % 60 === 0) {
-      return `${minutes / 60}h`;
-    }
-    return `${minutes}m`;
+    return formatDurationLocalized(seconds, { compact: true });
   }
 
   function selectHour(hour) {
     selectedHour = hour;
   }
 
-  // 统一紧凑时长格式：≥1min 显示 "Xm Ys"，<1min 显示 "Xs"
+  // 统一紧凑时长格式，并跟随当前语言。
   function formatCompact(seconds) {
-    if (!seconds || seconds <= 0) return '0s';
-    const m = Math.floor(seconds / 60);
-    const s = Math.round(seconds % 60);
-    if (m === 0) return `${s}s`;
-    if (s === 0) return `${m}m`;
-    return `${m}m ${s}s`;
+    return formatDurationLocalized(seconds, { compact: true });
   }
 
   $: buckets = Array.from({ length: 24 }, (_, hour) => {

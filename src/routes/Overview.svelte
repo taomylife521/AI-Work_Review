@@ -15,6 +15,7 @@
     formatLocalizedTime,
     locale,
     t,
+    translateCategoryLabel,
     translateSemanticCategoryLabel,
   } from '$lib/i18n/index.js';
   import { resolveAppIconSrc } from '../lib/utils/appVisuals.js';
@@ -166,7 +167,10 @@
     return acc;
   }, {});
   $: hourlyCategoryNames = categoryList.reduce((acc, c) => {
-    acc[c.key] = c.name;
+    currentLocale;
+    const translatedCategoryName = translateCategoryLabel(c.key);
+    const isKnownSystemCategory = c.is_system || translatedCategoryName !== c.key;
+    acc[c.key] = isKnownSystemCategory ? translatedCategoryName : (c.name || translatedCategoryName);
     return acc;
   }, {});
   $: hourlyCategoryBreakdown = hourlyAppBreakdown.reduce((acc, bucket) => {
@@ -271,7 +275,9 @@
   }
 
   function getSemanticCategoryDisplayName(cat) {
-    return cat.name || translateSemanticCategoryLabel(cat.key);
+    const translatedSemanticCategoryName = translateSemanticCategoryLabel(cat.key);
+    const isKnownSemanticCategory = cat.is_system || translatedSemanticCategoryName !== cat.key;
+    return isKnownSemanticCategory ? translatedSemanticCategoryName : (cat.name || translatedSemanticCategoryName);
   }
   
   // 浏览器统计弹窗
@@ -380,6 +386,10 @@
 
   function isUnresolvedBrowserDomain(domain) {
     return domain?.domain === UNRESOLVED_BROWSER_DOMAIN_LABEL;
+  }
+
+  function getBrowserDomainDisplayLabel(domain) {
+    return isUnresolvedBrowserDomain(domain) ? t('overview.unresolvedPage') : domain.domain;
   }
 
   function getAppIconSrc(appName, executablePath = null) {
@@ -1074,7 +1084,7 @@
           <div class="flex items-center justify-between p-3 bg-slate-50 dark:bg-[#21262d]/50">
             <div class="flex items-center gap-2">
               <span class="w-2 h-2 rounded-full bg-primary-500"></span>
-              <span class="font-medium text-slate-700 dark:text-[#c9d1d9]">{domain.domain}</span>
+              <span class="font-medium text-slate-700 dark:text-[#c9d1d9]">{getBrowserDomainDisplayLabel(domain)}</span>
               <span class="text-xs text-slate-400 bg-slate-200 dark:bg-[#30363d] px-1.5 py-0.5 rounded">
                 {t('overview.modalPages', { count: domain.urls.length })}
               </span>

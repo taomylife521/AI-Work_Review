@@ -49,3 +49,13 @@ test('按小时活跃度图表的柱子和时间刻度应共用同一套 24 列�
   assert.match(source, /<div class="mt-3 grid grid-cols-\[repeat\(24,minmax\(0,1fr\)\)\] gap-1">/);
   assert.doesNotMatch(source, /hourAxisLabelAlignmentClass/);
 });
+
+test('按小时活跃度图表的紧凑时长应跟随当前语言', async () => {
+  const source = await readFile(new URL('./ActivityHourlyChart.svelte', import.meta.url), 'utf8');
+
+  assert.match(source, /formatDurationLocalized\(seconds,\s*\{\s*compact:\s*true\s*\}\)/);
+  assert.match(source, /\{formatAxisTickLabel\(tick\)\}/);
+  assert.doesNotMatch(source, /return `\$\{minutes \/ 60\}h`/);
+  assert.doesNotMatch(source, /return `\$\{minutes\}m`/);
+  assert.doesNotMatch(source, /return `\$\{s\}s`/);
+});

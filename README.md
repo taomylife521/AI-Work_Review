@@ -62,13 +62,89 @@ The focus is not "monitoring". It is helping you **recall, organize, and review*
 
 ## Interface Preview
 
+The screenshots below are captured from the running desktop app with localized UI and representative local data, covering the main workflow and configuration surfaces.
+
+### Core Workflow
+
+<p align="center"><strong>Workflow GIF</strong></p>
+<p align="center">
+  <img src="docs/Introduction_en/工作流.gif" alt="Core workflow animation" width="720" />
+</p>
+
+<p align="center"><strong>Overview</strong></p>
 <p align="center">
   <img src="docs/Introduction_en/概览.png" alt="Overview" width="720" />
 </p>
 
+<p align="center"><strong>Timeline</strong></p>
+<p align="center">
+  <img src="docs/Introduction_en/时间线.png" alt="Timeline" width="720" />
+</p>
+
+<p align="center"><strong>Timeline Detail</strong></p>
+<p align="center">
+  <img src="docs/Introduction_en/时间线详情.png" alt="Timeline Detail" width="720" />
+</p>
+
+<p align="center"><strong>Daily Report</strong></p>
+<p align="center">
+  <img src="docs/Introduction_en/日报.png" alt="Daily Report" width="720" />
+</p>
+
+<p align="center"><strong>Work Assistant</strong></p>
 <p align="center">
   <img src="docs/Introduction_en/助手.png" alt="Work Assistant" width="720" />
 </p>
+
+<p align="center"><strong>Integrations</strong></p>
+<p align="center">
+  <img src="docs/Introduction_en/接入管理.png" alt="Integrations and MCP Server settings" width="720" />
+</p>
+
+<details>
+<summary>More screenshots: summaries, settings, and about page</summary>
+
+<p align="center"><strong>Hourly Summary</strong></p>
+<p align="center">
+  <img src="docs/Introduction_en/小时总结.png" alt="Hourly Summary" width="720" />
+</p>
+
+<p align="center"><strong>General Settings</strong></p>
+<p align="center">
+  <img src="docs/Introduction_en/设置-通用.png" alt="General Settings" width="720" />
+</p>
+
+<p align="center"><strong>Appearance</strong></p>
+<p align="center">
+  <img src="docs/Introduction_en/设置-外观.png" alt="Appearance Settings" width="720" />
+</p>
+
+<p align="center"><strong>AI Models</strong></p>
+<p align="center">
+  <img src="docs/Introduction_en/设置-AI模型.png" alt="AI Model Settings" width="720" />
+</p>
+
+<p align="center"><strong>Desktop Avatar</strong></p>
+<p align="center">
+  <img src="docs/Introduction_en/设置-桌面化身.png" alt="Desktop Avatar Settings" width="720" />
+</p>
+
+<p align="center"><strong>Privacy</strong></p>
+<p align="center">
+  <img src="docs/Introduction_en/设置-隐私.png" alt="Privacy Settings" width="720" />
+</p>
+
+<p align="center"><strong>Storage</strong></p>
+<p align="center">
+  <img src="docs/Introduction_en/设置-存储.png" alt="Storage Settings" width="720" />
+</p>
+
+<p align="center"><strong>About</strong></p>
+<p align="center">
+  <img src="docs/Introduction_en/关于.png" alt="About Work Review" width="720" />
+</p>
+
+</details>
 
 ---
 
@@ -96,8 +172,8 @@ You can control the recording scope as needed:
 
 ### Smart Organization
 
-- Work assistant based on local records, with basic template and AI-enhanced modes
-- Duration statistics, category filtering, trend comparison, and natural-language time ranges
+- Work assistant based on local records, with basic template, AI-enhanced modes, and dynamic opening prompts after a model is configured
+- Duration statistics, category filtering, trend comparison, natural-language time ranges, and hourly activity across Today, Week, Date, and Range views
 - Fragments grouped into continuous work sessions
 - Extracts potential follow-up to-dos from pages, window titles, and context
 
@@ -135,7 +211,7 @@ Supported providers: Ollama (local) / OpenAI compatible / DeepSeek / Qwen / Zhip
 | Platform | Installer |
 |------|--------|
 | macOS (Apple Silicon / Intel) | `.dmg` |
-| Windows | `.exe` |
+| Windows | `.exe` / portable `.zip` |
 | Linux x86_64 (X11 / Wayland) | `.deb` / `.AppImage` |
 | Linux ARM64 (aarch64) | `.deb` |
 
@@ -165,7 +241,13 @@ bash scripts/deb/reinstall.sh --dry-run # preview operations
 
 See [scripts/ubuntu-wayland-README.md](scripts/ubuntu-wayland-README.md) for details.
 
-**KDE Plasma / Wayland startup crash (Fedora, Arch, openSUSE, …):** If the app quits immediately with `Gdk-Message: Error 71 (Protocol error) dispatching to Wayland display.`, it is an upstream webkit2gtk/GTK bug on Wayland (see [tauri#10702](https://github.com/tauri-apps/tauri/issues/10702)), most common on KDE Plasma + NVIDIA. Recent builds already inject `WEBKIT_DISABLE_DMABUF_RENDERER=1` at startup. If you still hit it on an older build, force the X11 backend as a fallback:
+**KDE Plasma / Wayland startup crash (Fedora, Arch, openSUSE, …):** If the app quits immediately with `Gdk-Message: Error 71 (Protocol error) dispatching to Wayland display.`, it is an upstream webkit2gtk/GTK bug on Wayland (see [tauri#10702](https://github.com/tauri-apps/tauri/issues/10702)), most common on KDE Plasma + NVIDIA. Recent builds already inject `WEBKIT_DISABLE_DMABUF_RENDERER=1` at startup. If you still hit it on an older build, launch it with the same workaround manually:
+
+```bash
+WEBKIT_DISABLE_DMABUF_RENDERER=1 ./Work_Review
+```
+
+If that still fails, force the X11 backend as a last-resort fallback. This may render worse on some Wayland desktops:
 
 ```bash
 GDK_BACKEND=x11 ./Work_Review
@@ -290,7 +372,7 @@ Requires: Node.js 18+ / Rust stable / Tauri 2 CLI · Tech stack: Tauri 2 + Rust 
 <p align="center"><strong>WeChat Group</strong></p>
 
 <p align="center">
-  <img src="docs/group/vx.jpg" alt="WeChat Group" width="220" />
+  <img src="docs/group/wechat-group.png" alt="WeChat Group" width="220" />
 </p>
 
 <p align="center"><small>If the QR code has expired, follow the official account below for the latest group invitation, or join the TG group</small></p>
@@ -300,7 +382,7 @@ Requires: Node.js 18+ / Rust stable / Tauri 2 CLI · Tech stack: Tauri 2 + Rust 
 <p align="center"><strong>WeChat Official Account</strong></p>
 
 <p align="center">
-  <img src="docs/group/gzh.jpg" alt="Official Account" width="220" />
+  <img src="docs/group/official-account.png" alt="Official Account" width="220" />
 </p>
 
 ---
@@ -326,6 +408,6 @@ Requires: Node.js 18+ / Rust stable / Tauri 2 CLI · Tech stack: Tauri 2 + Rust 
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=wm94i/Work-Review&type=Date&theme=dark" />
     <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=wm94i/Work-Review&type=Date" />
-    <img alt="Star History" src="https://api.star-history.com/svg?repos=wm94i/Work-Review&type=Date" />
+    <img alt="Star History" src="https://api.star-history.com/svg?repos=wm94i/Work-Review&type=Date" width="720" />
   </picture>
 </a>

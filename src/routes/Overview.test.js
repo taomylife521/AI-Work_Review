@@ -141,6 +141,49 @@ test('概览页小时应用明细应与当前概览日期范围保持同口径',
   assert.match(source, /mode:\s*overviewMode/);
 });
 
+test('概览页按小时活跃度分类图例应按当前语言翻译系统分类', async () => {
+  const source = await readFile(new URL('./Overview.svelte', import.meta.url), 'utf8');
+
+  assert.match(source, /translateCategoryLabel/);
+  assert.match(source, /translatedCategoryName = translateCategoryLabel\(c\.key\)/);
+  assert.match(source, /isKnownSystemCategory = c\.is_system \|\| translatedCategoryName !== c\.key/);
+  assert.match(source, /acc\[c\.key\] = isKnownSystemCategory \? translatedCategoryName : \(c\.name \|\| translatedCategoryName\)/);
+  assert.doesNotMatch(
+    source,
+    /hourlyCategoryNames = categoryList\.reduce\(\(acc, c\) => \{[\s\S]*acc\[c\.key\] = c\.name;/,
+    '不能直接使用 get_categories 返回的中文系统分类名，否则英文/繁中切换后图例不会变'
+  );
+});
+
+test('概览页网站访问弹层应按当前语言翻译内置语义分类', async () => {
+  const source = await readFile(new URL('./Overview.svelte', import.meta.url), 'utf8');
+
+  assert.match(source, /translatedSemanticCategoryName = translateSemanticCategoryLabel\(cat\.key\)/);
+  assert.match(source, /isKnownSemanticCategory = cat\.is_system \|\| translatedSemanticCategoryName !== cat\.key/);
+  assert.match(
+    source,
+    /return isKnownSemanticCategory \? translatedSemanticCategoryName : \(cat\.name \|\| translatedSemanticCategoryName\)/
+  );
+  assert.doesNotMatch(
+    source,
+    /function getSemanticCategoryDisplayName\(cat\) \{[\s\S]*return cat\.name \|\| translateSemanticCategoryLabel\(cat\.key\);[\s\S]*\}/,
+    '网站语义分类选择器不能直接优先显示后端中文名称'
+  );
+});
+
+test('概览页未识别页面域名标题应走 i18n 文案而不是直接渲染中文 sentinel', async () => {
+  const source = await readFile(new URL('./Overview.svelte', import.meta.url), 'utf8');
+
+  assert.match(source, /function getBrowserDomainDisplayLabel\(domain\)/);
+  assert.match(source, /isUnresolvedBrowserDomain\(domain\) \? t\('overview\.unresolvedPage'\) : domain\.domain/);
+  assert.match(source, /\{getBrowserDomainDisplayLabel\(domain\)\}/);
+  assert.doesNotMatch(
+    source,
+    /<span class="font-medium text-slate-700 dark:text-\[#c9d1d9\]">\{domain\.domain\}<\/span>/,
+    '英文界面不能把后端未识别页面 sentinel 直接显示成中文'
+  );
+});
+
 test('概览统计命令应注册为 get_overview_stats', async () => {
   const source = await readFile(new URL('../../src-tauri/src/main.rs', import.meta.url), 'utf8');
 

@@ -62,13 +62,89 @@ Work Review 面向個人工作復盤，適合用來回答這些問題：
 
 ## 界面預覽
 
+以下截圖由本地運行中的桌面應用自動截取，使用對應語言界面和代表性的本地數據，覆蓋主要工作流和配置界面。
+
+### 核心工作流
+
+<p align="center"><strong>工作流 GIF</strong></p>
+<p align="center">
+  <img src="docs/Introduction_tw/工作流.gif" alt="核心工作流動圖" width="720" />
+</p>
+
+<p align="center"><strong>概覽</strong></p>
 <p align="center">
   <img src="docs/Introduction_tw/概览.png" alt="概覽" width="720" />
 </p>
 
+<p align="center"><strong>時間線</strong></p>
+<p align="center">
+  <img src="docs/Introduction_tw/时间线.png" alt="時間線" width="720" />
+</p>
+
+<p align="center"><strong>時間線詳情</strong></p>
+<p align="center">
+  <img src="docs/Introduction_tw/时间线详情.png" alt="時間線詳情" width="720" />
+</p>
+
+<p align="center"><strong>日報</strong></p>
+<p align="center">
+  <img src="docs/Introduction_tw/日报.png" alt="日報" width="720" />
+</p>
+
+<p align="center"><strong>工作助手</strong></p>
 <p align="center">
   <img src="docs/Introduction_tw/助手.png" alt="工作助手" width="720" />
 </p>
+
+<p align="center"><strong>接入管理</strong></p>
+<p align="center">
+  <img src="docs/Introduction_tw/接入管理.png" alt="接入管理和 MCP Server 設置" width="720" />
+</p>
+
+<details>
+<summary>更多截圖：小時總結、設置與關於頁</summary>
+
+<p align="center"><strong>小時總結</strong></p>
+<p align="center">
+  <img src="docs/Introduction_tw/小时总结.png" alt="小時總結" width="720" />
+</p>
+
+<p align="center"><strong>通用設置</strong></p>
+<p align="center">
+  <img src="docs/Introduction_tw/设置-通用.png" alt="通用設置" width="720" />
+</p>
+
+<p align="center"><strong>外觀設置</strong></p>
+<p align="center">
+  <img src="docs/Introduction_tw/设置-外观.png" alt="外觀設置" width="720" />
+</p>
+
+<p align="center"><strong>AI 模型</strong></p>
+<p align="center">
+  <img src="docs/Introduction_tw/设置-AI模型.png" alt="AI 模型設置" width="720" />
+</p>
+
+<p align="center"><strong>桌面化身</strong></p>
+<p align="center">
+  <img src="docs/Introduction_tw/设置-桌面化身.png" alt="桌面化身設置" width="720" />
+</p>
+
+<p align="center"><strong>隱私設置</strong></p>
+<p align="center">
+  <img src="docs/Introduction_tw/设置-隐私.png" alt="隱私設置" width="720" />
+</p>
+
+<p align="center"><strong>存儲設置</strong></p>
+<p align="center">
+  <img src="docs/Introduction_tw/设置-存储.png" alt="存儲設置" width="720" />
+</p>
+
+<p align="center"><strong>關於</strong></p>
+<p align="center">
+  <img src="docs/Introduction_tw/关于.png" alt="關於 Work Review" width="720" />
+</p>
+
+</details>
 
 ---
 
@@ -96,8 +172,8 @@ Work Review 從設計上面向個人使用，不適用於：員工監控 · 團�
 
 ### 智能整理
 
-- 工作助手基於本地記錄問答，支援基礎模板和 AI 增強
-- 支援時長統計、分類篩選、趨勢對比和自然語言時間範圍
+- 工作助手基於本地記錄問答，支援基礎模板、AI 增強，以及配置模型後顯示動態開場提示
+- 支援時長統計、分類篩選、趨勢對比、自然語言時間範圍，並可按今日、本週、指定日期、日期範圍查看小時活躍度
 - 碎片活動聚合為連續工作 Session
 - 從頁面、窗口標題和上下文中提煉可能的後續待辦
 
@@ -135,7 +211,7 @@ Work Review 的核心始終是**本地記錄**。AI 的作用是讓記錄更容�
 | 平台 | 安裝包 |
 |------|--------|
 | macOS (Apple Silicon / Intel) | `.dmg` |
-| Windows | `.exe` |
+| Windows | `.exe` / 便攜版 `.zip` |
 | Linux x86_64 (X11 / Wayland) | `.deb` / `.AppImage` |
 | Linux ARM64 (aarch64) | `.deb` |
 
@@ -165,7 +241,13 @@ bash scripts/deb/reinstall.sh --dry-run  # 預覽操作
 
 詳見 [scripts/ubuntu-wayland-README.md](scripts/ubuntu-wayland-README.md)。
 
-**KDE Plasma / Wayland 啟動崩潰（Fedora、Arch、openSUSE 等）：** 若應用啟動後立即退出並報 `Gdk-Message: Error 71 (Protocol error) dispatching to Wayland display.`，這是 webkit2gtk/GTK 在 Wayland 下的上游缺陷（見 [tauri#10702](https://github.com/tauri-apps/tauri/issues/10702)），在 KDE Plasma + NVIDIA 上最常見。新版本已在啟動時自動注入 `WEBKIT_DISABLE_DMABUF_RENDERER=1`。舊版本若仍崩潰，可強制走 X11 後端兜底：
+**KDE Plasma / Wayland 啟動崩潰（Fedora、Arch、openSUSE 等）：** 若應用啟動後立即退出並報 `Gdk-Message: Error 71 (Protocol error) dispatching to Wayland display.`，這是 webkit2gtk/GTK 在 Wayland 下的上游缺陷（見 [tauri#10702](https://github.com/tauri-apps/tauri/issues/10702)），在 KDE Plasma + NVIDIA 上最常見。新版本已在啟動時自動注入 `WEBKIT_DISABLE_DMABUF_RENDERER=1`。舊版本若仍崩潰，優先手動用同一個 workaround 啟動：
+
+```bash
+WEBKIT_DISABLE_DMABUF_RENDERER=1 ./Work_Review
+```
+
+如果仍無法啟動，再強制走 X11 後端作為最後兜底。部分 Wayland 桌面下 X11 兜底可能會出現渲染異常：
 
 ```bash
 GDK_BACKEND=x11 ./Work_Review
@@ -290,7 +372,7 @@ npm run tauri:build  # 構建
 <p align="center"><strong>微信群</strong></p>
 
 <p align="center">
-  <img src="docs/group/vx.jpg" alt="微信群" width="220" />
+  <img src="docs/group/wechat-group.png" alt="微信群" width="220" />
 </p>
 
 <p align="center"><small>如果二維碼失效，關注下方公眾號獲取最新進群方式，或者進 TG 群吐槽</small></p>
@@ -300,7 +382,7 @@ npm run tauri:build  # 構建
 <p align="center"><strong>公眾號</strong></p>
 
 <p align="center">
-  <img src="docs/group/gzh.jpg" alt="公眾號" width="220" />
+  <img src="docs/group/official-account.png" alt="公眾號" width="220" />
 </p>
 
 ---
@@ -326,6 +408,6 @@ npm run tauri:build  # 構建
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=wm94i/Work-Review&type=Date&theme=dark" />
     <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=wm94i/Work-Review&type=Date" />
-    <img alt="Star History" src="https://api.star-history.com/svg?repos=wm94i/Work-Review&type=Date" />
+    <img alt="Star History" src="https://api.star-history.com/svg?repos=wm94i/Work-Review&type=Date" width="720" />
   </picture>
 </a>

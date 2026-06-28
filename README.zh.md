@@ -62,13 +62,89 @@ Work Review 面向个人工作复盘，适合用来回答这些问题：
 
 ## 界面预览
 
+以下截图由本地运行中的桌面应用自动截取，使用对应语言界面和代表性的本地数据，覆盖主要工作流和配置界面。
+
+### 核心工作流
+
+<p align="center"><strong>工作流 GIF</strong></p>
+<p align="center">
+  <img src="docs/Introduction_zh/工作流.gif" alt="核心工作流动图" width="720" />
+</p>
+
+<p align="center"><strong>概览</strong></p>
 <p align="center">
   <img src="docs/Introduction_zh/概览.png" alt="概览" width="720" />
 </p>
 
+<p align="center"><strong>时间线</strong></p>
+<p align="center">
+  <img src="docs/Introduction_zh/时间线.png" alt="时间线" width="720" />
+</p>
+
+<p align="center"><strong>时间线详情</strong></p>
+<p align="center">
+  <img src="docs/Introduction_zh/时间线详情.png" alt="时间线详情" width="720" />
+</p>
+
+<p align="center"><strong>日报</strong></p>
+<p align="center">
+  <img src="docs/Introduction_zh/日报.png" alt="日报" width="720" />
+</p>
+
+<p align="center"><strong>工作助手</strong></p>
 <p align="center">
   <img src="docs/Introduction_zh/助手.png" alt="工作助手" width="720" />
 </p>
+
+<p align="center"><strong>接入管理</strong></p>
+<p align="center">
+  <img src="docs/Introduction_zh/接入管理.png" alt="接入管理和 MCP Server 设置" width="720" />
+</p>
+
+<details>
+<summary>更多截图：小时总结、设置与关于页</summary>
+
+<p align="center"><strong>小时总结</strong></p>
+<p align="center">
+  <img src="docs/Introduction_zh/小时总结.png" alt="小时总结" width="720" />
+</p>
+
+<p align="center"><strong>通用设置</strong></p>
+<p align="center">
+  <img src="docs/Introduction_zh/设置-通用.png" alt="通用设置" width="720" />
+</p>
+
+<p align="center"><strong>外观设置</strong></p>
+<p align="center">
+  <img src="docs/Introduction_zh/设置-外观.png" alt="外观设置" width="720" />
+</p>
+
+<p align="center"><strong>AI 模型</strong></p>
+<p align="center">
+  <img src="docs/Introduction_zh/设置-AI模型.png" alt="AI 模型设置" width="720" />
+</p>
+
+<p align="center"><strong>桌面化身</strong></p>
+<p align="center">
+  <img src="docs/Introduction_zh/设置-桌面化身.png" alt="桌面化身设置" width="720" />
+</p>
+
+<p align="center"><strong>隐私设置</strong></p>
+<p align="center">
+  <img src="docs/Introduction_zh/设置-隐私.png" alt="隐私设置" width="720" />
+</p>
+
+<p align="center"><strong>存储设置</strong></p>
+<p align="center">
+  <img src="docs/Introduction_zh/设置-存储.png" alt="存储设置" width="720" />
+</p>
+
+<p align="center"><strong>关于</strong></p>
+<p align="center">
+  <img src="docs/Introduction_zh/关于.png" alt="关于 Work Review" width="720" />
+</p>
+
+</details>
 
 ---
 
@@ -96,8 +172,8 @@ Work Review 从设计上面向个人使用，不适用于：员工监控 · 团�
 
 ### 智能整理
 
-- 工作助手基于本地记录问答，支持基础模板和 AI 增强
-- 支持时长统计、分类筛选、趋势对比和自然语言时间范围
+- 工作助手基于本地记录问答，支持基础模板、AI 增强，以及配置模型后显示动态开场提示
+- 支持时长统计、分类筛选、趋势对比、自然语言时间范围，并可按今日、本周、指定日期、日期范围查看小时活跃度
 - 碎片活动聚合为连续工作 Session
 - 从页面、窗口标题和上下文中提炼可能的后续待办
 
@@ -135,7 +211,7 @@ Work Review 的核心始终是**本地记录**。AI 的作用是让记录更容�
 | 平台 | 安装包 |
 |------|--------|
 | macOS (Apple Silicon / Intel) | `.dmg` |
-| Windows | `.exe` |
+| Windows | `.exe` / 便携版 `.zip` |
 | Linux x86_64 (X11 / Wayland) | `.deb` / `.AppImage` |
 | Linux ARM64 (aarch64) | `.deb` |
 
@@ -165,7 +241,13 @@ bash scripts/deb/reinstall.sh --dry-run  # 预览操作
 
 详见 [scripts/ubuntu-wayland-README.md](scripts/ubuntu-wayland-README.md)。
 
-**KDE Plasma / Wayland 启动崩溃（Fedora、Arch、openSUSE 等）：** 若应用启动后立即退出并报 `Gdk-Message: Error 71 (Protocol error) dispatching to Wayland display.`，这是 webkit2gtk/GTK 在 Wayland 下的上游缺陷（见 [tauri#10702](https://github.com/tauri-apps/tauri/issues/10702)），在 KDE Plasma + NVIDIA 上最常见。新版本已在启动时自动注入 `WEBKIT_DISABLE_DMABUF_RENDERER=1`。旧版本若仍崩溃，可强制走 X11 后端兜底：
+**KDE Plasma / Wayland 启动崩溃（Fedora、Arch、openSUSE 等）：** 若应用启动后立即退出并报 `Gdk-Message: Error 71 (Protocol error) dispatching to Wayland display.`，这是 webkit2gtk/GTK 在 Wayland 下的上游缺陷（见 [tauri#10702](https://github.com/tauri-apps/tauri/issues/10702)），在 KDE Plasma + NVIDIA 上最常见。新版本已在启动时自动注入 `WEBKIT_DISABLE_DMABUF_RENDERER=1`。旧版本若仍崩溃，优先手动用同一个 workaround 启动：
+
+```bash
+WEBKIT_DISABLE_DMABUF_RENDERER=1 ./Work_Review
+```
+
+如果仍无法启动，再强制走 X11 后端作为最后兜底。部分 Wayland 桌面下 X11 兜底可能会出现渲染异常：
 
 ```bash
 GDK_BACKEND=x11 ./Work_Review
@@ -290,7 +372,7 @@ npm run tauri:build  # 构建
 <p align="center"><strong>微信群</strong></p>
 
 <p align="center">
-  <img src="docs/group/vx.jpg" alt="微信群" width="220" />
+  <img src="docs/group/wechat-group.png" alt="微信群" width="220" />
 </p>
 
 <p align="center"><small>如果二维码失效，关注下方公众号获取最新进群方式，或者进 TG 群吐槽</small></p>
@@ -300,7 +382,7 @@ npm run tauri:build  # 构建
 <p align="center"><strong>公众号</strong></p>
 
 <p align="center">
-  <img src="docs/group/gzh.jpg" alt="公众号" width="220" />
+  <img src="docs/group/official-account.png" alt="公众号" width="220" />
 </p>
 
 ---
@@ -326,6 +408,6 @@ npm run tauri:build  # 构建
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=wm94i/Work-Review&type=Date&theme=dark" />
     <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=wm94i/Work-Review&type=Date" />
-    <img alt="Star History" src="https://api.star-history.com/svg?repos=wm94i/Work-Review&type=Date" />
+    <img alt="Star History" src="https://api.star-history.com/svg?repos=wm94i/Work-Review&type=Date" width="720" />
   </picture>
 </a>
