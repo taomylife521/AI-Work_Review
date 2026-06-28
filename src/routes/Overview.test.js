@@ -68,9 +68,16 @@ test('概览页面应支持今日、指定日期与本周三种时间视角切�
   assert.match(source, /\{#if overviewMode === 'date'\}/);
   assert.match(source, /selectedDateFrom/);
   assert.match(source, /selectedDateTo/);
+  assert.match(source, /overviewDateInputFrom/);
+  assert.match(source, /overviewDateInputTo/);
+  assert.match(source, /editingOverviewDateFrom/);
+  assert.match(source, /editingOverviewDateTo/);
   assert.match(source, /stepOverviewDateBoundary/);
-  assert.match(source, /LocalizedDatePicker/);
-  assert.match(source, /mode="range"/);
+  assert.match(source, /commitOverviewDateInput/);
+  assert.match(source, /inputmode="numeric"/);
+  assert.match(source, /type="text"/);
+  assert.match(source, /on:focus=\{\(\) => \{ editingOverviewDateFrom = true; \}\}/);
+  assert.match(source, /on:focus=\{\(\) => \{ editingOverviewDateTo = true; \}\}/);
   assert.match(source, /dateFrom: overviewMode === 'date'/);
   assert.match(source, /dateTo: overviewMode === 'date'/);
   const todayIndex = source.indexOf("setOverviewMode('today')");
@@ -86,13 +93,11 @@ test('概览页面的指定日期选择框应跟随当前语言并使用紧凑�
   const source = await readFile(new URL('./Overview.svelte', import.meta.url), 'utf8');
 
   assert.match(source, /overview-date-bar/);
-  assert.match(source, /LocalizedDatePicker/);
-  assert.match(source, /mode="range"/);
-  assert.match(source, /bind:startDate=\{selectedDateFrom\}/);
-  assert.match(source, /bind:endDate=\{selectedDateTo\}/);
-  assert.match(source, /on:change=\{handleOverviewDateChange\}/);
+  assert.match(source, /overview-date-input/);
+  assert.match(source, /overview-date-field/);
   assert.match(source, /stepOverviewDateBoundary\('start'/);
   assert.match(source, /stepOverviewDateBoundary\('end'/);
+  assert.doesNotMatch(source, /LocalizedDatePicker/);
 });
 
 test('概览卡片标题应随今日、单日、范围和本周视角切换', async () => {
