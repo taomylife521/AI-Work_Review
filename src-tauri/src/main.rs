@@ -335,7 +335,7 @@ pub(crate) fn refresh_tray_menu(app: &AppHandle) {
 
 /// 前端切换语言时同步到后端 config，并刷新托盘菜单文案
 #[tauri::command]
-pub async fn set_locale(
+pub async fn set_app_locale(
     locale: String,
     app: AppHandle,
     state: tauri::State<'_, Arc<Mutex<AppState>>>,
@@ -350,7 +350,7 @@ pub async fn set_locale(
         s.config.locale = normalized.to_string();
         s.config.clone()
     };
-    commands::persist_app_config(config, &app, state.inner())?;
+    commands::persist_app_config(config, app.clone(), state.inner())?;
     refresh_tray_menu(&app);
     Ok(())
 }
@@ -3828,7 +3828,7 @@ async fn main() {
             commands::generate_weekly_review,
             commands::extract_todo_items,
             commands::clear_old_activities,
-            set_locale,
+            set_app_locale,
             commands::delete_activity,
             commands::delete_activities_by_date,
             commands::delete_activities_by_range,
