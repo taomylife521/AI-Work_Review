@@ -4,6 +4,8 @@ use crate::config::AvatarFollowupItem;
 use crate::error::AppError;
 #[cfg(target_os = "linux")]
 use crate::linux_session::{current_linux_desktop_environment, current_linux_desktop_session, LinuxDesktopSession};
+#[cfg(target_os = "linux")]
+use std::path::PathBuf;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -16,11 +18,11 @@ const GNOME_AVATAR_EXTENSION_UUID: &str = "work-review-avatar-input@workreview.a
 
 #[cfg(target_os = "linux")]
 const GNOME_AVATAR_EXTENSION_METADATA: &str =
-    include_str!("../../scripts/gnome-shell/work-review-avatar-input@workreview.app/metadata.json");
+    include_str!("../../../scripts/gnome-shell/work-review-avatar-input@workreview.app/metadata.json");
 
 #[cfg(target_os = "linux")]
 const GNOME_AVATAR_EXTENSION_SOURCE: &str =
-    include_str!("../../scripts/gnome-shell/work-review-avatar-input@workreview.app/extension.js");
+    include_str!("../../../scripts/gnome-shell/work-review-avatar-input@workreview.app/extension.js");
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -58,7 +60,7 @@ fn gnome_avatar_extension_install_dir() -> Result<PathBuf, AppError> {
 }
 
 #[cfg(target_os = "linux")]
-fn is_gnome_avatar_extension_installed() -> bool {
+pub(crate) fn is_gnome_avatar_extension_installed() -> bool {
     gnome_avatar_extension_install_dir()
         .ok()
         .map(|dir| dir.join("metadata.json").exists() && dir.join("extension.js").exists())
@@ -66,7 +68,7 @@ fn is_gnome_avatar_extension_installed() -> bool {
 }
 
 #[cfg(target_os = "linux")]
-fn is_gnome_avatar_extension_enabled() -> bool {
+pub(crate) fn is_gnome_avatar_extension_enabled() -> bool {
     std::process::Command::new("gnome-extensions")
         .args(["list", "--enabled"])
         .output()
@@ -81,7 +83,7 @@ fn is_gnome_avatar_extension_enabled() -> bool {
 }
 
 #[cfg(target_os = "linux")]
-fn gnome_avatar_extension_needs_relogin(
+pub(crate) fn gnome_avatar_extension_needs_relogin(
     desktop_environment: crate::linux_session::LinuxDesktopEnvironment,
     installed: bool,
     enabled: bool,

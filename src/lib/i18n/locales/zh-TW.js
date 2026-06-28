@@ -875,6 +875,8 @@ export default {
       uiStyleCTitle: '緊湊數據',
       uiStyleCDesc: '更緊湊的資訊密度，適合長時間掃描統計資料。',
       uiStyleCBadge: 'C',
+      uiStyleCurrent: '目前',
+      uiVisualStyleApplyHint: '點擊即套用並保存',
       uiVisualStyleSaveFailed: '保存介面風格失敗: {error}',
       syncing: '同步中',
       smaller: '更小',

@@ -34,7 +34,7 @@ test('设置页应在顶部单独展示权限区，并将背景外观放入独�
   assert.match(settingsSource, /activeTab === 'avatar'/);
   assert.match(settingsSource, /activeTab === 'appearance'/);
   assert.match(settingsSource, /<SettingsAvatar bind:config on:change=\{\(\) => dirty = true\} \/>/);
-  assert.match(settingsSource, /<SettingsAppearance bind:config mode="background-only" on:change=\{\(\) => dirty = true\} \/>/);
+  assert.match(settingsSource, /<SettingsAppearance bind:config mode="background-only" on:change=\{handleSettingsChange\} \/>/);
   assert.match(settingsSource, /\{#if settingsRuntimePlatform === 'macos'\}/);
   assert.match(settingsSource, /<SettingsSystem \/>/);
   assert.match(settingsSource, /settings-top-status-zone/);

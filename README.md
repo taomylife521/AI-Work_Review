@@ -66,7 +66,6 @@ The screenshots below are captured from the running desktop app with localized U
 
 ### Core Workflow
 
-<p align="center"><strong>Workflow GIF</strong></p>
 <p align="center">
   <img src="docs/Introduction_en/工作流.gif" alt="Core workflow animation" width="720" />
 </p>

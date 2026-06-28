@@ -66,7 +66,6 @@ Work Review 面向個人工作復盤，適合用來回答這些問題：
 
 ### 核心工作流
 
-<p align="center"><strong>工作流 GIF</strong></p>
 <p align="center">
   <img src="docs/Introduction_tw/工作流.gif" alt="核心工作流動圖" width="720" />
 </p>

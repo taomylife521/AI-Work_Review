@@ -252,7 +252,7 @@
     const previousStyle = config.ui_visual_style || 'b';
     uiVisualStyleSaving = true;
     config.ui_visual_style = styleId;
-    dispatch('change', config);
+    dispatch('change', { autosaved: true, config });
     window.dispatchEvent(new CustomEvent('ui-visual-style-changed', {
       detail: { style: styleId },
     }));
@@ -261,7 +261,7 @@
       await invoke('save_config', { config });
     } catch (e) {
       config.ui_visual_style = previousStyle;
-      dispatch('change', config);
+      dispatch('change', { autosaved: true, config });
       window.dispatchEvent(new CustomEvent('ui-visual-style-changed', {
         detail: { style: previousStyle },
       }));
@@ -608,21 +608,39 @@
         on:click={() => selectUiVisualStyle(option.id)}
         aria-pressed={config.ui_visual_style === option.id}
       >
-        <div class="settings-style-preview settings-style-preview--{option.id}">
-          <span></span>
-          <span></span>
-          <span></span>
+        <div class="settings-style-preview settings-style-preview--{option.id}" aria-hidden="true">
+          <div class="settings-style-preview__sidebar"></div>
+          <div class="settings-style-preview__topbar"></div>
+          <div class="settings-style-preview__metric"></div>
+          <div class="settings-style-preview__chart">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
         </div>
         <div class="mt-3 flex items-center justify-between gap-2">
           <div class="text-sm font-semibold text-slate-900 dark:text-[#e6edf3]">
             {t(option.titleKey)}
           </div>
-          <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:bg-[#30363d] dark:text-[#adbac7]">
-            {t(option.badgeKey)}
-          </span>
+          <div class="flex items-center gap-1.5">
+            {#if config.ui_visual_style === option.id}
+              <span class="settings-style-current-mark">
+                <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M3.5 8.2L6.5 11L12.5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                {t('settingsAppearance.uiStyleCurrent')}
+              </span>
+            {/if}
+            <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:bg-[#30363d] dark:text-[#adbac7]">
+              {t(option.badgeKey)}
+            </span>
+          </div>
         </div>
         <p class="mt-2 text-xs leading-5 text-slate-500 dark:text-[#7d8590]">
           {t(option.descriptionKey)}
+        </p>
+        <p class="mt-2 text-[11px] font-medium text-slate-400 dark:text-[#636c76]">
+          {t('settingsAppearance.uiVisualStyleApplyHint')}
         </p>
       </button>
     {/each}

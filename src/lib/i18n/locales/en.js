@@ -875,6 +875,8 @@ export default {
       uiStyleCTitle: 'Compact Data',
       uiStyleCDesc: 'A denser layout for scanning statistics over long sessions.',
       uiStyleCBadge: 'C',
+      uiStyleCurrent: 'Current',
+      uiVisualStyleApplyHint: 'Click to apply and save',
       uiVisualStyleSaveFailed: 'Failed to save interface style: {error}',
       syncing: 'Syncing',
       smaller: 'Smaller',

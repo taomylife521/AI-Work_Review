@@ -875,6 +875,8 @@ export default {
       uiStyleCTitle: '紧凑数据',
       uiStyleCDesc: '更紧凑的信息密度，适合长时间扫描统计数据。',
       uiStyleCBadge: 'C',
+      uiStyleCurrent: '当前',
+      uiVisualStyleApplyHint: '点击即应用并保存',
       uiVisualStyleSaveFailed: '保存界面风格失败: {error}',
       syncing: '同步中',
       smaller: '更小',

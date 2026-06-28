@@ -247,6 +247,10 @@
     }
   }
 
+  function handleSettingsChange(event) {
+    dirty = !event.detail?.autosaved;
+  }
+
   // 清理缓存回调
   async function handleClearCache() {
     try {
@@ -390,7 +394,7 @@
         {#if activeTab === 'general'}
           <SettingsGeneral bind:config on:change={() => dirty = true} />
         {:else if activeTab === 'appearance'}
-          <SettingsAppearance bind:config mode="background-only" on:change={() => dirty = true} />
+          <SettingsAppearance bind:config mode="background-only" on:change={handleSettingsChange} />
         {:else if activeTab === 'node'}
           <SettingsNodeGateway bind:config {dataDir} on:change={() => dirty = true} />
         {:else if activeTab === 'ai'}

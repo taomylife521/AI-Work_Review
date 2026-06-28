@@ -3,6 +3,11 @@
 use crate::error::AppError;
 #[cfg(target_os = "linux")]
 use crate::linux_session::{current_linux_desktop_environment, current_linux_desktop_session, LinuxDesktopSession};
+#[cfg(target_os = "linux")]
+use super::avatar::{
+    gnome_avatar_extension_needs_relogin, is_gnome_avatar_extension_enabled,
+    is_gnome_avatar_extension_installed,
+};
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
