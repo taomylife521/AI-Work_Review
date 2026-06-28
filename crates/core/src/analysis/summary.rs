@@ -162,7 +162,6 @@ pub struct SummaryAnalyzer {
     system_prompt_override: Option<String>,
     locale: AppLocale,
     pinned_blocks: Vec<String>,
-    hidden_blocks: Vec<String>,
     cached_ai_order: Option<Vec<String>>,
     client: Client,
 }
@@ -177,7 +176,6 @@ impl SummaryAnalyzer {
         system_prompt_override: Option<&str>,
         locale: AppLocale,
         pinned_blocks: Vec<String>,
-        hidden_blocks: Vec<String>,
         cached_ai_order: Option<Vec<String>>,
     ) -> Self {
         let client = Client::builder()
@@ -195,7 +193,6 @@ impl SummaryAnalyzer {
             system_prompt_override: system_prompt_override.map(|s| s.to_string()),
             locale,
             pinned_blocks,
-            hidden_blocks,
             cached_ai_order,
             client,
         }
@@ -864,7 +861,7 @@ impl Analyzer for SummaryAnalyzer {
             Some(order) => merge_ai_order(order, &default_order),
             None => default_order,
         };
-        let blocks = apply_preferences(ordered, &self.pinned_blocks, &self.hidden_blocks);
+        let blocks = apply_preferences(ordered, &self.pinned_blocks);
         let (stats_sections, section_count) = assemble_with_section_count(
             &blocks,
             stats,
@@ -984,7 +981,6 @@ mod tests {
             system_prompt_override: None,
             locale,
             pinned_blocks: Vec::new(),
-            hidden_blocks: Vec::new(),
             cached_ai_order: None,
             client: reqwest::Client::builder()
                 .no_proxy()

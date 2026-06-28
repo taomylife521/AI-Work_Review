@@ -183,27 +183,22 @@ pub fn parse_block_name(name: &str) -> Option<StatsBlock> {
     }
 }
 
-/// 根据用户偏好（pinned/hidden）调整段落顺序。
-/// pinned 中的块排到最前（按 pinned 列表顺序），hidden 中的块被移除。
-pub fn apply_preferences(
-    blocks: Vec<StatsBlock>,
-    pinned: &[String],
-    hidden: &[String],
-) -> Vec<StatsBlock> {
-    let is_hidden = |b: &StatsBlock| hidden.iter().any(|h| h == b.block_name());
-    let is_pinned = |b: &StatsBlock| pinned.iter().any(|p| p == b.block_name());
-
-    // 过滤掉 hidden
-    let filtered: Vec<StatsBlock> = blocks.into_iter().filter(|b| !is_hidden(b)).collect();
+/// 根据用户偏好（pinned）调整段落顺序：pinned 中的块排到最前（按 pinned 列表顺序）。
+///
+/// 注意：hidden 的过滤已移到前端显示层（`getVisibleReportSections`），生成时保留
+/// 全部区块。这样用户在「管理段落」恢复隐藏区块后无需重新生成即可见——之前的
+/// 实现在此过滤 hidden，导致 hidden 区块被永久写出生成内容、restore 后无法显示。
+pub fn apply_preferences(blocks: Vec<StatsBlock>, pinned: &[String]) -> Vec<StatsBlock> {
+    let is_pinned = |b: &StatsBlock>| pinned.iter().any(|p| p == b.block_name());
 
     // 分成 pinned（按 pinned 列表顺序）+ 其余（保持原顺序）
     let mut pinned_blocks = Vec::new();
     for pin_name in pinned {
-        if let Some(b) = filtered.iter().find(|b| b.block_name() == pin_name) {
+        if let Some(b) = blocks.iter().find(|b| b.block_name() == pin_name) {
             pinned_blocks.push(*b);
         }
     }
-    let rest: Vec<StatsBlock> = filtered.into_iter().filter(|b| !is_pinned(b)).collect();
+    let rest: Vec<StatsBlock> = blocks.into_iter().filter(|b| !is_pinned(b)).collect();
 
     pinned_blocks.into_iter().chain(rest).collect()
 }

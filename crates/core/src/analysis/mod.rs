@@ -110,7 +110,6 @@ pub fn create_analyzer(
     system_prompt_override: Option<&str>,
     locale: AppLocale,
     pinned_blocks: Vec<String>,
-    hidden_blocks: Vec<String>,
     cached_ai_order: Option<Vec<String>>,
 ) -> Box<dyn Analyzer + Send + Sync> {
     log::info!(
@@ -128,7 +127,6 @@ pub fn create_analyzer(
             custom_prompt,
             locale,
             pinned_blocks,
-            hidden_blocks,
         )),
         AiMode::Summary => Box::new(summary::SummaryAnalyzer::new(
             provider,
@@ -139,7 +137,6 @@ pub fn create_analyzer(
             system_prompt_override,
             locale,
             pinned_blocks,
-            hidden_blocks,
             cached_ai_order,
         )),
         AiMode::Cloud => Box::new(cloud::CloudAnalyzer::new(

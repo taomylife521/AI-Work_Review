@@ -53,7 +53,6 @@ pub struct LocalAnalyzer {
     custom_prompt: String,
     locale: AppLocale,
     pinned_blocks: Vec<String>,
-    hidden_blocks: Vec<String>,
     client: Client,
 }
 
@@ -64,7 +63,6 @@ impl LocalAnalyzer {
         custom_prompt: &str,
         locale: AppLocale,
         pinned_blocks: Vec<String>,
-        hidden_blocks: Vec<String>,
     ) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(120))
@@ -78,7 +76,6 @@ impl LocalAnalyzer {
             custom_prompt: custom_prompt.to_string(),
             locale,
             pinned_blocks,
-            hidden_blocks,
             client,
         }
     }
@@ -365,11 +362,7 @@ impl Analyzer for LocalAnalyzer {
         let mut fallback_reason = None;
 
         let (stats_sections, mut section_count) = assemble_with_section_count(
-            &apply_preferences(
-                default_local_order(),
-                &self.pinned_blocks,
-                &self.hidden_blocks,
-            ),
+            &apply_preferences(default_local_order(), &self.pinned_blocks),
             stats,
             locale,
             &category_name_overrides,

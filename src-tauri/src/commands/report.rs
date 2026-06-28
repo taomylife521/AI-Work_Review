@@ -197,7 +197,6 @@ pub(crate) async fn generate_report_inner(
         config.daily_report_system_prompt_override.as_deref(),
         report_locale,
         config.daily_report_pinned_blocks.clone(),
-        config.daily_report_hidden_blocks.clone(),
         if config.daily_report_last_ai_order.is_empty() {
             None
         } else {
