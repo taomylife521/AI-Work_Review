@@ -1523,11 +1523,10 @@
 
 .overview-command-deck {
   @apply flex flex-wrap items-center gap-2;
-  margin-bottom: 1rem;
-  padding: 0 0 1rem;
+  margin-bottom: 0.5rem;
+  padding: 0;
   background: transparent;
   border: none;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.78);
   box-shadow: none;
 }
 
