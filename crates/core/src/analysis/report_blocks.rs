@@ -189,7 +189,7 @@ pub fn parse_block_name(name: &str) -> Option<StatsBlock> {
 /// 全部区块。这样用户在「管理段落」恢复隐藏区块后无需重新生成即可见——之前的
 /// 实现在此过滤 hidden，导致 hidden 区块被永久写出生成内容、restore 后无法显示。
 pub fn apply_preferences(blocks: Vec<StatsBlock>, pinned: &[String]) -> Vec<StatsBlock> {
-    let is_pinned = |b: &StatsBlock>| pinned.iter().any(|p| p == b.block_name());
+    let is_pinned = |b: &StatsBlock| pinned.iter().any(|p| p == b.block_name());
 
     // 分成 pinned（按 pinned 列表顺序）+ 其余（保持原顺序）
     let mut pinned_blocks = Vec::new();
