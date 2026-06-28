@@ -53,7 +53,8 @@ function localizeRuntimeStatusMessage(message) {
     return t('updater.noInstallAvailable');
   }
 
-  return text;
+  // 未识别的后端状态串原样返回会泄漏中文，回退到通用文案
+  return '';
 }
 
 async function getRuntimePlatform() {

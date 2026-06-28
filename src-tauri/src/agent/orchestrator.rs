@@ -416,13 +416,27 @@ pub fn fast_answer(
     // 分类分布
     lines.push(format!("{}：", lbl_category));
     for (cat_key, dur) in &sorted_cats {
-        let cn = get_category_name(cat_key);
+        let cat_display = if is_chinese {
+            get_category_name(cat_key).to_string()
+        } else {
+            match cat_key.as_str() {
+                "development" => "Development",
+                "browser" => "Browser",
+                "communication" => "Communication",
+                "office" => "Office",
+                "design" => "Design",
+                "entertainment" => "Leisure",
+                "other" => "Other",
+                _ => cat_key,
+            }
+            .to_string()
+        };
         let pct = if total > 0 {
             *dur as f64 / total as f64 * 100.0
         } else {
             0.0
         };
-        lines.push(format!("  - {cn}: {} ({pct:.0}%)", fmt_dur(*dur)));
+        lines.push(format!("  - {cat_display}: {} ({pct:.0}%)", fmt_dur(*dur)));
     }
 
     // Top 5 应用
