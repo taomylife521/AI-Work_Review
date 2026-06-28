@@ -6,6 +6,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_locale() -> String {
+    "zh-CN".to_string()
+}
+
 /// AI 提供商类型
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -630,6 +634,9 @@ pub struct WorkTimeSegment {
 pub struct AppConfig {
     /// 截屏间隔（秒）
     pub screenshot_interval: u64,
+    /// 界面语言（zh-CN / en / zh-TW），用于后端托盘菜单等本地化
+    #[serde(default = "default_locale")]
+    pub locale: String,
     /// 空闲检测阈值（分钟）：超过此时间无键鼠输入则进入疑似空闲
     #[serde(default = "default_idle_threshold_minutes")]
     pub idle_threshold_minutes: u32,
@@ -921,6 +928,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             screenshot_interval: 30,
+            locale: default_locale(),
             idle_threshold_minutes: default_idle_threshold_minutes(),
             ai_mode: AiMode::Local,
             text_model: ModelConfig::default_text(),

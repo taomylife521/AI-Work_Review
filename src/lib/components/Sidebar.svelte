@@ -55,6 +55,9 @@
     emitTo('avatar', 'locale-changed', normalizedLocale).catch((error) => {
       console.warn('同步桌宠语言失败:', error);
     });
+    invoke('set_locale', { locale: normalizedLocale }).catch((error) => {
+      console.warn('同步后端语言失败:', error);
+    });
   }
 
   function handleWindowClick(event) {
