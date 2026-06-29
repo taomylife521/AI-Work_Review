@@ -3506,8 +3506,10 @@ async fn main() {
 
             if should_hide_main_window {
                 let _ = window.hide();
+                let _ = app.emit("main-window-visibility", false);
             } else {
                 let _ = window.show();
+                let _ = app.emit("main-window-visibility", true);
             }
 
             let state_clone = state.inner().clone();

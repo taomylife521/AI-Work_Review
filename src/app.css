@@ -1521,6 +1521,11 @@
   background: var(--editorial-surface-featured);
 }
 
+/* #118: 主窗口隐藏时暂停所有 CSS 动画，降低后台 WebView2 GPU 占用 */
+.app-window-hidden * {
+  animation-play-state: paused !important;
+}
+
 .overview-command-deck {
   @apply flex flex-wrap items-center gap-2;
   margin-bottom: 0.5rem;

@@ -265,6 +265,11 @@
     let disposed = false;
     const pendingCleanup = [];
 
+    // #118: 主窗口隐藏（静默驻留/轻量）时暂停 CSS 动画，降低后台 WebView2 GPU 占用
+    listen('main-window-visibility', (event) => {
+      document.body.classList.toggle('app-window-hidden', event.payload === false);
+    }).then((unlisten) => pendingCleanup.push(unlisten));
+
     // 同步注册的 locale subscription 立即可清理
     pendingCleanup.push(() => unsubscribeLocale());
     pendingCleanup.push(() => window.removeEventListener('dragover', preventFileDrop));
