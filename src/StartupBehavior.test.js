@@ -14,6 +14,6 @@ test('主窗口应默认隐藏并由启动流程决定是否显示', async () =>
   assert.equal(tauriConfig.app.windows[0].visible, false);
   assert.match(
     mainSource,
-    /if should_hide_main_window \{\s*let _ = window\.hide\(\);\s*\} else \{\s*let _ = window\.show\(\);\s*\}/
+    /if should_hide_main_window \{\s*let _ = window\.hide\(\);\s*let _ = app\.emit\("main-window-visibility", false\);\s*\} else \{\s*let _ = window\.show\(\);\s*let _ = app\.emit\("main-window-visibility", true\);\s*\}/
   );
 });
