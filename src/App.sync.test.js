@@ -13,7 +13,7 @@ async function readCommandsSource() {
 test('应用壳层应监听录制状态变更事件并同步侧边栏状态', async () => {
   const source = await readFile(new URL('./App.svelte', import.meta.url), 'utf8');
 
-  assert.match(source, /listen\('recording-state-changed'/);
+  assert.match(source, /safeListen\('recording-state-changed'/);
   assert.match(source, /isRecording\s*=\s*event\.payload\.isRecording/);
   assert.match(source, /isPaused\s*=\s*event\.payload\.isPaused/);
 });
@@ -31,7 +31,7 @@ test('托盘和设置的配置变更应回推到前端缓存与设置页', async
     ])
   ).join('\n');
 
-  assert.match(appSource, /listen\('config-changed'/);
+  assert.match(appSource, /safeListen\('config-changed'/);
   assert.match(appSource, /cache\.setConfig\(event\.payload\)/);
   assert.match(settingsSource, /cache\.subscribe\(\(state\)\s*=>/);
   assert.match(settingsSource, /config\s*=\s*state\.config/);
