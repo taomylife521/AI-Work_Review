@@ -798,7 +798,7 @@
   });
 </script>
 
-<div class="relative h-screen w-screen overflow-visible bg-transparent select-none" on:mousedown={(e) => { if (e.target.closest('button, a, section, .avatar-popover-anchor, [role="button"]')) return; startAvatarDrag(e); }}>
+<div role="presentation" class="relative h-screen w-screen overflow-visible bg-transparent select-none" on:mousedown={(e) => { if (e.target.closest('button, a, section, .avatar-popover-anchor, [role="button"]')) return; startAvatarDrag(e); }}>
   <div class="absolute inset-x-0 top-0 h-[86px] overflow-visible">
     <AvatarPopover {bubble} onClose={dismissBubble} />
   </div>

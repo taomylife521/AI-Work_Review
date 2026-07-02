@@ -282,6 +282,16 @@
     saveConfigQuietly();
   }
 
+  function toggleAvatarProactiveAi() {
+    if (!config.avatar_enabled) {
+      return;
+    }
+
+    config.avatar_proactive_ai_enabled = !Boolean(config.avatar_proactive_ai_enabled);
+    dispatch('change', config);
+    saveConfigQuietly();
+  }
+
   function handleBreakReminderIntervalChange() {
     dispatch('change', config);
     saveConfigQuietly();
@@ -581,6 +591,33 @@
         </select>
       </div>
     {/if}
+
+    <div class="settings-muted text-[12px] leading-5">
+      {t('settingsAppearance.avatarLocalReminderNote')}
+    </div>
+
+    <hr class="border-slate-200 dark:border-[#30363d]" />
+
+    <div class="flex items-start justify-between gap-4">
+      <div>
+        <div class="settings-text">{t('settingsAppearance.avatarProactiveAi')}</div>
+        <div class="settings-muted mt-1 text-[12px]">{t('settingsAppearance.avatarProactiveAiDescription')}</div>
+        <div class="settings-muted mt-1 text-[12px]">{t('settingsAppearance.avatarProactiveAiDataNotice')}</div>
+        {#if !config.avatar_enabled}
+          <div class="settings-muted mt-1 text-[12px]">{t('settingsAppearance.avatarProactiveAiRequiresAvatar')}</div>
+        {/if}
+      </div>
+      <button
+        type="button"
+        on:click={toggleAvatarProactiveAi}
+        class="switch-track {config.avatar_proactive_ai_enabled && config.avatar_enabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'} {!config.avatar_enabled ? 'cursor-not-allowed opacity-50' : ''}"
+        disabled={!config.avatar_enabled}
+        aria-pressed={config.avatar_proactive_ai_enabled}
+        aria-label={t('settingsAppearance.avatarProactiveAi')}
+      >
+        <span class="switch-thumb {config.avatar_proactive_ai_enabled && config.avatar_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
+      </button>
+    </div>
   </div>
 </div>
 {/if}

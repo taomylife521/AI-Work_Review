@@ -26,10 +26,10 @@ test('应用应提供 A/B/C 三套可持久化界面风格并作用到根壳层'
   assert.match(configSource, /pub ui_visual_style: String/);
   assert.match(configSource, /default_ui_visual_style/);
   assert.match(configSource, /normalize_ui_visual_style/);
-  assert.match(configSource, /"b"\.to_string\(\)/);
+  assert.match(configSource, /"c"\.to_string\(\)/);
 
   assert.match(settingsSource, /config\.ui_visual_style/);
-  assert.match(settingsSource, /config\.ui_visual_style = 'b'/);
+  assert.match(settingsSource, /config\.ui_visual_style = 'c'/);
   assert.match(settingsSource, /import SettingsAppearance/);
   assert.match(settingsSource, /settings\.tabs\.appearance/);
   assert.match(settingsSource, /activeTab === 'appearance'/);
@@ -54,7 +54,9 @@ test('应用应提供 A/B/C 三套可持久化界面风格并作用到根壳层'
   assert.match(appearanceSource, /settingsAppearance\.uiVisualStyleApplyHint/);
 
   assert.match(appSource, /uiVisualStyle/);
+  assert.match(appSource, /let uiVisualStyle = 'c'/);
   assert.match(appSource, /applyUiVisualStyle/);
+  assert.match(appSource, /return \['a', 'b', 'c'\]\.includes\(nextStyle\) \? nextStyle : 'c'/);
   assert.match(appSource, /ui-style-\{uiVisualStyle\}/);
   assert.match(appSource, /ui-visual-style-changed/);
   assert.match(appSource, /app-shell-ambient/);

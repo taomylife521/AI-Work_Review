@@ -743,7 +743,7 @@
       <!-- 系统提示词覆盖 -->
       <div class="mt-4 pt-3 border-t border-slate-200 dark:border-[#30363d]">
         <div class="flex items-center justify-between mb-2">
-          <label class="text-sm font-medium text-slate-700 dark:text-[#adbac7]">
+          <label for="daily-report-system-prompt-override" class="text-sm font-medium text-slate-700 dark:text-[#adbac7]">
             {t('report.systemPromptOverride')}
           </label>
           <button
@@ -757,6 +757,7 @@
         </div>
         <p class="text-xs text-slate-400 dark:text-[#636c76] mb-2">{t('report.systemPromptOverrideHint')}</p>
         <textarea
+          id="daily-report-system-prompt-override"
           rows="6"
           class="control-input resize-y min-h-[100px] font-mono text-xs"
           bind:value={config.daily_report_system_prompt_override}
@@ -950,10 +951,11 @@
 
 <!-- 段落编辑弹窗 -->
 {#if editingSection >= 0}
-  <div class="modal-overlay" on:click|self={cancelEditSection}>
-    <div class="modal-panel" on:click|stopPropagation>
+  <div class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="report-edit-section-title">
+    <button type="button" class="absolute inset-0 cursor-default" aria-label={t('report.cancelEdit')} on:click={cancelEditSection}></button>
+    <div class="modal-panel relative z-10">
       <div class="modal-header">
-        <h3 class="modal-title">{t('report.editSection')}</h3>
+        <h3 id="report-edit-section-title" class="modal-title">{t('report.editSection')}</h3>
         <button class="modal-close" on:click={cancelEditSection}>
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -984,18 +986,20 @@
 <!-- 表格 / 标题 / 列表等 markdown 样式已统一放到 app.css .markdown-body -->
 
 {#if showPresetModal}
-  <div class="modal-overlay" on:click|self={() => { showPresetModal = false; }}>
-    <div class="modal-panel" style="max-width: 36rem;" on:click|stopPropagation>
+  <div class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="report-preset-dialog-title">
+    <button type="button" class="absolute inset-0 cursor-default" aria-label={t('report.cancelEdit')} on:click={() => { showPresetModal = false; }}></button>
+    <div class="modal-panel relative z-10" style="max-width: 36rem;">
       <div class="modal-header">
-        <h3 class="modal-title">{editingPresetIndex >= 0 ? editingPresetName || t('report.presetsTitle') : t('report.addPreset')}</h3>
+        <h3 id="report-preset-dialog-title" class="modal-title">{editingPresetIndex >= 0 ? editingPresetName || t('report.presetsTitle') : t('report.addPreset')}</h3>
         <button class="modal-close" on:click={() => { showPresetModal = false; }}>
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
         </button>
       </div>
       <div class="modal-body space-y-4">
         <div>
-          <label class="block text-xs font-medium text-slate-500 dark:text-[#7d8590] mb-1.5">{t('report.presetNamePlaceholder')}</label>
+          <label for="report-preset-name" class="block text-xs font-medium text-slate-500 dark:text-[#7d8590] mb-1.5">{t('report.presetNamePlaceholder')}</label>
           <input
+            id="report-preset-name"
             type="text"
             class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-[#484f58] bg-white dark:bg-[#21262d] text-slate-900 dark:text-[#c9d1d9] placeholder-slate-400 dark:placeholder-[#636c76] focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-400 transition-colors"
             placeholder={t('report.presetNamePlaceholder')}
@@ -1003,8 +1007,9 @@
           />
         </div>
         <div>
-          <label class="block text-xs font-medium text-slate-500 dark:text-[#7d8590] mb-1.5">{t('report.promptLabel')}</label>
+          <label for="report-preset-prompt" class="block text-xs font-medium text-slate-500 dark:text-[#7d8590] mb-1.5">{t('report.promptLabel')}</label>
           <textarea
+            id="report-preset-prompt"
             class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-[#484f58] bg-white dark:bg-[#21262d] text-slate-900 dark:text-[#c9d1d9] placeholder-slate-400 dark:placeholder-[#636c76] focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-400 transition-colors resize-y min-h-[160px] leading-relaxed"
             placeholder={t('report.presetPromptPlaceholder')}
             bind:value={editingPresetPrompt}
@@ -1056,10 +1061,11 @@
 {/if}
 
 {#if showBatchExportModal}
-  <div class="modal-overlay" on:click|self={() => { if (!batchExporting) showBatchExportModal = false; }}>
-    <div class="modal-panel" style="max-width: 32rem;" on:click|stopPropagation>
+  <div class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="report-batch-export-dialog-title">
+    <button type="button" class="absolute inset-0 cursor-default" aria-label={t('report.cancelEdit')} on:click={() => { if (!batchExporting) showBatchExportModal = false; }}></button>
+    <div class="modal-panel relative z-10" style="max-width: 32rem;">
       <div class="modal-header">
-        <h3 class="modal-title">{t('report.batchExportModalTitle')}</h3>
+        <h3 id="report-batch-export-dialog-title" class="modal-title">{t('report.batchExportModalTitle')}</h3>
         <button
           class="modal-close"
           on:click={() => { if (!batchExporting) showBatchExportModal = false; }}

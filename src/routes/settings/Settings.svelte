@@ -96,7 +96,10 @@
         config.localhost_api_host = null;
       }
       if (!['a', 'b', 'c'].includes(config.ui_visual_style)) {
-        config.ui_visual_style = 'b';
+        config.ui_visual_style = 'c';
+      }
+      if (typeof config.avatar_proactive_ai_enabled !== 'boolean') {
+        config.avatar_proactive_ai_enabled = false;
       }
       if (typeof config.telegram_bot_enabled !== 'boolean') {
         config.telegram_bot_enabled = false;

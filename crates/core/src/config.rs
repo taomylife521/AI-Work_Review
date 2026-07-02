@@ -864,6 +864,9 @@ pub struct AppConfig {
     /// 桌宠互动风格
     #[serde(default = "default_avatar_persona")]
     pub avatar_persona: String,
+    /// 桌宠是否允许调用文本模型生成不定时提醒
+    #[serde(default)]
+    pub avatar_proactive_ai_enabled: bool,
     /// 桌宠鼠标穿透（点击事件穿透到下层窗口）
     #[serde(default)]
     pub avatar_click_through: bool,
@@ -921,7 +924,7 @@ fn default_avatar_persona() -> String {
     "assistant".to_string()
 }
 fn default_ui_visual_style() -> String {
-    "b".to_string()
+    "c".to_string()
 }
 
 impl Default for AppConfig {
@@ -1020,6 +1023,7 @@ impl Default for AppConfig {
             avatar_opacity: default_avatar_opacity(),
             avatar_preset: default_avatar_preset(),
             avatar_persona: default_avatar_persona(),
+            avatar_proactive_ai_enabled: false,
             avatar_click_through: false,
             avatar_followups: Vec::new(),
             avatar_x: None,
@@ -1637,15 +1641,22 @@ mod tests {
     }
 
     #[test]
+    fn 桌宠模型生成提醒默认应关闭() {
+        let config = AppConfig::default();
+
+        assert!(!config.avatar_proactive_ai_enabled);
+    }
+
+    #[test]
     fn 界面风格默认应保持当前柔和层次且只允许三套方案() {
         let config = AppConfig::default();
 
         assert_eq!(config.ui_visual_style, default_ui_visual_style());
-        assert_eq!(config.ui_visual_style, "b");
+        assert_eq!(config.ui_visual_style, "c");
         assert_eq!(normalize_ui_visual_style(" a "), "a");
         assert_eq!(normalize_ui_visual_style("B"), "b");
         assert_eq!(normalize_ui_visual_style("c"), "c");
-        assert_eq!(normalize_ui_visual_style("unknown"), "b");
+        assert_eq!(normalize_ui_visual_style("unknown"), "c");
     }
 
     #[test]

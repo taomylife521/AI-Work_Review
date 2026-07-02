@@ -17,3 +17,47 @@ test('主窗口应默认隐藏并由启动流程决定是否显示', async () =>
     /if should_hide_main_window \{\s*let _ = window\.hide\(\);\s*let _ = app\.emit\("main-window-visibility", false\);\s*\} else \{\s*let _ = window\.show\(\);\s*let _ = app\.emit\("main-window-visibility", true\);\s*\}/
   );
 });
+
+test('主窗口可见性应在前端挂载时补偿同步并在重新显示时恢复动画', async () => {
+  const [appSource, mainSource] = await Promise.all([
+    readFile(new URL('./App.svelte', import.meta.url), 'utf8'),
+    readFile(new URL('../src-tauri/src/main.rs', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(appSource, /await appWindow\.isVisible\(\)/);
+  assert.match(
+    appSource,
+    /document\.body\.classList\.toggle\('app-window-hidden',\s*visible === false\)/
+  );
+  assert.match(
+    appSource,
+    /safeListen\('main-window-visibility',\s*\(event\) => \{\s*syncMainWindowVisibility\(event\.payload\);\s*\}/
+  );
+  assert.match(
+    mainSource,
+    /let _ = window\.show\(\);\s*let _ = app\.emit\("main-window-visibility", true\);/
+  );
+});
+
+test('浏览器预览环境缺少 Tauri window metadata 时应用仍应可挂载', async () => {
+  const appSource = await readFile(new URL('./App.svelte', import.meta.url), 'utf8');
+
+  assert.match(appSource, /function getSafeCurrentWebviewWindow\(\)/);
+  assert.match(appSource, /try \{\s*return getCurrentWebviewWindow\(\);/);
+  assert.match(appSource, /catch \(e\) \{[\s\S]*return createBrowserPreviewWindow\(\);/);
+  assert.match(appSource, /const appWindow = getSafeCurrentWebviewWindow\(\);/);
+  assert.doesNotMatch(appSource, /const appWindow = getCurrentWebviewWindow\(\);/);
+});
+
+test('浏览器预览环境缺少 Tauri event metadata 时主应用事件监听不应中断挂载', async () => {
+  const appSource = await readFile(new URL('./App.svelte', import.meta.url), 'utf8');
+
+  assert.match(appSource, /async function safeListen\(eventName, handler\)/);
+  assert.match(appSource, /return await listen\(eventName, handler\);/);
+  assert.match(appSource, /return \(\) => \{\};/);
+  assert.match(appSource, /safeListen\('main-window-visibility'/);
+  assert.match(appSource, /await safeListen\('recording-state-changed'/);
+  assert.match(appSource, /await safeListen\('config-changed'/);
+  assert.match(appSource, /await safeListen\('avatar-open-timeline'/);
+  assert.match(appSource, /await safeListen\('screenshot-taken'/);
+});

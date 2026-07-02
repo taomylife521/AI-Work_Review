@@ -5,6 +5,7 @@
   import StatsCard from '../lib/components/StatsCard.svelte';
   import AppUsageChart from '../lib/components/AppUsageChart.svelte';
   import ActivityHourlyChart from '../lib/components/ActivityHourlyChart.svelte';
+  import LocalizedDatePicker from '../lib/components/LocalizedDatePicker.svelte';
   import { cache } from '../lib/stores/cache.js';
   import { confirm } from '../lib/stores/confirm.js';
   import { showToast } from '../lib/stores/toast.js';
@@ -21,6 +22,15 @@
   import { resolveAppIconSrc } from '../lib/utils/appVisuals.js';
   import { formatBrowserUrlForDisplay } from '../lib/utils/browserUrl.js';
   import { semanticCategoryStore } from '../lib/stores/categories.js';
+
+  async function safeListen(eventName, handler) {
+    try {
+      return await listen(eventName, handler);
+    } catch (e) {
+      console.warn(`当前环境无法注册 Tauri 事件 ${eventName}，已跳过:`, e);
+      return () => {};
+    }
+  }
 
   function getLocalDateString() {
     const now = new Date();
@@ -80,20 +90,6 @@
       dateFrom: formatIsoDate(monday),
       dateTo: formatIsoDate(anchor),
     };
-  }
-
-  function formatOverviewDateInput(dateValue) {
-    return dateValue ? dateValue.replace(/-/g, '/') : '';
-  }
-
-  function parseOverviewDateInput(value) {
-    const normalized = value.trim().replace(/[.]/g, '-').replace(/[\/]/g, '-');
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
-      return null;
-    }
-
-    const parsed = parseDateString(normalized);
-    return Number.isNaN(parsed.getTime()) ? null : normalized;
   }
 
   function formatIsoDate(date) {
@@ -183,10 +179,6 @@
     return acc;
   }, {});
   let overviewViewModeReady = false;
-  let overviewDateInputFrom = formatOverviewDateInput(selectedDateFrom);
-  let overviewDateInputTo = formatOverviewDateInput(selectedDateTo);
-  let editingOverviewDateFrom = false;
-  let editingOverviewDateTo = false;
   
   let expandedDomains = new Set();
   let editingDomainKey = null;
@@ -333,13 +325,7 @@
     : overviewMode === 'date'
       ? t(isSingleSelectedDate ? 'overview.noAppStatsDate' : 'overview.noAppStatsRange')
       : t('overview.noAppStatsToday');
-  $: if (!editingOverviewDateFrom && overviewDateInputFrom !== formatOverviewDateInput(selectedDateFrom)) {
-    overviewDateInputFrom = formatOverviewDateInput(selectedDateFrom);
-  }
-  $: if (!editingOverviewDateTo && overviewDateInputTo !== formatOverviewDateInput(selectedDateTo)) {
-    overviewDateInputTo = formatOverviewDateInput(selectedDateTo);
-  }
-  
+
   // 订阅全局图标缓存 store
   let appIcons = {};
   const unsubIcons = appIconStore.subscribe(v => appIcons = v);
@@ -467,32 +453,9 @@
 
   function handleOverviewDateChange() {
     normalizeSelectedDateRange();
-    overviewDateInputFrom = formatOverviewDateInput(selectedDateFrom);
-    overviewDateInputTo = formatOverviewDateInput(selectedDateTo);
     selectedBrowser = null;
     cancelDomainSemanticEdit();
     loadStats(true);
-  }
-
-  function commitOverviewDateInput(field) {
-    const nextValue = field === 'start' ? overviewDateInputFrom : overviewDateInputTo;
-    const parsed = parseOverviewDateInput(nextValue);
-
-    if (!parsed) {
-      overviewDateInputFrom = formatOverviewDateInput(selectedDateFrom);
-      overviewDateInputTo = formatOverviewDateInput(selectedDateTo);
-      return;
-    }
-
-    if (field === 'start') {
-      selectedDateFrom = parsed;
-      editingOverviewDateFrom = false;
-    } else {
-      selectedDateTo = parsed;
-      editingOverviewDateTo = false;
-    }
-
-    handleOverviewDateChange();
   }
 
   function stepOverviewDateBoundary(field, offsetDays) {
@@ -693,7 +656,7 @@
     document.addEventListener('visibilitychange', handleVisibilityChange);
     
     // 监听 Tauri 截屏事件（后备）
-    unlisten = await listen('screenshot-taken', () => {
+    unlisten = await safeListen('screenshot-taken', () => {
       if (!document.hidden && shouldAutoRefreshOverview()) {
         loadStats(true);
       }
@@ -789,39 +752,15 @@
             </svg>
           </button>
 
-          <div class="overview-date-field">
-            <span class="overview-date-label">{t('overview.rangeStart')}</span>
-            <input
-              type="text"
-              bind:value={overviewDateInputFrom}
-              class="overview-date-input"
-              inputmode="numeric"
-              placeholder="YYYY/MM/DD"
-              spellcheck="false"
-              autocomplete="off"
-              on:focus={() => { editingOverviewDateFrom = true; }}
-              on:blur={() => commitOverviewDateInput('start')}
-              on:keydown={(event) => event.key === 'Enter' && commitOverviewDateInput('start')}
-            />
-          </div>
-
-          <span class="overview-date-separator">-</span>
-
-          <div class="overview-date-field">
-            <span class="overview-date-label">{t('overview.rangeEnd')}</span>
-            <input
-              type="text"
-              bind:value={overviewDateInputTo}
-              class="overview-date-input"
-              inputmode="numeric"
-              placeholder="YYYY/MM/DD"
-              spellcheck="false"
-              autocomplete="off"
-              on:focus={() => { editingOverviewDateTo = true; }}
-              on:blur={() => commitOverviewDateInput('end')}
-              on:keydown={(event) => event.key === 'Enter' && commitOverviewDateInput('end')}
-            />
-          </div>
+          <LocalizedDatePicker
+            mode="range"
+            bind:startDate={selectedDateFrom}
+            bind:endDate={selectedDateTo}
+            localeCode={currentLocale}
+            max={getLocalDateString()}
+            triggerClass="overview-date-trigger"
+            on:change={handleOverviewDateChange}
+          />
 
           <button
             type="button"

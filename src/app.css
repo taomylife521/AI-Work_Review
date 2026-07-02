@@ -667,20 +667,8 @@
   max-width: 100%;
 }
 
-.overview-date-field {
-  @apply inline-flex min-w-0 items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 py-1.5 dark:border-[#30363d] dark:bg-[#21262d];
-}
-
-.overview-date-label {
-  @apply text-[8px] font-medium text-slate-400 dark:text-[#636c76];
-}
-
-.overview-date-input {
-  @apply w-[6.8rem] bg-transparent text-[15px] font-medium tracking-[0.01em] text-slate-700 outline-none dark:text-[#c9d1d9];
-}
-
-.overview-date-separator {
-  @apply px-0.5 text-[11px] text-slate-400 dark:text-[#484f58];
+.overview-date-trigger {
+  @apply inline-flex min-h-9 min-w-[10.5rem] items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent dark:border-[#30363d] dark:bg-[#21262d] dark:text-[#adbac7] dark:hover:bg-[#30363d];
 }
 
 .page-action-warn {
@@ -2505,7 +2493,7 @@
   color: #c4b5fd;
 }
 
-/* ===== 界面风格切换：B 为当前默认，A/C 只通过根 class 覆盖视觉变量 ===== */
+/* ===== 界面风格切换：C 为当前默认，A/B/C 只通过根 class 覆盖视觉变量 ===== */
 
 .app-shell.ui-style-b {
   --ui-visual-style: "b";
@@ -2559,7 +2547,7 @@
 .app-shell.ui-style-a .page-title-badge,
 .app-shell.ui-style-a .page-control-btn,
 .app-shell.ui-style-a .page-control-input,
-.app-shell.ui-style-a .overview-date-field,
+.app-shell.ui-style-a .overview-date-trigger,
 .app-shell.ui-style-a .page-status-chip {
   border-radius: 0.75rem;
 }
@@ -2616,13 +2604,13 @@
 
 .app-shell.ui-style-c {
   --ui-visual-style: "c";
-  --editorial-shell-bg: #eef2f6;
+  --editorial-shell-bg: #f3f5f7;
   --editorial-surface-featured: #ffffff;
   --editorial-surface-subtle: #f8fafc;
 }
 
 .app-shell.ui-style-c .app-shell-ambient {
-  opacity: 0.36;
+  display: none;
 }
 
 .app-shell.ui-style-c .app-shell-stage {
@@ -2644,9 +2632,11 @@
 
 .app-shell.ui-style-c .app-shell-sidebar-frame,
 .app-shell.ui-style-c .app-shell-main-frame {
-  --app-shell-frame-radius: 1.2rem;
-  --app-shell-inner-radius: 0.98rem;
+  --app-shell-frame-radius: 0.72rem;
+  --app-shell-inner-radius: 0.58rem;
   padding: 0.14rem;
+  border-color: rgba(203, 213, 225, 0.82);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
 }
 
 .app-shell.ui-style-c .page-shell {
@@ -2661,8 +2651,9 @@
 .app-shell.ui-style-c .page-card,
 .app-shell.ui-style-c .page-card-soft,
 .app-shell.ui-style-c .settings-card {
-  border-radius: 0.75rem;
+  border-radius: 0.5rem;
   padding: 0.85rem;
+  box-shadow: none;
 }
 
 .app-shell.ui-style-c .overview-command-deck {
@@ -2687,14 +2678,24 @@
 
 .app-shell.ui-style-c .sidebar-nav-item {
   padding: 0.5rem 0.65rem;
-  border-radius: 0.72rem;
+  border-radius: 0.5rem;
   font-size: 0.86rem;
 }
 
 .app-shell.ui-style-c .page-title-badge {
   width: 2.1rem;
   height: 2.1rem;
-  border-radius: 0.72rem;
+  border-radius: 0.5rem;
+}
+
+.app-shell.ui-style-c .page-control-btn,
+.app-shell.ui-style-c .page-control-input,
+.app-shell.ui-style-c .overview-date-trigger,
+.app-shell.ui-style-c .page-status-chip,
+.app-shell.ui-style-c .localized-date-picker__popover,
+.app-shell.ui-style-c .localized-date-picker__selection-chip,
+.app-shell.ui-style-c .localized-date-picker__nav {
+  border-radius: 0.5rem;
 }
 
 .app-shell.ui-style-c .page-title-copy h2 {
@@ -2714,7 +2715,7 @@
 
 .app-shell.ui-style-c .overview-summary-grid > :where(a, div) {
   min-height: 88px;
-  border-radius: 0.75rem;
+  border-radius: 0.5rem;
   padding: 0.85rem;
 }
 
@@ -2735,7 +2736,7 @@
 .app-shell.ui-style-c .overview-summary-grid > :where(a, div) > div > div:last-child {
   width: 2.2rem;
   height: 2.2rem;
-  border-radius: 0.72rem;
+  border-radius: 0.5rem;
 }
 
 .dark .app-shell.ui-style-c {

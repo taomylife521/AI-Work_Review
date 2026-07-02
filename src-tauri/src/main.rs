@@ -241,6 +241,7 @@ pub(crate) fn reveal_main_window(
     align_window_to_reference_monitor(&window, reference_window.as_ref());
     let _ = window.unminimize();
     let _ = window.show();
+    let _ = app.emit("main-window-visibility", true);
     let _ = window.set_focus();
     sync_effective_dock_visibility(app);
     Ok(())
@@ -1386,6 +1387,22 @@ fn avatar_activity_decision(
     }
 }
 
+fn avatar_proactive_ai_should_run(
+    avatar_enabled: bool,
+    avatar_proactive_ai_enabled: bool,
+    is_paused: bool,
+    text_model: &work_review_core::config::ModelConfig,
+    now_ms: u64,
+    next_check_ms: u64,
+) -> bool {
+    avatar_enabled
+        && avatar_proactive_ai_enabled
+        && !is_paused
+        && !text_model.endpoint.trim().is_empty()
+        && !text_model.model.trim().is_empty()
+        && now_ms >= next_check_ms
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct AvatarTransitionDecision {
     emit_state: Option<avatar_engine::AvatarStatePayload>,
@@ -1493,7 +1510,7 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
     let mut cached_rules_signature: u64 = 0;
     const IDLE_TIMEOUT_MINUTES: u64 = 3;
     let idle_detector = idle_detector::IdleDetector::new(IDLE_TIMEOUT_MINUTES);
-    // 桌宠主动开口（AI 自定节奏）运行时状态
+    // 桌宠模型生成提醒运行时状态
     let task_start_ms = chrono::Local::now().timestamp_millis().max(0) as u64;
     let mut next_proactive_check_ms: u64 = task_start_ms + 10 * 60_000; // 启动后 10 分钟首次
     let mut proactive_mood: Option<(String, u64)> = None; // (mode, expires_ms)
@@ -1503,6 +1520,7 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
     loop {
         let (
             avatar_enabled,
+            avatar_proactive_ai_enabled,
             avatar_generating_report,
             avatar_opacity,
             avatar_preset,
@@ -1515,6 +1533,7 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
             let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
             (
                 state_guard.config.avatar_enabled,
+                state_guard.config.avatar_proactive_ai_enabled,
                 state_guard.avatar_generating_report,
                 state_guard.config.avatar_opacity,
                 state_guard.config.avatar_preset.clone(),
@@ -1746,7 +1765,7 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
         pending_avatar_hits = transition_decision.pending_hits;
 
         if let Some(mut next_avatar_state) = transition_decision.emit_state {
-            // 桌宠主动开口的情绪覆盖：AI 给的表情未过期则覆盖 mode
+            // 桌宠模型生成提醒的情绪覆盖：AI 给的表情未过期则覆盖 mode
             let mood_now_ms = chrono::Local::now().timestamp_millis().max(0) as u64;
             match &proactive_mood {
                 Some((mood_mode, expires_ms)) if mood_now_ms < *expires_ms => {
@@ -1866,15 +1885,16 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
             }
         }
 
-        // 桌宠主动开口（AI 自定节奏）：到点才调一次 LLM，模型自主决定开口时机/内容/语气
+        // 桌宠模型生成提醒：到点才调一次文本模型，模型自主决定是否提示和提示内容
         let proactive_now_ms = chrono::Local::now().timestamp_millis().max(0) as u64;
-        let has_text_model =
-            !text_model.endpoint.trim().is_empty() && !text_model.model.trim().is_empty();
-        if avatar_enabled
-            && !is_paused
-            && has_text_model
-            && proactive_now_ms >= next_proactive_check_ms
-        {
+        if avatar_proactive_ai_should_run(
+            avatar_enabled,
+            avatar_proactive_ai_enabled,
+            is_paused,
+            &text_model,
+            proactive_now_ms,
+            next_proactive_check_ms,
+        ) {
             let active_minutes = proactive_now_ms.saturating_sub(active_app_since_ms) / 60_000;
             let recent_switches = recent_switches_ms.len() as u32;
             let (work_seconds_today, hour, minute) = {
@@ -3459,6 +3479,7 @@ async fn main() {
                     == MainWindowCloseBehavior::HideToTray
                 {
                     let _ = window.hide();
+                    let _ = window.app_handle().emit("main-window-visibility", false);
                     api.prevent_close();
                 } else if let Some(lifecycle_state) =
                     window.try_state::<Arc<Mutex<AppLifecycleState>>>()
@@ -3893,7 +3914,8 @@ async fn main() {
 mod tests {
     use super::{
         advance_break_reminder, avatar_activity_decision, avatar_monitor_poll_interval_ms,
-        avatar_monitor_poll_interval_ms_for_platform, avatar_transition_decision,
+        avatar_monitor_poll_interval_ms_for_platform, avatar_proactive_ai_should_run,
+        avatar_transition_decision,
         browser_change_capture_min_interval_ms, effective_dock_visibility,
         launch_args_contain_autostart, main_window_close_behavior, monitoring_poll_interval_ms,
         monitoring_poll_interval_ms_for_platform, persist_previous_activity_backfill,
@@ -3910,7 +3932,9 @@ mod tests {
     use crate::avatar_engine::{
         apply_avatar_visual_settings, default_avatar_state, derive_avatar_state,
     };
-    use crate::config::{AppConfig, AvatarFollowupItem, WebsiteSemanticRule};
+    use crate::config::{
+        AiProvider, AppConfig, AvatarFollowupItem, ModelConfig, WebsiteSemanticRule,
+    };
     use crate::database::Database;
     use crate::monitor::ActiveWindow;
     use crate::privacy::PrivacyFilter;
@@ -4230,6 +4254,46 @@ mod tests {
                 "assistant",
             ))
         );
+    }
+
+    #[test]
+    fn 桌宠模型生成提醒必须显式开启才会调用文本模型() {
+        let model = ModelConfig {
+            provider: AiProvider::Ollama,
+            endpoint: "http://localhost:11434".to_string(),
+            api_key: None,
+            model: "qwen3".to_string(),
+        };
+
+        assert!(avatar_proactive_ai_should_run(
+            true, true, false, &model, 1_000, 1_000
+        ));
+        assert!(!avatar_proactive_ai_should_run(
+            true, false, false, &model, 1_000, 1_000
+        ));
+        assert!(!avatar_proactive_ai_should_run(
+            false, true, false, &model, 1_000, 1_000
+        ));
+        assert!(!avatar_proactive_ai_should_run(
+            true, true, true, &model, 1_000, 1_000
+        ));
+        assert!(!avatar_proactive_ai_should_run(
+            true, true, false, &model, 999, 1_000
+        ));
+
+        let empty_model = ModelConfig {
+            model: String::new(),
+            ..model
+        };
+
+        assert!(!avatar_proactive_ai_should_run(
+            true,
+            true,
+            false,
+            &empty_model,
+            1_000,
+            1_000
+        ));
     }
 
     #[test]

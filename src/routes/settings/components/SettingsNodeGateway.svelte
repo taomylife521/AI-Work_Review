@@ -867,7 +867,11 @@
               <!-- Body: description + curl -->
               <div class="border-t border-slate-100 dark:border-[#30363d]/50">
                 <div class="px-3 py-1 text-[11px] text-slate-500 dark:text-[#7d8590]">{example.desc}</div>
-                <pre class="mx-2 mb-1.5 rounded-md bg-slate-800/90 px-2.5 py-1.5 text-[10.5px] font-mono leading-relaxed text-emerald-300/90 dark:bg-[#161b22]/90 overflow-x-auto" on:click={() => copyCurl(example.cmd)}>{example.cmd}</pre>
+                <button
+                  type="button"
+                  class="mx-2 mb-1.5 block w-[calc(100%-1rem)] overflow-x-auto rounded-md bg-slate-800/90 px-2.5 py-1.5 text-left text-[10.5px] font-mono leading-relaxed text-emerald-300/90 dark:bg-[#161b22]/90"
+                  on:click={() => copyCurl(example.cmd)}
+                ><span class="whitespace-pre">{example.cmd}</span></button>
               </div>
             </div>
               {/if}

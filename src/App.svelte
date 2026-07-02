@@ -1,17 +1,10 @@
 <script>
   import { onMount, tick } from 'svelte';
   import Router, { push } from 'svelte-spa-router';
+  import { wrap } from 'svelte-spa-router/wrap';
   import Sidebar from './lib/components/Sidebar.svelte';
   import Toast from './lib/components/Toast.svelte';
   import ConfirmDialog from './lib/components/ConfirmDialog.svelte';
-  import Overview from './routes/Overview.svelte';
-  import Timeline from './routes/timeline/Timeline.svelte';
-  import Summary from './routes/timeline/Summary.svelte';
-  import Report from './routes/report/Report.svelte';
-  import Ask from './routes/ask/Ask.svelte';
-  import Settings from './routes/settings/Settings.svelte';
-  import About from './routes/about/About.svelte';
-  import AvatarWindow from './routes/avatar/AvatarWindow.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
@@ -25,9 +18,48 @@
     if (import.meta.env.DEV) console.log(...args);
   };
 
-  const appWindow = getCurrentWebviewWindow();
+  function createBrowserPreviewWindow() {
+    return {
+      label: 'main',
+      startDragging: async () => {},
+      close: async () => {},
+      hide: async () => {},
+      minimize: async () => {},
+      isMaximized: async () => false,
+      unmaximize: async () => {},
+      maximize: async () => {},
+      isVisible: async () => true,
+    };
+  }
+
+  function getSafeCurrentWebviewWindow() {
+    try {
+      return getCurrentWebviewWindow();
+    } catch (e) {
+      console.warn('当前环境缺少 Tauri 窗口元数据，已切换到浏览器预览模式:', e);
+      return createBrowserPreviewWindow();
+    }
+  }
+
+  async function safeListen(eventName, handler) {
+    try {
+      return await listen(eventName, handler);
+    } catch (e) {
+      console.warn(`当前环境无法注册 Tauri 事件 ${eventName}，已跳过:`, e);
+      return () => {};
+    }
+  }
+
+  const appWindow = getSafeCurrentWebviewWindow();
   const currentWindowLabel = appWindow.label;
   const isAvatarWindow = currentWindowLabel === 'avatar';
+  let AvatarWindowComponent = null;
+
+  if (isAvatarWindow) {
+    import('./routes/avatar/AvatarWindow.svelte').then((module) => {
+      AvatarWindowComponent = module.default;
+    });
+  }
 
   // 視窗拖拽（Linux WebKitGTK 不支援 -webkit-app-region: drag，改用 Tauri API）
   let lastDragClick = 0;
@@ -51,6 +83,7 @@
     }
 
     await appWindow.hide();
+    syncMainWindowVisibility(false);
   }
 
   async function minimizeWindow() {
@@ -111,14 +144,14 @@
   }
 
   const routes = {
-    '/': Overview,
-    '/timeline': Timeline,
-    '/timeline/summary/:date': Summary,
-    '/timeline/summary': Summary,
-    '/report': Report,
-    '/ask': Ask,
-    '/settings': Settings,
-    '/about': About,
+    '/': wrap({ asyncComponent: () => import('./routes/Overview.svelte') }),
+    '/timeline': wrap({ asyncComponent: () => import('./routes/timeline/Timeline.svelte') }),
+    '/timeline/summary/:date': wrap({ asyncComponent: () => import('./routes/timeline/Summary.svelte') }),
+    '/timeline/summary': wrap({ asyncComponent: () => import('./routes/timeline/Summary.svelte') }),
+    '/report': wrap({ asyncComponent: () => import('./routes/report/Report.svelte') }),
+    '/ask': wrap({ asyncComponent: () => import('./routes/ask/Ask.svelte') }),
+    '/settings': wrap({ asyncComponent: () => import('./routes/settings/Settings.svelte') }),
+    '/about': wrap({ asyncComponent: () => import('./routes/about/About.svelte') }),
   };
 
   let theme = 'system';
@@ -130,7 +163,7 @@
   let backgroundOpacity = 0.25;
   let backgroundBlur = 1;
   let runtimeConfig = null;
-  let uiVisualStyle = 'b';
+  let uiVisualStyle = 'c';
   let unsubscribeLocale = () => {};
   $: currentLocale = $locale;
 
@@ -151,7 +184,7 @@
 
   function normalizeUiVisualStyle(value) {
     const nextStyle = typeof value === 'string' ? value.trim().toLowerCase() : '';
-    return ['a', 'b', 'c'].includes(nextStyle) ? nextStyle : 'b';
+    return ['a', 'b', 'c'].includes(nextStyle) ? nextStyle : 'c';
   }
 
   function applyUiVisualStyle(value) {
@@ -199,6 +232,10 @@
       if (d.opacity !== undefined) backgroundOpacity = d.opacity;
       if (d.blur !== undefined) backgroundBlur = d.blur;
     }
+  }
+
+  function syncMainWindowVisibility(visible) {
+    document.body.classList.toggle('app-window-hidden', visible === false);
   }
 
   // 阻止文件拖拽到窗口时 WebView 导航到文件 URL
@@ -266,8 +303,8 @@
     const pendingCleanup = [];
 
     // #118: 主窗口隐藏（静默驻留/轻量）时暂停 CSS 动画，降低后台 WebView2 GPU 占用
-    listen('main-window-visibility', (event) => {
-      document.body.classList.toggle('app-window-hidden', event.payload === false);
+    safeListen('main-window-visibility', (event) => {
+      syncMainWindowVisibility(event.payload);
     }).then((unlisten) => pendingCleanup.push(unlisten));
 
     // 同步注册的 locale subscription 立即可清理
@@ -276,6 +313,14 @@
     pendingCleanup.push(() => window.removeEventListener('drop', preventFileDrop));
 
     (async () => {
+      try {
+        const visible = await appWindow.isVisible();
+        if (!disposed) syncMainWindowVisibility(visible);
+      } catch (e) {
+        console.warn('同步主窗口可见性失败:', e);
+      }
+      if (disposed) return;
+
       // 获取平台信息
       try {
         platform = await invoke('get_platform');
@@ -292,11 +337,11 @@
         runtimeConfig = config;
         cache.setConfig(config);
         applyTheme(config.theme || 'system');
-        applyUiVisualStyle(config.ui_visual_style || 'b');
+        applyUiVisualStyle(config.ui_visual_style || 'c');
       } catch (e) {
         console.error('加载配置失败:', e);
         applyTheme('system');
-        applyUiVisualStyle('b');
+        applyUiVisualStyle('c');
         config = { work_end_hour: 18 };
         runtimeConfig = config;
       }
@@ -335,22 +380,22 @@
       });
       pendingCleanup.push(unsubscribeCache);
 
-      const unlistenRecordingState = await listen('recording-state-changed', (event) => {
+      const unlistenRecordingState = await safeListen('recording-state-changed', (event) => {
         isRecording = event.payload.isRecording;
         isPaused = event.payload.isPaused;
       });
       if (disposed) return;
       pendingCleanup.push(unlistenRecordingState);
 
-      const unlistenConfigChanged = await listen('config-changed', (event) => {
+      const unlistenConfigChanged = await safeListen('config-changed', (event) => {
         runtimeConfig = event.payload;
-        applyUiVisualStyle(event.payload?.ui_visual_style || 'b');
+        applyUiVisualStyle(event.payload?.ui_visual_style || 'c');
         cache.setConfig(event.payload);
       });
       if (disposed) return;
       pendingCleanup.push(unlistenConfigChanged);
 
-      const unlistenAvatarTimeline = await listen('avatar-open-timeline', async (event) => {
+      const unlistenAvatarTimeline = await safeListen('avatar-open-timeline', async (event) => {
         const payload = event.payload ?? {};
         const nextDate = typeof payload.date === 'string' ? payload.date.trim() : '';
 
@@ -378,7 +423,7 @@
       pendingCleanup.push(() => window.removeEventListener('background-changed', handleBgChange));
 
       const handleUiVisualStyleChange = (event) => {
-        applyUiVisualStyle(event.detail?.style || 'b');
+        applyUiVisualStyle(event.detail?.style || 'c');
       };
       window.addEventListener('ui-visual-style-changed', handleUiVisualStyleChange);
       pendingCleanup.push(() => window.removeEventListener('ui-visual-style-changed', handleUiVisualStyleChange));
@@ -457,7 +502,7 @@
       }, 60000);  // 每分钟检查一次
       pendingCleanup.push(() => clearInterval(autoReportTimer));
 
-      const unlisten = await listen('screenshot-taken', (event) => {
+      const unlisten = await safeListen('screenshot-taken', (event) => {
         devLog('截屏完成:', event.payload);
 
         // 1. 增量更新时间线缓存
@@ -491,7 +536,9 @@
 </script>
 
 {#if isAvatarWindow}
-  <AvatarWindow />
+  {#if AvatarWindowComponent}
+    <svelte:component this={AvatarWindowComponent} />
+  {/if}
 {:else}
 <div class="app-shell ui-style-{uiVisualStyle} flex h-screen overflow-hidden relative">
   <div class="app-shell-ambient pointer-events-none absolute inset-0 z-0 opacity-80">

@@ -255,7 +255,7 @@ impl Orchestrator {
             }
 
             QueryPath::Fallback => {
-                let answer = fallback_answer();
+                let answer = fallback_answer(question);
                 let tool_labels = vec!["fallback".to_string()];
                 emit_done(&event_tx, &answer, &[], &tool_labels);
                 Ok(OrchestratorResult {
@@ -292,7 +292,7 @@ fn emit_done(
 /// DirectPath：直接回答
 pub fn direct_answer(question: &str) -> String {
     let q = question.to_lowercase();
-    let is_chinese = question.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
+    let is_chinese = prefers_chinese_answer(question);
     if q.contains("你好") || q.contains("hi") || q.contains("hello") {
         return (if is_chinese {
             "你好！我是你的工作助手，可以帮你分析工作时间、查看记录、对比效率等。请问你想了解什么？"
@@ -341,7 +341,7 @@ pub fn fast_answer(
         crate::commands::filter_activities_by_privacy(activities, ignored_apps, excluded_domains);
 
     if activities.is_empty() {
-        let is_chinese = question.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
+        let is_chinese = prefers_chinese_answer(question);
         return Ok(if is_chinese {
             format!(
                 "在 {} ~ {} 范围内未找到活动记录。",
@@ -392,7 +392,7 @@ pub fn fast_answer(
     };
 
     // 跟随用户提问语言（CJK -> 中文，否则英文）
-    let is_chinese = question.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
+    let is_chinese = prefers_chinese_answer(question);
     let (lbl_overview, lbl_records, lbl_category, lbl_top_apps, lbl_related) = if is_chinese {
         ("活动总览", "条记录，总时长", "分类分布", "使用最多的应用", "相关记录")
     } else {
@@ -461,13 +461,25 @@ pub fn fast_answer(
     Ok(lines.join("\n"))
 }
 
+fn prefers_chinese_answer(question: &str) -> bool {
+    question.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c))
+}
+
 /// FallbackPath：无模型时的模板回答
-fn fallback_answer() -> String {
-    "我目前无法使用 AI 模型进行分析，但你可以尝试：\n\
-     - 询问具体某天的工作记录\n\
-     - 使用时间关键词（今天、昨天、本周等）\n\
-     - 配置 AI 模型后可以获得更智能的分析"
-        .to_string()
+fn fallback_answer(question: &str) -> String {
+    if prefers_chinese_answer(question) {
+        "我目前无法使用 AI 模型进行分析，但你可以尝试：\n\
+         - 询问具体某天的工作记录\n\
+         - 使用时间关键词（今天、昨天、本周等）\n\
+         - 配置 AI 模型后可以获得更智能的分析"
+            .to_string()
+    } else {
+        "I can't use an AI model for analysis right now, but you can try:\n\
+         - Asking for work records from a specific day\n\
+         - Using time keywords such as today, yesterday, or this week\n\
+         - Configuring an AI model for smarter analysis"
+            .to_string()
+    }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -581,7 +593,14 @@ mod tests {
 
     #[test]
     fn test_fallback_answer() {
-        let answer = fallback_answer();
+        let answer = fallback_answer("随便聊聊");
         assert!(answer.contains("AI 模型"));
+    }
+
+    #[test]
+    fn test_fallback_answer_follows_english_question() {
+        let answer = fallback_answer("Can you chat with me?");
+        assert!(answer.contains("AI model"));
+        assert!(!answer.contains("我目前无法使用"));
     }
 }

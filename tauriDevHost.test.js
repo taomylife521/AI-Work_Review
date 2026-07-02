@@ -11,4 +11,5 @@ test('tauri dev 与 vite dev server 应固定使用同一个 127.0.0.1 地址', 
   assert.match(tauriConfigSource, /"devUrl":\s*"http:\/\/127\.0\.0\.1:5173"/);
   assert.match(viteConfigSource, /host:\s*'127\.0\.0\.1'/);
   assert.match(viteConfigSource, /hmr:\s*\{\s*host:\s*'127\.0\.0\.1'/);
+  assert.match(viteConfigSource, /optimizeDeps:\s*\{\s*entries:\s*\['index\.html'\]/);
 });

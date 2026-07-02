@@ -256,7 +256,9 @@
             <h4 class="text-base font-semibold text-slate-900 dark:text-[#e6edf3]">{t('about.wechat')}</h4>
           </div>
           <div class="mt-4 flex items-center justify-center rounded-[24px] bg-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-[#0d1117] dark:shadow-none">
-            <img src={wechatSponsorshipQr} alt={t('about.wechatQrAlt')} class="aspect-square w-40 cursor-zoom-in rounded-2xl object-cover transition-transform hover:scale-[1.02]" on:click={() => zoomedQr = wechatSponsorshipQr} />
+            <button type="button" class="aspect-square w-40 cursor-zoom-in rounded-2xl transition-transform hover:scale-[1.02]" on:click={() => zoomedQr = wechatSponsorshipQr}>
+              <img src={wechatSponsorshipQr} alt={t('about.wechatQrAlt')} class="h-full w-full rounded-2xl object-cover" />
+            </button>
           </div>
         </div>
 
@@ -271,7 +273,9 @@
             <h4 class="text-base font-semibold text-slate-900 dark:text-[#e6edf3]">{t('about.alipay')}</h4>
           </div>
           <div class="mt-4 flex items-center justify-center rounded-[24px] bg-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-[#0d1117] dark:shadow-none">
-            <img src={alipaySponsorshipQr} alt={t('about.alipayQrAlt')} class="aspect-square w-40 cursor-zoom-in rounded-2xl object-cover transition-transform hover:scale-[1.02]" on:click={() => zoomedQr = alipaySponsorshipQr} />
+            <button type="button" class="aspect-square w-40 cursor-zoom-in rounded-2xl transition-transform hover:scale-[1.02]" on:click={() => zoomedQr = alipaySponsorshipQr}>
+              <img src={alipaySponsorshipQr} alt={t('about.alipayQrAlt')} class="h-full w-full rounded-2xl object-cover" />
+            </button>
           </div>
         </div>
 
@@ -287,7 +291,9 @@
             <h4 class="text-base font-semibold text-slate-900 dark:text-[#e6edf3]">Buy Me a Coffee</h4>
           </div>
           <div class="mt-4 flex items-center justify-center rounded-[24px] bg-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-[#0d1117] dark:shadow-none">
-            <img src={bmcQr} alt="Buy Me a Coffee QR code" class="aspect-square w-40 cursor-zoom-in rounded-2xl object-cover transition-transform hover:scale-[1.02]" on:click={() => zoomedQr = bmcQr} />
+            <button type="button" class="aspect-square w-40 cursor-zoom-in rounded-2xl transition-transform hover:scale-[1.02]" on:click={() => zoomedQr = bmcQr}>
+              <img src={bmcQr} alt="Buy Me a Coffee QR code" class="h-full w-full rounded-2xl object-cover" />
+            </button>
           </div>
         </div>
       </div>
@@ -296,10 +302,14 @@
     {#if zoomedQr}
       <div
         class="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/70 backdrop-blur-sm animate-fadeIn"
-        on:click={() => zoomedQr = null}
-        on:keydown={(e) => e.key === 'Escape' && (zoomedQr = null)}
       >
-        <img src={zoomedQr} alt="" class="max-h-[75vh] max-w-[75vw] cursor-zoom-out rounded-3xl shadow-2xl" />
+        <button
+          type="button"
+          class="absolute inset-0 cursor-zoom-out"
+          aria-label={t('about.closeSupportDialog')}
+          on:click={() => zoomedQr = null}
+        ></button>
+        <img src={zoomedQr} alt="" class="relative z-10 max-h-[75vh] max-w-[75vw] rounded-3xl shadow-2xl" />
       </div>
     {/if}
   </div>
