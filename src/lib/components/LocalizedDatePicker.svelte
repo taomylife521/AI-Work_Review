@@ -1,5 +1,5 @@
 <script>
-  import { createEventDispatcher, onDestroy, onMount } from 'svelte';
+  import { createEventDispatcher, onDestroy, onMount, tick } from 'svelte';
   import { t } from '$lib/i18n/index.js';
 
   export let mode = 'single';
@@ -18,6 +18,9 @@
   const weekdayBase = new Date(Date.UTC(2026, 2, 1));
 
   let rootElement;
+  let triggerElement;
+  let popoverElement;
+  let floatingPanelStyle = '';
   let rangeSelectionStage = 'start';
   let viewDate = new Date();
 
@@ -90,6 +93,43 @@
     rangeSelectionStage = 'start';
   }
 
+  function portalToBody(node, enabled) {
+    if (!enabled) {
+      return {};
+    }
+
+    document.body.appendChild(node);
+    return {
+      destroy() {
+        node.remove();
+      },
+    };
+  }
+
+  function updateFloatingPanelPosition() {
+    if (!open || inlinePanel || !popoverElement) return;
+
+    const anchorElement = triggerElement || rootElement;
+    if (!anchorElement) return;
+
+    const viewportPadding = 12;
+    const gap = 6;
+    const anchorRect = anchorElement.getBoundingClientRect();
+    const panelWidth = popoverElement.offsetWidth || 212;
+    const panelHeight = popoverElement.offsetHeight || 260;
+    const maxLeft = Math.max(viewportPadding, window.innerWidth - panelWidth - viewportPadding);
+
+    let left = anchorRect.right - panelWidth;
+    left = Math.min(Math.max(viewportPadding, left), maxLeft);
+
+    let top = anchorRect.bottom + gap;
+    if (top + panelHeight > window.innerHeight - viewportPadding) {
+      top = Math.max(viewportPadding, anchorRect.top - panelHeight - gap);
+    }
+
+    floatingPanelStyle = `left: ${Math.round(left)}px; top: ${Math.round(top)}px;`;
+  }
+
   function syncViewDate() {
     if (mode === 'range') {
       if (startDate) {
@@ -114,6 +154,7 @@
     syncViewDate();
     resetRangeSelectionStage();
     open = true;
+    tick().then(updateFloatingPanelPosition);
   }
 
   function closePanel() {
@@ -213,6 +254,7 @@
   function handleDocumentPointerDown(event) {
     if (!open || !rootElement) return;
     if (rootElement.contains(event.target)) return;
+    if (popoverElement?.contains(event.target)) return;
     closePanel();
   }
 
@@ -229,15 +271,22 @@
     : formatTriggerLabel(value);
   $: weekdayLabels = getWeekdayLabels();
   $: visibleDays = buildVisibleDays(viewDate);
+  $: if (open && !inlinePanel) {
+    tick().then(updateFloatingPanelPosition);
+  }
 
   onMount(() => {
     document.addEventListener('mousedown', handleDocumentPointerDown);
     document.addEventListener('keydown', handleDocumentKeydown);
+    document.addEventListener('scroll', updateFloatingPanelPosition, true);
+    window.addEventListener('resize', updateFloatingPanelPosition);
   });
 
   onDestroy(() => {
     document.removeEventListener('mousedown', handleDocumentPointerDown);
     document.removeEventListener('keydown', handleDocumentKeydown);
+    document.removeEventListener('scroll', updateFloatingPanelPosition, true);
+    window.removeEventListener('resize', updateFloatingPanelPosition);
   });
 </script>
 
@@ -249,6 +298,7 @@
       aria-haspopup="dialog"
       aria-expanded={open}
       on:click={togglePanel}
+      bind:this={triggerElement}
     >
       <span class="localized-date-picker__trigger-label">{triggerLabel}</span>
       <span class="localized-date-picker__trigger-icon">▾</span>
@@ -256,7 +306,14 @@
   {/if}
 
   {#if open}
-    <div class={`localized-date-picker__popover popover ${inlinePanel ? 'localized-date-picker__popover--inline' : ''}`} role="dialog" aria-modal="false">
+    <div
+      class={`localized-date-picker__popover popover ${inlinePanel ? 'localized-date-picker__popover--inline' : 'localized-date-picker__popover--floating'}`}
+      role="dialog"
+      aria-modal="false"
+      style={inlinePanel ? '' : floatingPanelStyle}
+      bind:this={popoverElement}
+      use:portalToBody={!inlinePanel}
+    >
       <div class="localized-date-picker__header">
         <button type="button" class="localized-date-picker__nav" on:click={() => shiftMonth(-1)} aria-label={t('datePicker.previousMonth')}>‹</button>
         <div class="localized-date-picker__title">{getMonthTitle(viewDate)}</div>

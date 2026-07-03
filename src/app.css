@@ -541,6 +541,10 @@
   @apply inline-flex items-center justify-center gap-1.5 min-h-9 px-3 rounded-xl bg-white dark:bg-[#21262d] border border-slate-200 dark:border-[#30363d] text-xs font-medium text-slate-700 dark:text-[#adbac7] hover:bg-slate-50 dark:hover:bg-[#30363d] transition-colors;
 }
 
+.page-control-btn:disabled {
+  @apply cursor-not-allowed opacity-45 hover:bg-white dark:hover:bg-[#21262d];
+}
+
 .page-control-btn-icon {
   @apply page-control-btn w-9 px-0;
 }
@@ -575,6 +579,10 @@
 
 .localized-date-picker__popover {
   @apply absolute right-0 top-[calc(100%+0.35rem)] z-50 w-[13.25rem] rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl dark:shadow-[0_12px_32px_rgba(0,0,0,0.5)] dark:border-[#30363d] dark:bg-[#21262d];
+}
+
+.localized-date-picker__popover--floating {
+  @apply fixed right-auto top-auto z-[1000];
 }
 
 .localized-date-picker__popover--inline {

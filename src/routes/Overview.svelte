@@ -102,6 +102,11 @@
     return formatIsoDate(next);
   }
 
+  function diffIsoDateDays(leftDateValue, rightDateValue) {
+    const dayInMs = 24 * 60 * 60 * 1000;
+    return Math.round((parseDateString(leftDateValue) - parseDateString(rightDateValue)) / dayInMs);
+  }
+
   const APP_USAGE_VIEW_MODE_KEY = 'overview.appUsage.viewMode';
   const HOURLY_ACTIVITY_VIEW_MODE_KEY = 'overview.hourlyActivity.viewMode';
 
@@ -276,6 +281,7 @@
   let selectedBrowser = null;
   $: currentLocale = $locale;
   $: isSingleSelectedDate = selectedDateFrom === selectedDateTo;
+  $: canStepOverviewDateForward = selectedDateTo < getLocalDateString();
   $: overviewSubtitle = overviewMode === 'date'
     ? getDateRangeLabel(selectedDateFrom, selectedDateTo)
     : overviewMode === 'week'
@@ -458,18 +464,24 @@
     loadStats(true);
   }
 
-  function stepOverviewDateBoundary(field, offsetDays) {
+  function stepOverviewDateRange(offsetDays) {
     const today = getLocalDateString();
-
-    if (field === 'start') {
-      const nextStart = shiftIsoDate(selectedDateFrom, offsetDays);
-      selectedDateFrom = nextStart > selectedDateTo ? selectedDateTo : nextStart;
-    } else {
-      const nextEnd = shiftIsoDate(selectedDateTo, offsetDays);
-      const clampedEnd = nextEnd > today ? today : nextEnd;
-      selectedDateTo = clampedEnd < selectedDateFrom ? selectedDateFrom : clampedEnd;
+    if (offsetDays > 0 && !canStepOverviewDateForward) {
+      return;
     }
 
+    normalizeSelectedDateRange();
+    let nextStart = shiftIsoDate(selectedDateFrom, offsetDays);
+    let nextEnd = shiftIsoDate(selectedDateTo, offsetDays);
+
+    if (nextEnd > today) {
+      const overshootDays = diffIsoDateDays(nextEnd, today);
+      nextStart = shiftIsoDate(nextStart, -overshootDays);
+      nextEnd = today;
+    }
+
+    selectedDateFrom = nextStart;
+    selectedDateTo = nextEnd;
     handleOverviewDateChange();
   }
 
@@ -745,7 +757,7 @@
             type="button"
             class="page-control-btn-icon"
             title={t('common.previous')}
-            on:click={() => stepOverviewDateBoundary('start', -1)}
+            on:click={() => stepOverviewDateRange(-1)}
           >
             <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 19l-7-7 7-7" />
@@ -766,7 +778,8 @@
             type="button"
             class="page-control-btn-icon"
             title={t('common.next')}
-            on:click={() => stepOverviewDateBoundary('end', 1)}
+            disabled={!canStepOverviewDateForward}
+            on:click={() => stepOverviewDateRange(1)}
           >
             <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 5l7 7-7 7" />

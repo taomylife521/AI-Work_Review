@@ -81,7 +81,7 @@ test('概览页面应支持今日、指定日期与本周三种时间视角切�
   assert.match(source, /mode="range"/);
   assert.match(source, /bind:startDate=\{selectedDateFrom\}/);
   assert.match(source, /bind:endDate=\{selectedDateTo\}/);
-  assert.match(source, /stepOverviewDateBoundary/);
+  assert.match(source, /stepOverviewDateRange/);
   assert.doesNotMatch(source, /commitOverviewDateInput/);
   assert.doesNotMatch(source, /overviewDateInputFrom/);
   assert.doesNotMatch(source, /overviewDateInputTo/);
@@ -106,9 +106,12 @@ test('概览页面的指定日期选择框应跟随当前语言并使用紧凑�
   assert.match(source, /triggerClass="overview-date-trigger"/);
   assert.match(source, /localeCode=\{currentLocale\}/);
   assert.match(source, /max=\{getLocalDateString\(\)\}/);
+  assert.doesNotMatch(source, /inlinePanel=\{true\}/);
   assert.match(source, /on:change=\{handleOverviewDateChange\}/);
-  assert.match(source, /stepOverviewDateBoundary\('start'/);
-  assert.match(source, /stepOverviewDateBoundary\('end'/);
+  assert.match(source, /stepOverviewDateRange\(-1\)/);
+  assert.match(source, /stepOverviewDateRange\(1\)/);
+  assert.match(source, /disabled=\{!canStepOverviewDateForward\}/);
+  assert.doesNotMatch(source, /stepOverviewDateBoundary/);
   assert.doesNotMatch(source, /overview-date-input/);
   assert.doesNotMatch(source, /overview-date-field/);
 });
