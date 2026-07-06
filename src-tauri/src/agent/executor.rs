@@ -43,6 +43,42 @@ const DEFAULT_SYSTEM_PROMPT: &str =
     "你是 Work Review 的工作助手。你可以回答任何问题。对于工作相关问题，优先使用工具查询用户的真实工作记录。对于非工作问题，直接用你的知识回答。\
      请使用简体中文回答，先给结论再给依据。不要编造不存在的事实。";
 
+/// 构造当前时间上下文片段，追加到 system prompt 末尾。
+///
+/// 所有工具的 `date_from`/`date_to` 参数都依赖模型知道"今天"是哪天，否则
+/// 用户问"本周/上周"时模型会瞎猜日期（issue #122）。这里注入当前本地日期 +
+/// 星期几 + 时分作为锚点，让模型能正确解析相对时间词，并明确告知工具粒度
+/// 限制（仅支持天级 YYYY-MM-DD），避免模型用带时分的参数调用工具导致解析
+/// 失败、回退成查全量数据。
+fn build_date_context_suffix() -> String {
+    use chrono::{Datelike, Timelike};
+
+    let now = chrono::Local::now();
+    let date = now.date_naive();
+    let weekday = match date.weekday().num_days_from_monday() {
+        0 => "周一",
+        1 => "周二",
+        2 => "周三",
+        3 => "周四",
+        4 => "周五",
+        5 => "周六",
+        6 => "周日",
+        _ => "未知",
+    };
+    let hh = now.hour();
+    let mm = now.minute();
+    format!(
+        "\n\n[当前时间上下文] 今天是 {} {}，当前时间 {hh:02}:{mm:02}（周一为一周开始）。\n\
+         请基于这个日期理解\"今天/昨天/本周/上周/本月/上月/最近N天\"等相对时间词，\
+         调用工具时把日期换算成 YYYY-MM-DD。\n\
+         注意：工作记录工具仅支持天级查询（YYYY-MM-DD，不含时分）。若用户问\
+         \"这小时/上午/下午/刚才\"等亚日级问题，请直接说明工具暂不支持该粒度，\
+         不要在 date_from/date_to 里带时分调用工具。",
+        date.format("%Y-%m-%d"),
+        weekday
+    )
+}
+
 /// Agent 执行器
 ///
 /// 对应 Python 的 agent_run() 函数
@@ -73,7 +109,13 @@ impl AgentExecutor {
         excluded_domains: Vec<String>,
         event_tx: Option<mpsc::Sender<StreamEvent>>,
     ) -> Result<AgentResult, AppError> {
-        let sys = system_prompt.unwrap_or(DEFAULT_SYSTEM_PROMPT);
+        // 注入当前日期上下文（issue #122）：让模型能正确理解"今天/本周/上周"
+        // 等相对时间词，避免工具调用时把日期算错。
+        let sys = format!(
+            "{}{}",
+            system_prompt.unwrap_or(DEFAULT_SYSTEM_PROMPT),
+            build_date_context_suffix()
+        );
         let max_iter = max_iterations.unwrap_or(DEFAULT_MAX_ITERATIONS);
 
         // 工具注册中心（Stage 1）
@@ -95,7 +137,7 @@ impl AgentExecutor {
 
         for _ in 0..max_iter {
             // ── 第 1 步：调用 LLM（Stage 2） ──
-            let response = model::chat_with_tools(model_config, sys, &messages, &tools)
+            let response = model::chat_with_tools(model_config, &sys, &messages, &tools)
                 .await
                 .map_err(|e| AppError::Analysis(format!("Agent 调用失败: {e}")))?;
 
@@ -283,5 +325,38 @@ mod tests {
         let assistant_msg = Message::assistant_with_tool_calls(&[tc]);
         assert_eq!(assistant_msg.role, "assistant");
         assert!(assistant_msg.tool_calls.is_some());
+    }
+
+    /// 时间上下文 suffix 必须包含日期、周几、时分，以及工具粒度说明，
+    /// 让模型能正确解析相对时间词，且不会用带时分的参数调用工具（issue #122）。
+    #[test]
+    fn 时间上下文suffix应包含日期周几时分与粒度说明() {
+        let suffix = build_date_context_suffix();
+
+        // 含完整日期 YYYY-MM-DD
+        assert!(regex::Regex::new(r"\d{4}-\d{2}-\d{2}")
+            .unwrap()
+            .is_match(&suffix));
+        // 含周几
+        assert!(
+            ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+                .iter()
+                .any(|w| suffix.contains(w)),
+            "suffix 应包含周几，实际: {suffix}"
+        );
+        // 含当前时分 HH:MM
+        assert!(regex::Regex::new(r"当前时间 \d{2}:\d{2}")
+            .unwrap()
+            .is_match(&suffix));
+        // 明确告知工具仅支持天级 YYYY-MM-DD，避免模型传带时分的参数
+        assert!(
+            suffix.contains("YYYY-MM-DD"),
+            "suffix 应告知模型工具的日期格式，实际: {suffix}"
+        );
+        // 明确告知亚日级粒度不支持，引导模型诚实回答而非瞎调工具
+        assert!(
+            suffix.contains("亚日级") || suffix.contains("暂不支持"),
+            "suffix 应说明亚日级粒度限制，实际: {suffix}"
+        );
     }
 }
