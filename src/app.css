@@ -1280,8 +1280,42 @@
   @apply bg-slate-100 dark:bg-[#30363d] p-4 rounded-lg overflow-x-auto mb-4;
 }
 
+/* 代码块内的 <code> 不能继承内联代码的背景/padding，否则会双层叠加 */
+.markdown-body pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+}
+
 .markdown-body blockquote {
   @apply border-l-4 border-primary-500 pl-4 italic text-slate-700 dark:text-[#7d8590] my-4;
+}
+
+/* 链接：此前缺失，浏览器默认蓝在暗色模式下对比不足 */
+.markdown-body a {
+  @apply text-indigo-600 underline decoration-indigo-300/60 underline-offset-2 transition hover:text-indigo-500 hover:decoration-indigo-500;
+}
+.dark .markdown-body a {
+  @apply text-indigo-400 decoration-indigo-500/40 hover:text-indigo-300 hover:decoration-indigo-400;
+}
+
+/* 图片防撑破容器 */
+.markdown-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.5rem;
+  margin: 0.5em 0;
+}
+
+/* 水平分隔线 */
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid #e2e8f0;
+  margin: 1.5em 0;
+}
+.dark .markdown-body hr {
+  border-top-color: #30363d;
 }
 
 /* Markdown 标题间距（统一日报 / 助手等多页面） */
@@ -1329,7 +1363,7 @@
 
 .markdown-body th {
   padding: 0.75rem 1rem;
-  text-align: center;
+  text-align: left;
   font-weight: 600;
   color: #475569;
   border-bottom: 2px solid #e2e8f0;
@@ -1345,7 +1379,7 @@
   padding: 0.625rem 1rem;
   border-bottom: 1px solid #e2e8f0;
   color: #334155;
-  text-align: center;
+  text-align: left;
 }
 
 .dark .markdown-body td {
@@ -1363,19 +1397,6 @@
 
 .markdown-body tbody tr:last-child td {
   border-bottom: none;
-}
-
-/* 第一列左对齐 */
-.markdown-body td:first-child,
-.markdown-body th:first-child {
-  text-align: left;
-  font-weight: 500;
-}
-
-/* 最后一列右对齐 */
-.markdown-body td:last-child,
-.markdown-body th:last-child {
-  text-align: right;
 }
 
 /* details/summary 折叠组件（活动时间线等） */

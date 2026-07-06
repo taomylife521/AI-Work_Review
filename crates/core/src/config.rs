@@ -48,7 +48,11 @@ pub enum AiProvider {
 }
 
 impl AiProvider {
-    /// 获取提供商的显示名称
+    /// 获取提供商的显示名称（仅用于新建 profile 时的默认命名，见 `default_profile_name`）。
+    ///
+    /// 运行时显示由前端 `providerDisplayNames`（Ask.svelte）按 locale 提供，
+    /// 这里只有中文一种，已不再作为运行时显示来源。
+    #[deprecated(note = "运行时显示请用前端 providerDisplayNames；此处仅保留用于 default_profile_name 的初始命名")]
     pub fn display_name(&self) -> &'static str {
         match self {
             AiProvider::Ollama => "Ollama (本地)",
@@ -1250,11 +1254,10 @@ fn same_model_config(left: &ModelConfig, right: &ModelConfig) -> bool {
 }
 
 fn default_profile_name(model_config: &ModelConfig) -> String {
-    format!(
-        "{} · {}",
-        model_config.provider.display_name(),
-        model_config.model.trim()
-    )
+    // 仅新建 profile 时的一次性默认命名；运行时显示走前端。
+    #[allow(deprecated)]
+    let provider_name = model_config.provider.display_name();
+    format!("{} · {}", provider_name, model_config.model.trim())
 }
 
 fn default_connection_status() -> String {

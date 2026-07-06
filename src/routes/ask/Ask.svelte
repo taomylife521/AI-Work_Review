@@ -37,14 +37,14 @@
       'zh-TW': 'Ollama（本機）',
     },
     openai: {
-      'zh-CN': 'OpenAI / 兼容API',
-      en: 'OpenAI / Compatible API',
-      'zh-TW': 'OpenAI / 相容 API',
+      'zh-CN': 'OpenAI 兼容',
+      en: 'OpenAI Compatible',
+      'zh-TW': 'OpenAI 相容',
     },
     siliconflow: {
-      'zh-CN': '硅基流动 SiliconFlow',
+      'zh-CN': '硅基流动',
       en: 'SiliconFlow',
-      'zh-TW': '矽基流動 SiliconFlow',
+      'zh-TW': '矽基流動',
     },
     deepseek: {
       'zh-CN': 'DeepSeek',
@@ -52,29 +52,29 @@
       'zh-TW': 'DeepSeek',
     },
     qwen: {
-      'zh-CN': '通义千问 Qwen',
+      'zh-CN': '通义千问',
       en: 'Qwen',
-      'zh-TW': '通義千問 Qwen',
+      'zh-TW': '通義千問',
     },
     zhipu: {
-      'zh-CN': '智谱 ChatGLM',
-      en: 'Zhipu ChatGLM',
-      'zh-TW': '智譜 ChatGLM',
+      'zh-CN': '智谱清言',
+      en: 'Zhipu',
+      'zh-TW': '智譜清言',
     },
     moonshot: {
-      'zh-CN': '月之暗面 Kimi',
+      'zh-CN': 'Kimi',
       en: 'Moonshot Kimi',
-      'zh-TW': '月之暗面 Kimi',
+      'zh-TW': 'Kimi',
     },
     doubao: {
-      'zh-CN': '火山引擎 豆包',
+      'zh-CN': '豆包',
       en: 'Doubao',
-      'zh-TW': '火山引擎 豆包',
+      'zh-TW': '豆包',
     },
     minimax: {
-      'zh-CN': '稀宇科技 MiniMax',
+      'zh-CN': 'MiniMax',
       en: 'MiniMax',
-      'zh-TW': '稀宇科技 MiniMax',
+      'zh-TW': 'MiniMax',
     },
     gemini: {
       'zh-CN': 'Google Gemini',
@@ -94,6 +94,13 @@
 
   function displayModelProfileName(profile) {
     if (!profile) return '';
+    // 优先用 profile.name（后端 default_profile_name 已拼好完整显示名，或用户自定义名）。
+    // 避免再次拼接 provider · model_id，那样会与后端重复且暴露裸 API id（如 Qwen/Qwen3-8B）。
+    const profileName = profile.name?.trim();
+    if (profileName) {
+      return profileName;
+    }
+    // fallback：profile.name 缺失时才用 provider · model 拼一个
     const localizedProvider = localizedProviderName(profile.model_config?.provider);
     const modelName = profile.model_config?.model?.trim();
     if (localizedProvider && modelName) {
@@ -102,7 +109,7 @@
     if (modelName) {
       return modelName;
     }
-    return profile.name || '';
+    return '';
   }
 
   onMount(async () => {
@@ -175,6 +182,10 @@
     '相关记录依据',
   ]);
   const renderedMarkdownCache = new Map();
+  // Streaming render throttle: reuse last HTML within STREAM_RENDER_INTERVAL_MS,
+  // so we don't run marked.parse on every token.
+  const STREAM_RENDER_INTERVAL_MS = 250;
+  const streamRenderState = new Map(); // messageIndex -> { html, at }
 
   function normalizeAssistantContent(content) {
     const text = (content || '').replace(/\r\n/g, '\n').trim();
@@ -212,6 +223,12 @@
       if (t.startsWith('```')) { inCodeBlock = !inCodeBlock; result.push(raw); continue; }
       if (inCodeBlock) { result.push(raw); continue; }
 
+      // 表格行原样透传（避免被下面的"标题/列表"规则误伤，破坏表格语法）
+      if (/^\|.*\|$/.test(t) || /^\|[-:\s|]+\|$/.test(t)) {
+        result.push(raw);
+        continue;
+      }
+
       // 已有 markdown 标题 → 保留
       if (/^#{1,6}\s/.test(t)) {
         result.push(raw);
@@ -230,14 +247,20 @@
         continue;
       }
 
-      // "标题（说明）" 格式 → ### 副标题
-      if (/^[^（）()。，！？]{2,20}[（(].+[）)]$/.test(t) && !t.includes('。')) {
+      // "标题（说明）" 格式 → ### 副标题（排除含"："的行，避免与下方 key:value 规则重叠误判）
+      if (/^[^（）()。，！？：]{2,20}[（(].+[）)]$/.test(t) && !t.includes('。')) {
         result.push('', `### ${t}`, '');
         continue;
       }
 
-      // 短 key：value 数据行（key ≤ 8 字符，无句号结尾，总长 < 40）→ 列表项
-      if (/^[^：。！？，]{1,8}：/.test(t) && !/[。！？]$/.test(t) && t.length < 40) {
+      // 短 key：value 数据行（key ≤ 6 字符，无句号结尾，总长 < 32，不含反引号）→ 列表项
+      // 收窄阈值避免把自然语言句子（如"结论：本次工作正常"）误转成列表项
+      if (
+        /^[^：。！？，`]{1,6}：/.test(t) &&
+        !/[。！？]$/.test(t) &&
+        !t.includes('`') &&
+        t.length < 32
+      ) {
         result.push(`- ${t}`);
         continue;
       }
@@ -265,6 +288,19 @@
       renderedMarkdownCache.delete(oldestKey);
     }
 
+    return html;
+  }
+
+  // 流式渲染：节流，STREAM_RENDER_INTERVAL_MS 内复用上次 HTML，避免每个 token 都跑 marked.parse。
+  // key 用消息在数组中的下标，收尾时由 renderMarkdown 接管（命中缓存，无额外开销）。
+  function renderStreamingMarkdown(content, key) {
+    const now = Date.now();
+    const state = streamRenderState.get(key);
+    if (state && now - state.at < STREAM_RENDER_INTERVAL_MS) {
+      return state.html;
+    }
+    const html = renderMarkdown(content);
+    streamRenderState.set(key, { html, at: now });
     return html;
   }
 
@@ -574,7 +610,7 @@
         </div>
       {:else}
         <div class="ask-thread-shell mx-auto flex min-h-full max-w-4xl flex-col gap-10">
-          {#each messages as message}
+          {#each messages as message, messageIndex}
             <div class={message.role === 'user' ? 'flex w-full min-w-0 justify-end' : 'flex w-full min-w-0 justify-start'}>
               <div
                 in:fly={{ y: 10, duration: 240 }}
@@ -603,7 +639,7 @@
                   {/if}
                   <div class="markdown-body assistant-markdown min-w-0 max-w-none">
                     {#if message.streaming}
-                      <p class="whitespace-pre-wrap break-words leading-7">{message.content}{#if !message.content}{t('ask.thinking')}{/if}<span class="ml-0.5 inline-block animate-pulse text-slate-400">▍</span></p>
+                      <div class="streaming-content">{#if message.content}{@html renderStreamingMarkdown(message.content, messageIndex)}{:else}<p class="text-slate-400">{t('ask.thinking')}</p>{/if}<span class="ml-0.5 inline-block animate-pulse text-slate-400 align-text-bottom">▍</span></div>
                     {:else}
                       {@html renderMarkdown(message.content)}
                     {/if}
@@ -696,7 +732,7 @@
               <select
                 bind:value={selectedModelId}
                 on:change={handleModelChange}
-                class="h-8 min-w-[122px] max-w-[176px] cursor-pointer appearance-none rounded-lg border border-slate-200/80 bg-slate-100/90 px-3 pr-8 text-[11px] font-medium text-slate-700 outline-none transition hover:bg-slate-200/70 focus:ring-2 focus:ring-slate-300 dark:border-[#30363d]/80 dark:bg-[#21262d]/70 dark:text-[#adbac7] dark:hover:bg-[#30363d]/80 dark:focus:ring-primary-600"
+                class="h-8 min-w-[160px] max-w-[260px] cursor-pointer appearance-none rounded-lg border border-slate-200/80 bg-slate-100/90 px-3 pr-8 text-[11px] font-medium text-slate-700 outline-none transition hover:bg-slate-200/70 focus:ring-2 focus:ring-slate-300 dark:border-[#30363d]/80 dark:bg-[#21262d]/70 dark:text-[#adbac7] dark:hover:bg-[#30363d]/80 dark:focus:ring-primary-600"
                 style="background-image: url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E&quot;); background-repeat: no-repeat; background-position: right 10px center;"
                 aria-label={t('ask.modelSelector')}
               >
