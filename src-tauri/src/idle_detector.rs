@@ -32,9 +32,15 @@ impl IdleDetector {
         idle_secs >= self.idle_timeout_secs
     }
 
-    /// 第二阶段：用截图哈希确认是否真的空闲
-    /// 在截图后调用，传入当前截图的哈希
-    /// 返回 true 表示真的空闲（屏幕也没变化），应该跳过时长记录
+    /// 第二阶段：用截图哈希判断屏幕是否长时间无变化。
+    ///
+    /// **注意**：返回值不再驱动空闲判定。早期版本曾把"画面连续无变化"当作"确认空闲"
+    /// 的依据，但对创意类应用（PS/C4D/Blender 等）、AI 网页阅读、代码思考等场景，
+    /// 用户确实在工作而画面几乎不变 —— 哈希相似度对这类场景是反信号。
+    /// 现在空闲判定只在 `should_confirm_idle` 里做（键鼠 + 硬超时兜底）。
+    ///
+    /// 此函数保留用于：累计 `NO_CHANGE_COUNT`、输出 trace 日志，便于诊断与未来扩展
+    /// （如区分"工作但画面静止"vs"非工作"）。
     pub fn confirm_idle_with_hash(&self, current_hash: u64) -> bool {
         let last_hash = LAST_SCREENSHOT_HASH.swap(current_hash, Ordering::Relaxed);
 

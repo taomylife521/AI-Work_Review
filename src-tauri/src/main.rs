@@ -1013,14 +1013,14 @@ struct RecordingLoopDecision {
     reset_capture_clock: bool,
 }
 
-const ACTIVITY_INPUT_IDLE_HARD_STOP_MINUTES: u64 = 20;
+const ACTIVITY_INPUT_IDLE_HARD_STOP_MINUTES: u64 = 10;
 const ACTIVITY_INPUT_IDLE_HARD_STOP_SECS: u64 = ACTIVITY_INPUT_IDLE_HARD_STOP_MINUTES * 60;
 
 fn should_confirm_idle(
     input_idle: bool,
     input_idle_seconds: u64,
     screenshots_enabled: bool,
-    screenshot_confirmed: bool,
+    _screenshot_confirmed: bool,
 ) -> bool {
     if !input_idle {
         return false;
@@ -1031,8 +1031,12 @@ fn should_confirm_idle(
         return true;
     }
 
+    // 键鼠超时但未到硬超时：不再因"画面无变化"判空闲。
+    // 创意类应用（PS/C4D/Blender）、AI 网页阅读、代码思考等场景下，画面可能长时间
+    // 几乎不变但用户确实在工作。哈希相似度对这类场景是反信号，故废弃其"确认空闲"作用。
+    // 关闭截图时无法看画面，回退到"键鼠超时即空闲"（保留原行为）。
     if screenshots_enabled {
-        screenshot_confirmed
+        false
     } else {
         true
     }
@@ -2513,6 +2517,12 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                         idle_detector.reset();
                         false
                     };
+                    // 画面静止但键鼠超时：仅日志诊断，不再据此判空闲（创意类应用场景）
+                    if input_idle && screenshot_idle && screenshots_enabled {
+                        log::debug!(
+                            "键鼠超时且画面静止，但未到硬超时，保留时长等待键鼠恢复 (idle_secs={input_idle_seconds})"
+                        );
+                    }
                     let is_confirmed_idle = should_confirm_idle(
                         input_idle,
                         input_idle_seconds,
@@ -3974,22 +3984,34 @@ mod tests {
     }
 
     #[test]
-    fn 关闭截图后应直接按输入空闲判断为空闲() {
-        assert!(should_confirm_idle(true, 5 * 60, false, false));
+    fn 键鼠活跃时无论截图与否都不应判空闲() {
+        assert!(!should_confirm_idle(false, 0, true, false));
         assert!(!should_confirm_idle(false, 0, false, true));
     }
 
     #[test]
-    fn 开启截图后仍应依赖截图确认空闲() {
-        assert!(!should_confirm_idle(true, 5 * 60, true, false));
-        assert!(should_confirm_idle(true, 5 * 60, true, true));
+    fn 关闭截图后应直接按输入空闲判断为空闲() {
+        assert!(should_confirm_idle(true, 5 * 60, false, false));
+        assert!(should_confirm_idle(true, 5 * 60, false, true));
     }
 
     #[test]
-    fn 长时间无输入时应强制停止累计活跃时长() {
-        assert!(should_confirm_idle(true, 20 * 60, true, false));
-        assert!(!should_confirm_idle(true, 19 * 60, true, false));
-        assert!(should_confirm_idle(true, 25 * 60, true, false));
+    fn 开启截图时键鼠超时不再因画面静止判空闲() {
+        // 反转后的核心行为：创意类应用（PS/C4D）画面长时间不变，但键鼠超时
+        // 不应直接判空闲 —— 用户可能在调色、思考、阅读 AI 回复。
+        // 画面静止（true）或画面有变化（false）都不影响：未到硬超时一律保留时长。
+        assert!(!should_confirm_idle(true, 5 * 60, true, true));
+        assert!(!should_confirm_idle(true, 5 * 60, true, false));
+        assert!(!should_confirm_idle(true, 9 * 60, true, true));
+    }
+
+    #[test]
+    fn 达到十分钟硬超时后应强制切断空闲() {
+        assert!(should_confirm_idle(true, 10 * 60, true, false));
+        assert!(should_confirm_idle(true, 10 * 60, false, false));
+        assert!(should_confirm_idle(true, 15 * 60, true, true));
+        // 边界：差一秒未到硬超时，仍不判空闲
+        assert!(!should_confirm_idle(true, 10 * 60 - 1, true, true));
     }
 
     #[test]

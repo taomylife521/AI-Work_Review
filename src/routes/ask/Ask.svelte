@@ -29,6 +29,9 @@
   // 模型选择器
   let modelProfiles = [];
   let selectedModelId = BASIC_ASSISTANT_MODEL_ID;
+  let modelSelectEl;
+  let modelSelectWidth = 'auto';
+  let modelMeasureEl;
 
   const providerDisplayNames = {
     ollama: {
@@ -111,6 +114,29 @@
     }
     return '';
   }
+
+  // 当前选中项的显示文本（用于测量 select 收起态宽度）
+  function currentModelOptionLabel() {
+    if (selectedModelId === BASIC_ASSISTANT_MODEL_ID) {
+      return t('ask.basicTemplate');
+    }
+    const profile = modelProfiles.find((p) => p.id === selectedModelId);
+    return profile ? displayModelProfileName(profile) || t('ask.aiEnhanced') : '';
+  }
+
+  // Measure collapsed select width: text width + padding(px-3=24) + arrow(pr-8=32) + border(2) ≈ text + 46.
+  // Use a hidden mirror span with the select's font props to measure precisely,
+  // avoiding width:max-content which sizes to the longest option.
+  function measureModelSelectWidth() {
+    if (!modelMeasureEl) return;
+    modelMeasureEl.textContent = currentModelOptionLabel() || '';
+    const textWidth = modelMeasureEl.offsetWidth;
+    const clamped = Math.max(textWidth + 46, 72); // min 72px, max aligns with max-w-[260px]
+    modelSelectWidth = Math.min(clamped, 260) + 'px';
+  }
+
+  // Re-measure when selection / profile list / locale changes
+  $: measureModelSelectWidth(selectedModelId, modelProfiles, currentLocale);
 
   onMount(async () => {
     unsubscribeAssistant = assistantStore.subscribe((state) => {
@@ -728,12 +754,14 @@
           />
 
           <div class="mt-3 flex items-center justify-between gap-3 border-t border-slate-200/60 pt-2.5 dark:border-[#30363d]/60">
-            <div class="flex min-w-0 flex-1 items-center gap-2">
+            <div class="flex min-w-0 items-center gap-2">
+              <span bind:this={modelMeasureEl} class="invisible pointer-events-none absolute left-0 top-0 -z-10 whitespace-nowrap text-[11px] font-medium" aria-hidden="true"></span>
               <select
+                bind:this={modelSelectEl}
                 bind:value={selectedModelId}
                 on:change={handleModelChange}
-                class="h-8 min-w-[160px] max-w-[260px] cursor-pointer appearance-none rounded-lg border border-slate-200/80 bg-slate-100/90 px-3 pr-8 text-[11px] font-medium text-slate-700 outline-none transition hover:bg-slate-200/70 focus:ring-2 focus:ring-slate-300 dark:border-[#30363d]/80 dark:bg-[#21262d]/70 dark:text-[#adbac7] dark:hover:bg-[#30363d]/80 dark:focus:ring-primary-600"
-                style="background-image: url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E&quot;); background-repeat: no-repeat; background-position: right 10px center;"
+                class="h-8 max-w-[260px] cursor-pointer appearance-none rounded-lg border border-slate-200/80 bg-slate-100/90 px-3 pr-8 text-[11px] font-medium text-slate-700 outline-none transition hover:bg-slate-200/70 focus:ring-2 focus:ring-slate-300 dark:border-[#30363d]/80 dark:bg-[#21262d]/70 dark:text-[#adbac7] dark:hover:bg-[#30363d]/80 dark:focus:ring-primary-600"
+                style="width: {modelSelectWidth}; background-image: url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E&quot;); background-repeat: no-repeat; background-position: right 10px center;"
                 aria-label={t('ask.modelSelector')}
               >
                 <option value={BASIC_ASSISTANT_MODEL_ID}>{t('ask.basicTemplate')}</option>
