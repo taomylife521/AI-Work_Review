@@ -1238,6 +1238,8 @@
   @apply text-slate-700 dark:text-[#adbac7];
   overflow-wrap: anywhere;
   word-break: break-word;
+  /* 兜底：窄屏时宽表格可横向滚动，不撑破布局 */
+  overflow-x: auto;
 }
 
 .markdown-body h1 {
@@ -1342,15 +1344,14 @@
 
 /* Excel 风格表格样式 */
 .markdown-body table {
-  display: block;
-  max-width: 100%;
+  display: table;
+  width: 100%;
   border-collapse: collapse;
   margin: 1em 0;
   font-size: 0.875rem;
   border: 1px solid #e2e8f0;
   border-radius: 0.5rem;
   overflow: hidden;
-  overflow-x: auto;
 }
 
 .markdown-body thead {
