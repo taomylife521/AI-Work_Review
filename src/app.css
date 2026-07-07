@@ -8,10 +8,17 @@
   line-height: 1.6;
   font-weight: 400;
   --editorial-shell-bg: linear-gradient(180deg, #f4f7ff 0%, #eef2ff 28%, #f8fafc 100%);
-  --editorial-surface-featured:
-    radial-gradient(circle at top left, rgba(255, 255, 255, 0.98), rgba(244, 247, 255, 0.94) 52%, rgba(248, 250, 252, 0.92) 100%);
-  --editorial-surface-subtle:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 252, 0.9));
+  --editorial-surface-featured: #ffffff;
+  --editorial-surface-subtle: #f8fafc;
+
+  /* 设计 token —— 2026 极简现代风：3 级圆角 + 极轻阴影 + 8 点栅格间距 */
+  --radius-sm: 6px;     /* 表格、blockquote、统计卡 */
+  --radius-md: 12px;    /* 按钮、段落容器 */
+  --radius-lg: 20px;    /* 主卡片 */
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 4px 16px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
+  --space-section: 1.75rem;  /* 段落间距 */
+  --space-block: 1rem;       /* 卡片内边距 */
 
   color: #213547;
   background-color: #f8fafc;
@@ -28,10 +35,11 @@
   color: #e6edf3;
   background-color: #0d1117;
   --editorial-shell-bg: linear-gradient(180deg, #010409 0%, #0d1117 22%, #161b22 56%, #0d1117 100%);
-  --editorial-surface-featured:
-    radial-gradient(circle at top left, rgba(56, 139, 253, 0.10), rgba(22, 27, 34, 0.96) 52%, rgba(13, 17, 23, 0.98) 100%);
-  --editorial-surface-subtle:
-    linear-gradient(180deg, rgba(22, 27, 34, 0.90), rgba(13, 17, 23, 0.84));
+  --editorial-surface-featured: #161b22;
+  --editorial-surface-subtle: #0d1117;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.20), 0 1px 3px rgba(0, 0, 0, 0.24);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.20);
 }
 
 /* 滚动条样式 */
@@ -1350,72 +1358,84 @@
   margin: 1em 0;
   font-size: 0.875rem;
   border: 1px solid #e2e8f0;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
+/* 表头：去掉 linear-gradient，改为纯色（更现代）*/
 .markdown-body thead {
-  background: linear-gradient(to bottom, #f8fafc, #f1f5f9);
+  background: #f8fafc;
 }
 
 .dark .markdown-body thead {
-  background: linear-gradient(to bottom, #334155, #1e293b);
+  background: rgba(30, 41, 59, 0.45);
 }
 
 .markdown-body th {
-  padding: 0.75rem 1rem;
+  padding: 0.7rem 1rem;
   text-align: left;
   font-weight: 600;
-  color: #475569;
-  border-bottom: 2px solid #e2e8f0;
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+  color: #64748b;
+  border-bottom: 1px solid #e2e8f0;
   white-space: nowrap;
 }
 
 .dark .markdown-body th {
-  color: #e2e8f0;
-  border-bottom-color: #475569;
+  color: #94a3b8;
+  border-bottom-color: #30363d;
 }
 
 .markdown-body td {
-  padding: 0.625rem 1rem;
+  padding: 0.7rem 1rem;
   border-bottom: 1px solid #e2e8f0;
   color: #334155;
   text-align: left;
 }
 
 .dark .markdown-body td {
-  border-bottom-color: #334155;
+  border-bottom-color: #21262d;
   color: #cbd5e1;
 }
 
+/* zebra：偶数行极淡底色，辅助长表格阅读 */
+.markdown-body tbody tr:nth-child(even) {
+  background-color: rgba(248, 250, 252, 0.5);
+}
+
+.dark .markdown-body tbody tr:nth-child(even) {
+  background-color: rgba(22, 27, 34, 0.4);
+}
+
 .markdown-body tbody tr:hover {
-  background-color: #f8fafc;
+  background-color: #f1f5f9;
 }
 
 .dark .markdown-body tbody tr:hover {
-  background-color: #1e293b;
+  background-color: rgba(30, 41, 59, 0.6);
 }
 
 .markdown-body tbody tr:last-child td {
   border-bottom: none;
 }
 
-/* details/summary 折叠组件（活动时间线等） */
+/* details/summary 折叠组件（活动时间线等）—— 现代化：CSS chevron + 平滑滚动 */
 .markdown-body details {
   margin: 1em 0;
   border: 1px solid #e2e8f0;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
 .dark .markdown-body details {
-  border-color: #334155;
+  border-color: #30363d;
 }
 
 .markdown-body summary {
-  padding: 0.625rem 1rem;
+  padding: 0.7rem 1rem;
   font-weight: 500;
-  font-size: 0.875rem;
+  font-size: 0.9rem;
   cursor: pointer;
   background: #f8fafc;
   color: #475569;
@@ -1424,34 +1444,46 @@
   display: flex;
   align-items: center;
   gap: 0.5em;
+  transition: background-color 0.15s ease;
+}
+
+.markdown-body summary:hover {
+  background: #f1f5f9;
 }
 
 .markdown-body summary::-webkit-details-marker {
   display: none;
 }
 
+/* CSS 画的 chevron —— 比 ▶ 文本符号更锐利、可控 */
 .markdown-body summary::before {
-  content: '▶';
-  font-size: 0.65em;
-  transition: transform 0.15s ease;
-  display: inline-block;
+  content: '';
+  width: 0.5rem;
+  height: 0.5rem;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.18s ease;
+  margin-right: 0.15rem;
+  flex-shrink: 0;
 }
 
 .markdown-body details[open] summary::before {
-  transform: rotate(90deg);
+  transform: rotate(45deg);
 }
 
 .dark .markdown-body summary {
-  background: #1e293b;
-  color: #94a3b8;
+  background: rgba(22, 27, 34, 0.6);
+  color: #adbac7;
 }
 
-.markdown-body details[open] {
-  /* 展开时限制高度，内部滚动 */
+.dark .markdown-body summary:hover {
+  background: rgba(30, 41, 59, 0.8);
 }
 
+/* 展开时限制高度，内部滚动 —— 提高上限避免短列表也被截断 */
 .markdown-body details[open] > :not(summary) {
-  max-height: 320px;
+  max-height: 480px;
   overflow-y: auto;
 }
 
@@ -1620,19 +1652,7 @@
   overflow: hidden;
 }
 
-.report-sheet::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 30%),
-    repeating-linear-gradient(
-      135deg,
-      rgba(99, 102, 241, 0.014) 0 6px,
-      transparent 6px 16px
-    );
-  pointer-events: none;
-}
+/* 极简风：去除斜纹纹理伪元素（视觉噪声），保留干净的纯色卡片底 */
 
 .report-sheet-controls {
   background: var(--editorial-surface-subtle);
@@ -1640,9 +1660,8 @@
 
 .report-article-card {
   background: var(--editorial-surface-featured);
-  box-shadow:
-    0 22px 52px rgba(15, 23, 42, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.86);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
 }
 
 .report-sheet-meta {
@@ -1655,6 +1674,35 @@
   margin: 0 auto;
 }
 
+/* 统计卡：现代数据洞察风格 —— 左对齐、大数值、hairline border、零阴影 */
+.report-stat-card {
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: var(--editorial-surface-subtle);
+  padding: 0.85rem 1rem;
+}
+.report-stat-label {
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 0.3rem;
+}
+.report-stat-value {
+  font-size: 1.4rem;
+  line-height: 1.2;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #0f172a;
+}
+.dark .report-stat-card {
+  border-color: rgba(48, 54, 61, 0.80);
+  background: rgba(22, 27, 34, 0.55);
+}
+.dark .report-stat-value {
+  color: #e6edf3;
+}
+
 .report-sheet-body {
   position: relative;
   z-index: 1;
@@ -1663,38 +1711,52 @@
 
 .report-editorial-shell .markdown-body h1 {
   font-size: 2.35rem;
-  letter-spacing: 0;
+  letter-spacing: -0.01em;
+  font-weight: 700;
 }
 
+/* h2：用大留白分隔段落，不再用 border-top 硬分隔线（更现代）*/
 .report-editorial-shell .markdown-body h2 {
-  font-size: 1.45rem;
-  padding-top: 0.4rem;
-  border-top: 1px solid rgba(120, 113, 108, 0.12);
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  margin-top: var(--space-section);
+  padding-top: 0;
+  border-top: none;
+}
+.report-editorial-shell .markdown-body h2:first-child {
+  margin-top: 0;
 }
 
 .report-editorial-shell .markdown-body h3 {
   font-size: 1.08rem;
+  font-weight: 600;
   letter-spacing: 0;
 }
 
 .report-editorial-shell .markdown-body p,
 .report-editorial-shell .markdown-body li {
-  line-height: 1.95;
+  line-height: 1.85;
 }
 
+/* 表格：去掉自身重阴影（卡片已有阴影），修暗色模式强制白底 bug */
 .report-editorial-shell .markdown-body table {
   margin-top: 0.85rem;
   margin-bottom: 1.15rem;
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.055);
+  background: transparent;
+  box-shadow: none;
 }
 
+/* 短结论 blockquote：从「淡靛蓝填充块」改为「左侧 accent 强调条 + 透明底」*/
 .report-editorial-shell .markdown-body blockquote {
-  border-left-width: 3px;
-  border-color: rgba(99, 102, 241, 0.44);
-  background: rgba(238, 242, 255, 0.62);
-  border-radius: 0 0.5rem 0.5rem 0;
-  padding: 0.9rem 1rem;
+  border-left: 3px solid #6366f1;
+  background: transparent;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: 0.5rem 0 0.5rem 1rem;
+  margin: 0.6rem 0 1rem;
+}
+.dark .report-editorial-shell .markdown-body blockquote {
+  border-left-color: #818cf8;
 }
 
 /* 报告段落编辑 */
@@ -2395,8 +2457,8 @@
 }
 
 .dark .report-editorial-shell .markdown-body table {
-  background: rgba(30, 41, 59, 0.58);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+  background: transparent;
+  box-shadow: none;
 }
 
 .dark .report-section:hover {

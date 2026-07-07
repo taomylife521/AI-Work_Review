@@ -852,22 +852,22 @@
           {isYesterdayReport ? t('report.yesterdayPrefix') : ''}{t('report.generatedAt', { time: formatLocalizedDate(new Date(report.created_at * 1000), { year: 'numeric', month: '2-digit', day: '2-digit' }) + ' ' + formatLocalizedTime(new Date(report.created_at * 1000), { hour: '2-digit', minute: '2-digit', second: '2-digit' }) })}
         </div>
         {#if freshStats}
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-            <div class="rounded-lg bg-slate-50 dark:bg-[#21262d]/60 px-3 py-2.5 text-center">
-              <div class="text-[11px] text-slate-500 dark:text-[#7d8590] mb-0.5">{t('report.statTotalDuration')}</div>
-              <div class="text-sm font-semibold text-slate-900 dark:text-[#c9d1d9]">{formatDurationLocalized(freshStats.total_duration)}</div>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+            <div class="report-stat-card">
+              <div class="report-stat-label">{t('report.statTotalDuration')}</div>
+              <div class="report-stat-value">{formatDurationLocalized(freshStats.total_duration)}</div>
             </div>
-            <div class="rounded-lg bg-slate-50 dark:bg-[#21262d]/60 px-3 py-2.5 text-center">
-              <div class="text-[11px] text-slate-500 dark:text-[#7d8590] mb-0.5">{t('report.statScreenshots')}</div>
-              <div class="text-sm font-semibold text-slate-900 dark:text-[#c9d1d9]">{freshStats.screenshot_count}</div>
+            <div class="report-stat-card">
+              <div class="report-stat-label">{t('report.statScreenshots')}</div>
+              <div class="report-stat-value">{freshStats.screenshot_count}</div>
             </div>
-            <div class="rounded-lg bg-slate-50 dark:bg-[#21262d]/60 px-3 py-2.5 text-center">
-              <div class="text-[11px] text-slate-500 dark:text-[#7d8590] mb-0.5">{t('report.statApps')}</div>
-              <div class="text-sm font-semibold text-slate-900 dark:text-[#c9d1d9]">{freshStats.app_usage?.length ?? 0}</div>
+            <div class="report-stat-card">
+              <div class="report-stat-label">{t('report.statApps')}</div>
+              <div class="report-stat-value">{freshStats.app_usage?.length ?? 0}</div>
             </div>
-            <div class="rounded-lg bg-slate-50 dark:bg-[#21262d]/60 px-3 py-2.5 text-center">
-              <div class="text-[11px] text-slate-500 dark:text-[#7d8590] mb-0.5">{t('report.statWebsites')}</div>
-              <div class="text-sm font-semibold text-slate-900 dark:text-[#c9d1d9]">{freshStats.domain_usage?.length ?? 0}</div>
+            <div class="report-stat-card">
+              <div class="report-stat-label">{t('report.statWebsites')}</div>
+              <div class="report-stat-value">{freshStats.domain_usage?.length ?? 0}</div>
             </div>
           </div>
         {/if}

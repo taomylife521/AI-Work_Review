@@ -48,7 +48,8 @@ test('日报页纸面容器应复用统一 editorial surface，而不是额外�
 
   assert.match(appCssSource, /\.report-sheet-controls\s*\{[\s\S]*background:\s*var\(--editorial-surface-subtle\)/);
   assert.match(appCssSource, /\.report-article-card\s*\{[\s\S]*background:\s*var\(--editorial-surface-featured\)/);
-  assert.match(appCssSource, /\.report-sheet::before\s*\{[\s\S]*rgba\(99,\s*102,\s*241,\s*0\.014\)/);
+  // 极简风：主卡片用统一 token 阴影，不再叠斜纹纹理伪元素
+  assert.match(appCssSource, /\.report-article-card\s*\{[\s\S]*box-shadow:\s*var\(--shadow-md\)/);
 });
 
 test('日报正文段落应提供稳定动作区、导语和表格阅读样式', async () => {
@@ -61,5 +62,7 @@ test('日报正文段落应提供稳定动作区、导语和表格阅读样式',
   assert.match(appCssSource, /\.report-section\s*\{[\s\S]*padding:/);
   assert.match(appCssSource, /\.report-section-content\s+blockquote:first-of-type\b/);
   assert.match(appCssSource, /\.report-section-actions\b/);
-  assert.match(appCssSource, /\.report-editorial-shell\s+\.markdown-body\s+table\s*\{[\s\S]*box-shadow:/);
+  // 表格不再自身加阴影（卡片已有阴影）；断言改为统计卡新结构
+  assert.match(reportSource, /report-stat-card/);
+  assert.match(appCssSource, /\.report-stat-card\b/);
 });
