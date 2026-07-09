@@ -243,6 +243,11 @@
     e.preventDefault();
   }
 
+  // #126: 屏蔽 WebView 原生右键菜单，避免暴露浏览器默认上下文菜单
+  function preventNativeContextMenu(e) {
+    e.preventDefault();
+  }
+
   function normalizeTimePart(value, upperBound) {
     const parsed = Number.parseInt(value, 10);
     if (!Number.isFinite(parsed)) return 0;
@@ -286,11 +291,13 @@
     // 全局阻止文件拖放导致页面导航（如拖入 PDF 会替换整个应用）
     window.addEventListener('dragover', preventFileDrop);
     window.addEventListener('drop', preventFileDrop);
+    window.addEventListener('contextmenu', preventNativeContextMenu);
 
     if (isAvatarWindow) {
       return () => {
         window.removeEventListener('dragover', preventFileDrop);
         window.removeEventListener('drop', preventFileDrop);
+        window.removeEventListener('contextmenu', preventNativeContextMenu);
       };
     }
 
@@ -311,6 +318,7 @@
     pendingCleanup.push(() => unsubscribeLocale());
     pendingCleanup.push(() => window.removeEventListener('dragover', preventFileDrop));
     pendingCleanup.push(() => window.removeEventListener('drop', preventFileDrop));
+    pendingCleanup.push(() => window.removeEventListener('contextmenu', preventNativeContextMenu));
 
     (async () => {
       try {

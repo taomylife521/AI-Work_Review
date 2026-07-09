@@ -52,3 +52,12 @@ test('自动检查更新不应在网络请求前提前写入最后检查时间',
   assert.match(source, /await runUpdateFlow\(/);
   assert.doesNotMatch(source, /invoke\('update_last_check_time'\)/);
 });
+
+test('应用壳层应屏蔽 WebView 原生右键菜单', async () => {
+  const source = await readFile(new URL('./App.svelte', import.meta.url), 'utf8');
+
+  assert.match(source, /function preventNativeContextMenu\(e\)/);
+  assert.match(source, /preventNativeContextMenu\(e\) \{\s*e\.preventDefault\(\);/);
+  assert.match(source, /window\.addEventListener\('contextmenu', preventNativeContextMenu\)/);
+  assert.match(source, /window\.removeEventListener\('contextmenu', preventNativeContextMenu\)/);
+});
