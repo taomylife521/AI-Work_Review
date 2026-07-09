@@ -250,7 +250,7 @@
       if (inCodeBlock) { result.push(raw); continue; }
 
       // 表格行原样透传（避免被下面的"标题/列表"规则误伤，破坏表格语法）
-      if (/^\|.*\|$/.test(t) || /^\|[-:\s|]+\|$/.test(t)) {
+      if (/^\|.*\|$/.test(t)) {
         result.push(raw);
         continue;
       }

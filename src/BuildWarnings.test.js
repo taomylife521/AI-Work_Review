@@ -31,4 +31,7 @@ test('生产构建不应出现已知质量警告', async () => {
   assert.doesNotMatch(output, /\[vite-plugin-svelte\].*A11y:/);
   assert.doesNotMatch(output, /Some chunks are larger than 500 kB after minification/);
   assert.doesNotMatch(output, /Browserslist: browsers data .* is .* old/);
+  assert.doesNotMatch(output, /warnings when minifying css/);
+  assert.doesNotMatch(output, /css-syntax-error/);
+  assert.doesNotMatch(output, /Expected identifier but found/);
 });
