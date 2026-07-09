@@ -26,3 +26,15 @@ test('Release workflow 应在构建前执行测试并使用 npm ci', () => {
   assert.ok(frontendBuildIndex < rustIndex, 'Rust 测试前必须先生成 frontendDist');
   assert.ok(rustIndex < buildIndex, 'Rust 测试必须先于构建执行');
 });
+
+test('Release workflow 应构建并上传 Linux RPM 产物', () => {
+  const source = readFileSync(new URL('./.github/workflows/release.yml', import.meta.url), 'utf8');
+
+  assert.match(source, /args:\s*"--target x86_64-unknown-linux-gnu --bundles deb,rpm,appimage"[\s\S]*target:\s*x86_64-unknown-linux-gnu/);
+  assert.match(source, /args:\s*"--target aarch64-unknown-linux-gnu --bundles deb"[\s\S]*target:\s*aarch64-unknown-linux-gnu/);
+  assert.match(source, /sudo apt-get install -y[\s\S]*\brpm\b/);
+  assert.match(source, /-name "\*\.rpm"/);
+  assert.match(source, /release\/bundle\/rpm\/\*\.rpm/);
+  assert.match(source, /require_file "\*\/release\/bundle\/rpm\/\*\.rpm" "Linux x64 RPM"/);
+  assert.match(source, /target\/\*\*\/release\/bundle\/rpm\/\*\.rpm/);
+});

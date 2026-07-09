@@ -26,6 +26,27 @@ test('Linux deb 依赖应覆盖 gdbus 与 Wayland 截图工具', async () => {
   assert.ok(depends.includes('gnome-screenshot | grim | scrot | maim | imagemagick'));
 });
 
+test('Linux 发行包应同时生成 RPM 并在 README 中说明', async () => {
+  const tauriConfig = JSON.parse(
+    await readFile(new URL('../src-tauri/tauri.conf.json', import.meta.url), 'utf8')
+  );
+  const zh = await readFile(new URL('../README.zh.md', import.meta.url), 'utf8');
+  const en = await readFile(new URL('../README.md', import.meta.url), 'utf8');
+  const tw = await readFile(new URL('../README.tw.md', import.meta.url), 'utf8');
+
+  assert.ok(tauriConfig.bundle.targets.includes('rpm'));
+  assert.ok(tauriConfig.bundle.linux.rpm.depends.includes('xdotool'));
+  assert.ok(tauriConfig.bundle.linux.rpm.depends.includes('xprintidle'));
+  assert.ok(tauriConfig.bundle.linux.rpm.depends.includes('tesseract'));
+  assert.ok(tauriConfig.bundle.linux.rpm.depends.includes('procps-ng'));
+  assert.match(zh, /Linux x86_64[\s\S]*\.rpm/);
+  assert.match(en, /Linux x86_64[\s\S]*\.rpm/);
+  assert.match(tw, /Linux x86_64[\s\S]*\.rpm/);
+  assert.match(zh, /sudo dnf install/);
+  assert.match(en, /sudo dnf install/);
+  assert.match(tw, /sudo dnf install/);
+});
+
 test('README 应说明 mac 输入监控权限与三端桌宠联动条件', async () => {
   const zh = await readFile(new URL('../README.zh.md', import.meta.url), 'utf8');
   const en = await readFile(new URL('../README.md', import.meta.url), 'utf8');

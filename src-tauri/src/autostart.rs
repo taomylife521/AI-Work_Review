@@ -96,8 +96,9 @@ pub fn enable_autostart(app: AppHandle, silent: bool) -> Result<()> {
 
     #[cfg(not(windows))]
     {
-        // macOS/Linux: plugin 初始化时已固定注入 `--autostart --hidden`，
-        // silent 由前端 config 主导，这里收下参数保持与 Windows 对齐但不使用。
+        // macOS/Linux: the plugin is initialized with `--autostart`; silent
+        // mode is decided from config at launch. Keep the parameter for API
+        // parity with Windows.
         let _ = silent;
         app.autolaunch()
             .enable()

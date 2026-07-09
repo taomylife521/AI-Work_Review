@@ -458,6 +458,10 @@ fn launch_args_request_hidden_window(args: &[String]) -> bool {
     launch_args_contain_autostart(args) || args_include_explicit_hidden_flag(args)
 }
 
+fn duplicate_instance_should_stay_silent(args: &[String]) -> bool {
+    launch_args_contain_autostart(args) || args_include_explicit_hidden_flag(args)
+}
+
 fn should_hide_main_window_on_setup(_config: &AppConfig, launch_args: &[String]) -> bool {
     #[cfg(windows)]
     {
@@ -469,11 +473,10 @@ fn should_hide_main_window_on_setup(_config: &AppConfig, launch_args: &[String])
 
     #[cfg(not(windows))]
     {
-        // macOS/Linux: tauri_plugin_autostart 的 args 在 plugin init 时固定，
-        // 仍由 config.auto_start_silent 作为显隐信源。
-        _config.auto_start
-            && _config.auto_start_silent
-            && launch_args_request_hidden_window(launch_args)
+        // Non-Windows autostart state can be stale during early setup. Once
+        // launch args prove this came from autostart/hidden launch, use the
+        // user's silent-mode preference as the visibility source of truth.
+        _config.auto_start_silent && launch_args_request_hidden_window(launch_args)
     }
 }
 
@@ -3456,12 +3459,12 @@ async fn main() {
     #[cfg(not(windows))]
     let builder = builder.plugin(tauri_plugin_autostart::init(
         tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-        Some(vec![AUTOSTART_LAUNCH_ARG, "--hidden"]),
+        Some(vec![AUTOSTART_LAUNCH_ARG]),
     ));
     builder
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             // 如果第二个实例是自启动触发的，保持静默不弹窗
-            if argv.iter().any(|arg| arg == AUTOSTART_LAUNCH_ARG) {
+            if duplicate_instance_should_stay_silent(&argv) {
                 log::info!("检测到重复自启动，保持静默 | 参数: {argv:?}");
                 return;
             }
@@ -3925,8 +3928,8 @@ mod tests {
     use super::{
         advance_break_reminder, avatar_activity_decision, avatar_monitor_poll_interval_ms,
         avatar_monitor_poll_interval_ms_for_platform, avatar_proactive_ai_should_run,
-        avatar_transition_decision,
-        browser_change_capture_min_interval_ms, effective_dock_visibility,
+        avatar_transition_decision, browser_change_capture_min_interval_ms,
+        duplicate_instance_should_stay_silent, effective_dock_visibility,
         launch_args_contain_autostart, main_window_close_behavior, monitoring_poll_interval_ms,
         monitoring_poll_interval_ms_for_platform, persist_previous_activity_backfill,
         previous_app_backfill_duration, record_avatar_window_switch, recording_loop_decision,
@@ -4419,6 +4422,22 @@ mod tests {
             &config,
             &["work-review".to_string(), "--minimized".to_string()]
         ));
+
+        let mut stale_enabled_config = AppConfig::default();
+        stale_enabled_config.auto_start = false;
+        stale_enabled_config.auto_start_silent = true;
+        assert!(should_hide_main_window_on_setup(
+            &stale_enabled_config,
+            &["work-review".to_string(), "--autostart".to_string()]
+        ));
+
+        let mut visible_config = AppConfig::default();
+        visible_config.auto_start = false;
+        visible_config.auto_start_silent = false;
+        assert!(!should_hide_main_window_on_setup(
+            &visible_config,
+            &["work-review".to_string(), "--hidden".to_string()]
+        ));
     }
 
     #[test]
@@ -4470,6 +4489,26 @@ mod tests {
             "--autostart".to_string()
         ]));
         assert!(!launch_args_contain_autostart(&[
+            "work-review".to_string(),
+            "--autostarted".to_string()
+        ]));
+    }
+
+    #[test]
+    fn 重复实例遇到自启或隐藏参数时应保持静默() {
+        assert!(duplicate_instance_should_stay_silent(&[
+            "work-review".to_string(),
+            "--autostart".to_string()
+        ]));
+        assert!(duplicate_instance_should_stay_silent(&[
+            "work-review".to_string(),
+            "--hidden".to_string()
+        ]));
+        assert!(duplicate_instance_should_stay_silent(&[
+            "work-review".to_string(),
+            "--minimized".to_string()
+        ]));
+        assert!(!duplicate_instance_should_stay_silent(&[
             "work-review".to_string(),
             "--autostarted".to_string()
         ]));

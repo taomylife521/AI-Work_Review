@@ -13,6 +13,7 @@
       "dmg",
       "app",
       "deb",
+      "rpm",
       "appimage"
     ],
     "windows": {
@@ -55,6 +56,17 @@
           "tesseract-ocr",
           "gnome-screenshot | grim | scrot | maim | imagemagick",
           "procps"
+        ]
+      },
+      "rpm": {
+        "depends": [
+          "xdotool",
+          "xprintidle",
+          "xorg-x11-utils",
+          "glib2",
+          "tesseract",
+          "gnome-screenshot",
+          "procps-ng"
         ]
       },
       "appimage": {

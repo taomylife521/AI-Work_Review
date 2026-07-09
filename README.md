@@ -211,7 +211,7 @@ Supported providers: Ollama (local) / OpenAI compatible / DeepSeek / Qwen / Zhip
 |------|--------|
 | macOS (Apple Silicon / Intel) | `.dmg` |
 | Windows | `.exe` / portable `.zip` |
-| Linux x86_64 (X11 / Wayland) | `.deb` / `.AppImage` |
+| Linux x86_64 (X11 / Wayland) | `.deb` / `.rpm` / `.AppImage` |
 | Linux ARM64 (aarch64) | `.deb` |
 
 **macOS:** Screenshots require the "Screen Recording" permission, and avatar linkage requires "Accessibility + Input Monitoring". If you see a "damaged" warning on first launch: `sudo xattr -rd com.apple.quarantine "/Applications/Work Review.app"`
@@ -227,6 +227,10 @@ sudo apt install xprintidle tesseract-ocr
 sudo apt install xdotool x11-utils scrot
 # Wayland: gdbus (GNOME) / kdotool (KDE) / swaymsg (Sway) / hyprctl (Hyprland)
 # Screenshots: grim / gnome-screenshot / spectacle
+
+# RPM-based distributions
+sudo dnf install xprintidle tesseract xdotool xorg-x11-utils gnome-screenshot procps-ng
+sudo zypper install xprintidle tesseract-ocr xdotool xorg-x11-tools gnome-screenshot procps
 ```
 
 </details>

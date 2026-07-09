@@ -39,6 +39,22 @@ test('主窗口可见性应在前端挂载时补偿同步并在重新显示时�
   );
 });
 
+test('非 Windows 自启插件应只固定注入 autostart 参数，静默与否交给配置判断', async () => {
+  const mainSource = await readFile(
+    new URL('../src-tauri/src/main.rs', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(
+    mainSource,
+    /tauri_plugin_autostart::init\(\s*tauri_plugin_autostart::MacosLauncher::LaunchAgent,\s*Some\(vec!\[AUTOSTART_LAUNCH_ARG\]\)/
+  );
+  assert.doesNotMatch(
+    mainSource,
+    /tauri_plugin_autostart::init\([\s\S]*Some\(vec!\[AUTOSTART_LAUNCH_ARG,\s*"--hidden"\]\)/
+  );
+});
+
 test('浏览器预览环境缺少 Tauri window metadata 时应用仍应可挂载', async () => {
   const appSource = await readFile(new URL('./App.svelte', import.meta.url), 'utf8');
 

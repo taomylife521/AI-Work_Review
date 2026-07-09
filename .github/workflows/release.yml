@@ -20,10 +20,10 @@ jobs:
             args: "--target x86_64-apple-darwin"
             target: x86_64-apple-darwin
           - platform: ubuntu-22.04
-            args: "--target x86_64-unknown-linux-gnu"
+            args: "--target x86_64-unknown-linux-gnu --bundles deb,rpm,appimage"
             target: x86_64-unknown-linux-gnu
           - platform: ubuntu-24.04-arm
-            args: "--target aarch64-unknown-linux-gnu"
+            args: "--target aarch64-unknown-linux-gnu --bundles deb"
             target: aarch64-unknown-linux-gnu
           - platform: windows-latest
             args: ""
@@ -65,7 +65,8 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf \
-            libfuse2
+            libfuse2 \
+            rpm
 
       - name: Import macOS code signing certificate
         if: startsWith(matrix.platform, 'macos')
@@ -134,7 +135,7 @@ jobs:
         run: |
           if [[ -d "target" ]]; then
             echo "=== target ==="
-            find target -maxdepth 5 -type f \( -name "*.app" -o -name "*.dmg" -o -name "*.exe" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.tar.gz" -o -name "*.sig" \) 2>/dev/null || true
+            find target -maxdepth 5 -type f \( -name "*.app" -o -name "*.dmg" -o -name "*.exe" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.gz" -o -name "*.sig" \) 2>/dev/null || true
           else
             echo "No build output directory found in target."
           fi
@@ -262,6 +263,16 @@ jobs:
             fi
           done
 
+          find target -type f -path "*/release/bundle/rpm/*.rpm" 2>/dev/null | while read -r file; do
+            dir="$(dirname "$file")"
+            name="$(basename "$file")"
+            normalized_name="$(normalize_name "$name")"
+            renamed="${dir}/${normalized_name}"
+            if [[ "$file" != "$renamed" ]]; then
+              mv "$file" "$renamed"
+            fi
+          done
+
       - name: Verify required artifacts
         shell: bash
         run: |
@@ -300,6 +311,7 @@ jobs:
             x86_64-unknown-linux-gnu)
               require_file "*/release/bundle/appimage/*.AppImage" "Linux x64 AppImage"
               require_file "*/release/bundle/deb/*.deb" "Linux x64 DEB"
+              require_file "*/release/bundle/rpm/*.rpm" "Linux x64 RPM"
               ;;
             aarch64-unknown-linux-gnu)
               require_file "*/release/bundle/deb/*.deb" "Linux ARM64 DEB"
@@ -324,6 +336,7 @@ jobs:
             target/**/Work_Review_portable_*.zip
             target/**/release/bundle/appimage/*.AppImage
             target/**/release/bundle/deb/*.deb
+            target/**/release/bundle/rpm/*.rpm
           if-no-files-found: warn
 
   publish-release:

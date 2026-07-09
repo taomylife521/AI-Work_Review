@@ -55,6 +55,7 @@ fn build_date_context_suffix() -> String {
 
     let now = chrono::Local::now();
     let date = now.date_naive();
+    let utc_offset = now.format("%:z").to_string();
     let weekday = match date.weekday().num_days_from_monday() {
         0 => "周一",
         1 => "周二",
@@ -68,14 +69,15 @@ fn build_date_context_suffix() -> String {
     let hh = now.hour();
     let mm = now.minute();
     format!(
-        "\n\n[当前时间上下文] 今天是 {} {}，当前时间 {hh:02}:{mm:02}（周一为一周开始）。\n\
+        "\n\n[当前时间上下文] 今天是 {} {}，当前时间 {hh:02}:{mm:02}，本地时区 UTC{}（周一为一周开始）。\n\
          请基于这个日期理解\"今天/昨天/本周/上周/本月/上月/最近N天\"等相对时间词，\
          调用工具时把日期换算成 YYYY-MM-DD。\n\
          注意：工作记录工具仅支持天级查询（YYYY-MM-DD，不含时分）。若用户问\
          \"这小时/上午/下午/刚才\"等亚日级问题，请直接说明工具暂不支持该粒度，\
          不要在 date_from/date_to 里带时分调用工具。",
         date.format("%Y-%m-%d"),
-        weekday
+        weekday,
+        utc_offset
     )
 }
 
@@ -346,6 +348,10 @@ mod tests {
         );
         // 含当前时分 HH:MM
         assert!(regex::Regex::new(r"当前时间 \d{2}:\d{2}")
+            .unwrap()
+            .is_match(&suffix));
+        // Include the local UTC offset so the model does not guess a default timezone.
+        assert!(regex::Regex::new(r"本地时区 UTC[+-]\d{2}:\d{2}")
             .unwrap()
             .is_match(&suffix));
         // 明确告知工具仅支持天级 YYYY-MM-DD，避免模型传带时分的参数

@@ -211,7 +211,7 @@ Work Review 的核心始終是**本地記錄**。AI 的作用是讓記錄更容�
 |------|--------|
 | macOS (Apple Silicon / Intel) | `.dmg` |
 | Windows | `.exe` / 便攜版 `.zip` |
-| Linux x86_64 (X11 / Wayland) | `.deb` / `.AppImage` |
+| Linux x86_64 (X11 / Wayland) | `.deb` / `.rpm` / `.AppImage` |
 | Linux ARM64 (aarch64) | `.deb` |
 
 **macOS：** 截圖需「螢幕錄製」權限，桌寵聯動需「輔助功能 + 輸入監控」。首次提示"已損壞"時：`sudo xattr -rd com.apple.quarantine "/Applications/Work Review.app"`
@@ -227,6 +227,10 @@ sudo apt install xprintidle tesseract-ocr
 sudo apt install xdotool x11-utils scrot
 # Wayland: gdbus (GNOME) / kdotool (KDE) / swaymsg (Sway) / hyprctl (Hyprland)
 # 截圖: grim / gnome-screenshot / spectacle
+
+# RPM-based distributions
+sudo dnf install xprintidle tesseract xdotool xorg-x11-utils gnome-screenshot procps-ng
+sudo zypper install xprintidle tesseract-ocr xdotool xorg-x11-tools gnome-screenshot procps
 ```
 
 </details>
