@@ -23,7 +23,7 @@
     try {
       appVersion = await getVersion();
       const settings = await invoke('get_update_settings');
-      autoCheckUpdate = settings.auto_check ?? true;
+      autoCheckUpdate = settings.autoCheck ?? true;
     } catch (e) {
       console.error('初始化失败:', e);
       appVersion = '1.0.0';
@@ -34,7 +34,7 @@
     autoCheckUpdate = !autoCheckUpdate;
     try {
       const settings = await invoke('get_update_settings');
-      settings.auto_check = autoCheckUpdate;
+      settings.autoCheck = autoCheckUpdate;
       await invoke('save_update_settings', { settings });
     } catch (e) {
       console.error('保存更新设置失败:', e);

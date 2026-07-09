@@ -141,6 +141,15 @@
   $: isTextModelConfigured = textConnectionVerified;
   $: hasTextModelConfig = !!(config?.text_model?.endpoint && config?.text_model?.model);
 
+  // 本地 API（LM Studio / Ollama / 任意 localhost 端点）的自动测试会触发模型加载，
+  // 耗时且无必要 —— 这类端点跳过进入页面时的自动测试，由用户手动点"测试"。
+  function isLocalEndpoint() {
+    const provider = config?.text_model?.provider;
+    if (provider === 'ollama') return true;
+    const endpoint = (config?.text_model?.endpoint || '').toLowerCase();
+    return endpoint.includes('localhost') || endpoint.includes('127.0.0.1') || endpoint.includes('0.0.0.0');
+  }
+
   // 当前提供商
   $: currentProvider = localizedProviders.find(p => p.id === config?.text_model?.provider) || localizedProviders[0];
   $: requiresApiKey = currentProvider?.requires_api_key ?? true;
@@ -329,7 +338,9 @@
     const unsub = aiStore.subscribe(s => { lastHash = s.lastTestedConfigHash; });
     unsub();
 
-    if (hasTextModelConfig && currentHash !== lastHash) {
+    // 本地端点跳过自动测试：LM Studio/Ollana 的连接测试会触发大模型加载，
+    // 每次进设置页都自动跑是负担而非帮助，交给用户手动点"测试连接"即可。
+    if (hasTextModelConfig && currentHash !== lastHash && !isLocalEndpoint()) {
       aiStore.setConfigHash(currentHash);
       await testTextModel();
     }
