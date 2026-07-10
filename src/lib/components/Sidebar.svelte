@@ -31,6 +31,7 @@
     { value: 'zh-CN', label: 'ZH', fullLabelKey: 'sidebar.localeNames.zhCN' },
     { value: 'en', label: 'EN', fullLabelKey: 'sidebar.localeNames.en' },
     { value: 'zh-TW', label: 'TW', fullLabelKey: 'sidebar.localeNames.zhTW' },
+    { value: 'ar', label: 'AR', fullLabelKey: 'sidebar.localeNames.ar' },
   ];
   $: localeOptions = localeOptionsBase.map((option) => ({
     ...option,

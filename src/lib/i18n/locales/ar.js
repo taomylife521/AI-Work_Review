@@ -55,10 +55,10 @@ export default {
       },
       localeButtonTitle: 'Switch language',
       localeNames: {
-        zhCN: 'Simplified Chinese',
-        zhTW: 'Traditional Chinese',
-        en: 'English',
-        ar: 'Arabic',
+        zhCN: 'الصينية المبسطة',
+        zhTW: 'الصينية التقليدية',
+        en: 'الإنجليزية',
+        ar: 'العربية',
       },
       themeTitle: {
         system: 'Auto theme',
