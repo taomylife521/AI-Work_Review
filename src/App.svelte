@@ -13,7 +13,7 @@
   import { preloadAppIcons } from './lib/stores/iconCache.js';
   import { runUpdateFlow } from './lib/utils/updater.js';
 
-  // 开发态调试日志：生产构建不输出，避免污染用户控制台
+  // Development debug log: not output in production build to avoid polluting user console
   const devLog = (...args) => {
     if (import.meta.env.DEV) console.log(...args);
   };
@@ -36,7 +36,7 @@
     try {
       return getCurrentWebviewWindow();
     } catch (e) {
-      console.warn('当前环境缺少 Tauri 窗口元数据，已切换到浏览器预览模式:', e);
+      console.warn('Tauri window metadata missing in current environment, switched to browser preview mode:', e);
       return createBrowserPreviewWindow();
     }
   }
@@ -45,7 +45,7 @@
     try {
       return await listen(eventName, handler);
     } catch (e) {
-      console.warn(`当前环境无法注册 Tauri 事件 ${eventName}，已跳过:`, e);
+      console.warn(`Cannot register Tauri event ${eventName} in current environment, skipped:`, e);
       return () => {};
     }
   }

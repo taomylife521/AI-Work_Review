@@ -1054,7 +1054,7 @@
         <p>
         {t('timeline.subtitle')}
         {#if isToday}
-          <span class="ml-1.5 inline-flex items-center gap-1.5">
+          <span class="ms-1.5 inline-flex items-center gap-1.5">
             <span class="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
             <span class="font-mono text-xs text-emerald-600 dark:text-emerald-400">{formatLocalizedTime(currentTime, { hour: '2-digit', minute: '2-digit' })}</span>
           </span>
@@ -1354,7 +1354,7 @@
                   >✎</button>
                   <button
                     on:click|stopPropagation={() => pendingDeleteCategory = { key: cat.key, name: getCategoryDisplayName(cat) }}
-                    class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center text-xs leading-none opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-opacity shadow-sm dark:shadow-none"
+                    class="absolute -top-1.5 -end-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center text-xs leading-none opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-opacity shadow-sm dark:shadow-none"
                     disabled={categorySaving}
                     title={t('timeline.deleteCategory')}
                   >×</button>
@@ -1545,7 +1545,7 @@
             <span class="text-sm font-medium text-slate-500 dark:text-[#7d8590]">{t('timeline.detail.visitedUrl')}</span>
             <button 
               on:click={() => openUrl(selectedActivity.browser_url)}
-              class="text-primary-600 dark:text-primary-400 mt-1 text-sm hover:underline break-all block text-left cursor-pointer"
+              class="text-primary-600 dark:text-primary-400 mt-1 text-sm hover:underline break-all block text-start cursor-pointer"
             >
               {formatBrowserUrlForDisplay(selectedActivity.browser_url)}
             </button>
@@ -1801,7 +1801,7 @@
 
   .timeline-rail {
     position: absolute;
-    left: calc(1.25rem + var(--timeline-anchor-width) + 0.5rem);
+    inset-inline-start: calc(1.25rem + var(--timeline-anchor-width) + 0.5rem);
     top: 1.25rem;
     bottom: 1.25rem;
     width: 2px;
@@ -1819,7 +1819,7 @@
     gap: 1rem;
     width: 100%;
     padding: 0.2rem 0;
-    text-align: left;
+    text-align: start;
     transition:
       transform 180ms ease,
       filter 180ms ease;
@@ -1853,7 +1853,7 @@
 
   .timeline-entry-marker {
     flex-shrink: 0;
-    margin-left: auto;
+    margin-inline-start: auto;
     width: 0.8rem;
     height: 0.8rem;
     border-radius: 999px;
@@ -2395,7 +2395,7 @@
     }
 
     .timeline-rail {
-      left: calc(0.85rem + var(--timeline-anchor-width) + 0.4rem);
+      inset-inline-start: calc(0.85rem + var(--timeline-anchor-width) + 0.4rem);
     }
 
     .timeline-entry {

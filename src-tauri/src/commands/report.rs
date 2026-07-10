@@ -180,6 +180,7 @@ pub(crate) async fn generate_report_inner(
                 AppLocale::ZhCn => "开始整理日报，稍等我一下。",
                 AppLocale::ZhTw => "開始整理日報，稍等我一下。",
                 AppLocale::En => "I'm preparing your daily report. Give me a moment.",
+                AppLocale::Ar => "أقوم بإعداد تقريرك اليومي. لحظة من فضلك.",
             }),
         );
     }
@@ -240,6 +241,9 @@ pub(crate) async fn generate_report_inner(
                     AppLocale::En => {
                         "Internal error during report generation, please retry".to_string()
                     }
+                    AppLocale::Ar => {
+                        "حدث خطأ داخلي أثناء إنشاء التقرير، يرجى المحاولة مرة أخرى".to_string()
+                    }
                 },
             )),
             Err(_) => Err(work_review_core::error::AppError::Analysis(
@@ -248,6 +252,9 @@ pub(crate) async fn generate_report_inner(
                     AppLocale::ZhTw => "日報生成逾時，請稍後重試".to_string(),
                     AppLocale::En => {
                         "Report generation timed out, please try again later".to_string()
+                    }
+                    AppLocale::Ar => {
+                        "انتهت مهلة إنشاء التقرير، يرجى المحاولة مرة أخرى لاحقاً".to_string()
                     }
                 },
             )),
@@ -283,12 +290,14 @@ pub(crate) async fn generate_report_inner(
                 AppLocale::ZhCn => "日报整理好了，可以回来看看。",
                 AppLocale::ZhTw => "日報整理好了，可以回來看看。",
                 AppLocale::En => "Your daily report is ready. You can check it now.",
+                AppLocale::Ar => "تقريرك اليومي جاهز. يمكنك التحقق منه الآن.",
             })
         } else {
             crate::avatar_engine::AvatarBubblePayload::info(match report_locale {
                 AppLocale::ZhCn => "这次日报整理失败了，稍后可以再试。",
                 AppLocale::ZhTw => "這次日報整理失敗了，稍後可以再試。",
                 AppLocale::En => "This report run failed. Please try again later.",
+                AppLocale::Ar => "فشل تشغيل هذا التقرير. يرجى المحاولة مرة أخرى لاحقاً.",
             })
         };
         crate::avatar_engine::emit_avatar_bubble(app, &bubble);

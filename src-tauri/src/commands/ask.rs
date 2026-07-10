@@ -88,6 +88,7 @@ fn assistant_empty_question_message(locale: AppLocale) -> &'static str {
         AppLocale::ZhCn => "请输入你想问的问题。",
         AppLocale::ZhTw => "請輸入你想問的問題。",
         AppLocale::En => "Please enter your question.",
+        AppLocale::Ar => "الرجاء إدخال سؤالك.",
     }
 }
 
@@ -101,6 +102,9 @@ fn build_assistant_system_prompt(locale: AppLocale) -> &'static str {
         }
         AppLocale::En => {
             "You are the Work Review assistant. You can answer any question. For work-related questions, you have tools to query the user's actual work records (activity timeline, statistics, work sessions, etc.) — use them for accuracy. For non-work questions, answer directly from your knowledge. Respond in the same language as the user's question, regardless of the language of the work records (English question -> English answer, Chinese question -> Chinese answer). Lead with the conclusion, then support with evidence. Do not invent facts."
+        }
+        AppLocale::Ar => {
+            "أنت مساعد Work Review. يمكنك الإجابة على أي سؤال. للأسئلة المتعلقة بالعمل، لديك أدوات للاستعلام عن سجلات عمل المستخدم الفعلية (الجدول الزمني للنشاط، الإحصائيات، جلسات العمل، وما إلى ذلك) — استخدمها لضمان الدقة. بالنسبة للأسئلة غير المتعلقة بالعمل، أجب مباشرة من معرفتك. قم بالرد بنفس لغة سؤال المستخدم، بغض النظر عن لغة سجلات العمل (سؤال عربي -> إجابة عربية). ابدأ بالخلاصة، ثم ادعمها بالأدلة. لا تختلق الحقائق."
         }
     }
 }

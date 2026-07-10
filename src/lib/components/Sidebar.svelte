@@ -218,13 +218,13 @@
 
           {#if localeMenuOpen}
             <div
-              class="absolute bottom-full left-0 mb-2 min-w-[148px] rounded-2xl border border-slate-200/80 bg-white/96 p-1.5 shadow-xl dark:shadow-[0_12px_32px_rgba(0,0,0,0.5)] backdrop-blur dark:border-[#30363d]/80 dark:bg-[#161b22]/96"
+              class="absolute bottom-full start-0 mb-2 min-w-[148px] rounded-2xl border border-slate-200/80 bg-white/96 p-1.5 shadow-xl dark:shadow-[0_12px_32px_rgba(0,0,0,0.5)] backdrop-blur dark:border-[#30363d]/80 dark:bg-[#161b22]/96"
               role="menu"
             >
               {#each localeOptions as option}
                 <button
                   type="button"
-                  class="flex w-full items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 text-left text-xs font-medium transition-colors {currentLocale === option.value ? 'bg-slate-200/80 text-slate-900 dark:bg-[#30363d] dark:text-[#e6edf3]' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900 dark:text-[#adbac7] dark:hover:bg-[#21262d]/80 dark:hover:text-[#e6edf3]'}"
+                  class="flex w-full items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 text-start text-xs font-medium transition-colors {currentLocale === option.value ? 'bg-slate-200/80 text-slate-900 dark:bg-[#30363d] dark:text-[#e6edf3]' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900 dark:text-[#adbac7] dark:hover:bg-[#21262d]/80 dark:hover:text-[#e6edf3]'}"
                   role="menuitemradio"
                   aria-checked={currentLocale === option.value}
                   on:click={() => selectLocale(option.value)}

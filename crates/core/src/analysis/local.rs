@@ -26,6 +26,7 @@ fn format_domain_label(
                 translate_semantic_category_name(semantic_category, locale, semantic_overrides);
             match locale {
                 AppLocale::En => format!("{} ({})", domain.domain, semantic_category),
+                AppLocale::Ar => format!("{} ({})", domain.domain, semantic_category),
                 _ => format!("{}（{}）", domain.domain, semantic_category),
             }
         }
@@ -38,11 +39,12 @@ fn empty_value(locale: AppLocale) -> &'static str {
         AppLocale::ZhCn => "无",
         AppLocale::ZhTw => "無",
         AppLocale::En => "None",
+        AppLocale::Ar => "لا يوجد",
     }
 }
 
 fn join_list(locale: AppLocale, items: Vec<String>) -> String {
-    items.join(if locale == AppLocale::En { ", " } else { "、" })
+    items.join(if locale == AppLocale::En { ", " } else if locale == AppLocale::Ar { "، " } else { "、" })
 }
 
 /// 本地多模态分析器
@@ -257,6 +259,50 @@ Do not add any extra preface or explanation."#,
                 },
                 timeline = timeline,
             ),
+            AppLocale::Ar => format!(
+                r#"أنت مساعد تقييم عمل دقيق وموثوق. بناءً على البيانات أدناه، اكتب تحليلًا عمليًا لعمل اليوم.
+
+## البيانات اليومية
+- التاريخ: {date}
+- إجمالي مدة العمل: {}
+- التطبيقات المستخدمة: {}
+- المواقع المزارة: {}
+- الكلمات الرئيسية المستخرجة من محتوى الشاشة: {}
+
+## الجدول الزمني للنشاط
+{timeline}
+
+## المتطلبات
+يرجى الكتابة باللغة العربية وإخراج الأقسام الثلاثة التالية بدقة:
+
+## عمل اليوم
+لخص ما عمل عليه المستخدم اليوم في جملتين إلى 4 جمل.
+
+## تقييم التركيز
+علق بإيجاز على التركيز وتوزيع الوقت بناءً على استخدام التطبيقات وأنماط التبديل.
+
+## اقتراح للخطوة التالية
+قدم اقتراحًا واحدًا ملموسًا وعمليًا للغد.
+
+لا تضف أي مقدمة أو شرح إضافي."#,
+                format_duration_for_locale(stats.total_duration, self.locale),
+                if apps_list.is_empty() {
+                    empty_value(self.locale).to_string()
+                } else {
+                    apps_list
+                },
+                if urls_list.is_empty() {
+                    empty_value(self.locale).to_string()
+                } else {
+                    urls_list
+                },
+                if keywords.is_empty() {
+                    empty_value(self.locale).to_string()
+                } else {
+                    join_list(self.locale, keywords)
+                },
+                timeline = timeline,
+            ),
         };
 
         append_custom_prompt_for_locale(base_prompt, &self.custom_prompt, self.locale)
@@ -313,6 +359,9 @@ Do not add any extra preface or explanation."#,
             AppLocale::En => {
                 "Briefly describe what work is shown in this screenshot in under 50 words."
             }
+            AppLocale::Ar => {
+                "صف بإيجاز العمل الموضح في هذه اللقطة في أقل من 50 كلمة."
+            }
         };
 
         let response = self
@@ -357,6 +406,7 @@ impl Analyzer for LocalAnalyzer {
             AppLocale::ZhCn => format!("# 工作日报 - {date}\n\n"),
             AppLocale::ZhTw => format!("# 工作日報 - {date}\n\n"),
             AppLocale::En => format!("# Daily Report - {date}\n\n"),
+            AppLocale::Ar => format!("# تقرير اليوم - {date}\n\n"),
         };
         let mut used_ai = false;
         let mut fallback_reason = None;
@@ -383,6 +433,10 @@ impl Analyzer for LocalAnalyzer {
                     AppLocale::ZhTw => "請求失敗，已回退到基礎模板".to_string(),
                     AppLocale::En => {
                         "the AI request failed, so the report fell back to the base template"
+                            .to_string()
+                    }
+                    AppLocale::Ar => {
+                        "فشل طلب الذكاء الاصطناعي، لذا رجع التقرير إلى القالب الأساسي"
                             .to_string()
                     }
                 });
@@ -492,6 +546,40 @@ impl Analyzer for LocalAnalyzer {
                         ));
                         report.push_str("Reserve a longer uninterrupted block for the main task tomorrow to reduce context switching.\n");
                         report.push_str("\n---\n*Note: AI analysis is currently unavailable, so this report was generated from the base template.*");
+                    }
+                    AppLocale::Ar => {
+                        section_count += 1;
+                        report.push('\n');
+                        report.push_str(&format_section_heading(
+                            locale,
+                            section_count,
+                            "عمل اليوم",
+                        ));
+                        report.push_str(&format!(
+                            "شمل العمل اليوم بشكل أساسي {} والأدوات ذات الصلة، مع وتيرة ثابتة بشكل عام.\n",
+                            if apps_list.is_empty() {
+                                "عدة تطبيقات".to_string()
+                            } else {
+                                apps_list
+                            }
+                        ));
+                        section_count += 1;
+                        report.push('\n');
+                        report.push_str(&format_section_heading(
+                            locale,
+                            section_count,
+                            "تقييم التركيز",
+                        ));
+                        report.push_str("يبدو الإيقاع العام مستقراً اليوم، وظل سير العمل متسقاً بشكل معقول.\n");
+                        section_count += 1;
+                        report.push('\n');
+                        report.push_str(&format_section_heading(
+                            locale,
+                            section_count,
+                            "اقتراح للخطوة التالية",
+                        ));
+                        report.push_str("خصص فترات زمنية غير متقطعة أطول للمهمة الرئيسية غداً لتقليل التبديل بين المهام.\n");
+                        report.push_str("\n---\n*ملاحظة: تحليل الذكاء الاصطناعي غير متوفر حالياً، لذا تم إنشاء هذا التقرير باستخدام القالب الأساسي.*");
                     }
                 }
             }
