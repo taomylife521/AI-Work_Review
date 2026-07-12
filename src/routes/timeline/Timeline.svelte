@@ -1801,7 +1801,7 @@
 
   .timeline-rail {
     position: absolute;
-    left: calc(1.25rem + var(--timeline-anchor-width) + 0.5rem);
+    left: calc(1.25rem + var(--timeline-anchor-width));
     top: 1.25rem;
     bottom: 1.25rem;
     width: 2px;
@@ -1851,9 +1851,12 @@
     color: #57534e;
   }
 
+  /* marker 绝对定位到 anchor 列右边缘，与 rail 共用同一水平基准（#129 对齐修复）。
+     之前 marker 用 margin-left:auto + rail 用独立 calc，两者差约 14px。 */
   .timeline-entry-marker {
-    flex-shrink: 0;
-    margin-left: auto;
+    position: absolute;
+    top: 0.95rem;
+    right: 0;
     width: 0.8rem;
     height: 0.8rem;
     border-radius: 999px;
@@ -2395,7 +2398,7 @@
     }
 
     .timeline-rail {
-      left: calc(0.85rem + var(--timeline-anchor-width) + 0.4rem);
+      left: calc(0.85rem + var(--timeline-anchor-width));
     }
 
     .timeline-entry {
