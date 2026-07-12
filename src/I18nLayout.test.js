@@ -11,6 +11,7 @@ test('应用壳层应使用统一 i18n 资源并支持三种界面语言', async
   assert.match(i18nSource, /'zh-CN'/);
   assert.match(i18nSource, /'en'/);
   assert.match(i18nSource, /'zh-TW'/);
+  assert.match(i18nSource, /'ar'/);
   assert.match(i18nSource, /export function cycleLocale\(\)/);
   assert.match(appSource, /applyLocaleToDocument/);
   assert.match(appSource, /initializeLocale/);
@@ -28,12 +29,15 @@ test('侧边栏底部应提供语言切换菜单，并按 ZH、EN、TW 顺序展
   assert.match(source, /value: 'zh-CN', label: 'ZH'/);
   assert.match(source, /value: 'en', label: 'EN'/);
   assert.match(source, /value: 'zh-TW', label: 'TW'/);
+  assert.match(source, /value: 'ar', label: 'AR'/);
   assert.ok(
     source.indexOf("value: 'zh-CN', label: 'ZH'")
       < source.indexOf("value: 'en', label: 'EN'")
       && source.indexOf("value: 'en', label: 'EN'")
-      < source.indexOf("value: 'zh-TW', label: 'TW'"),
-    '语言顺序应为 ZH、EN、TW'
+      < source.indexOf("value: 'zh-TW', label: 'TW'")
+      && source.indexOf("value: 'zh-TW', label: 'TW'")
+      < source.indexOf("value: 'ar', label: 'AR'"),
+    '语言顺序应为 ZH、EN、TW、AR'
   );
   assert.match(source, /emitTo\('avatar', 'locale-changed', normalizedLocale\)/);
   assert.doesNotMatch(source, /sidebar-footer-version/);
@@ -49,7 +53,7 @@ test('后端语言切换命令应保持私有以避免 Tauri command 宏重导�
 test('语言菜单应左对齐展开，并按“英文缩写 + 语言名称”展示避免裁切', async () => {
   const source = await readFile(new URL('./lib/components/Sidebar.svelte', import.meta.url), 'utf8');
 
-  assert.match(source, /class="absolute bottom-full left-0 mb-2/);
+  assert.match(source, /class="absolute bottom-full start-0 mb-2/);
   assert.match(source, /min-w-\[148px\]/);
   assert.match(source, /whitespace-nowrap/);
   assert.match(source, /fullLabelKey: 'sidebar\.localeNames\.zhCN'/);

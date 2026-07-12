@@ -58,6 +58,7 @@ export default {
         zhCN: 'Simplified Chinese',
         zhTW: 'Traditional Chinese',
         en: 'English',
+        ar: 'Arabic',
       },
       themeTitle: {
         system: 'Auto theme',

@@ -2,12 +2,13 @@ import { get, writable } from 'svelte/store';
 import zhCN from './locales/zh-CN.js';
 import en from './locales/en.js';
 import zhTW from './locales/zh-TW.js';
+import ar from './locales/ar.js';
 
 const LOCALE_STORAGE_KEY = 'work-review.locale';
 const DEFAULT_LOCALE = 'zh-CN';
 
-export const SUPPORTED_LOCALES = ['zh-CN', 'en', 'zh-TW'];
-const LOCALE_CYCLE = ['zh-CN', 'en', 'zh-TW'];
+export const SUPPORTED_LOCALES = ['zh-CN', 'en', 'zh-TW', 'ar'];
+const LOCALE_CYCLE = ['zh-CN', 'en', 'zh-TW', 'ar'];
 
 const LOCALE_META = {
   'zh-CN': {
@@ -22,6 +23,10 @@ const LOCALE_META = {
     short: 'TW',
     label: '繁體中文',
   },
+  ar: {
+    short: 'AR',
+    label: 'العربية',
+  },
 };
 
 const CATEGORY_LABELS = {
@@ -29,36 +34,43 @@ const CATEGORY_LABELS = {
     'zh-CN': '开发工具',
     en: 'Development',
     'zh-TW': '開發工具',
+    ar: 'أدوات التطوير',
   },
   browser: {
     'zh-CN': '浏览器',
     en: 'Browser',
     'zh-TW': '瀏覽器',
+    ar: 'المتصفح',
   },
   communication: {
     'zh-CN': '通讯协作',
     en: 'Communication',
     'zh-TW': '通訊協作',
+    ar: 'تواصل وتعاون',
   },
   office: {
     'zh-CN': '办公软件',
     en: 'Office',
     'zh-TW': '辦公軟體',
+    ar: 'برامج مكتبية',
   },
   design: {
     'zh-CN': '设计工具',
     en: 'Design',
     'zh-TW': '設計工具',
+    ar: 'أدوات التصميم',
   },
   entertainment: {
     'zh-CN': '娱乐摸鱼',
     en: 'Leisure',
     'zh-TW': '娛樂摸魚',
+    ar: 'ترفيه',
   },
   other: {
     'zh-CN': '其他',
     en: 'Other',
     'zh-TW': '其他',
+    ar: 'أخرى',
   },
 };
 
@@ -67,66 +79,79 @@ const SEMANTIC_LABELS = {
     'zh-CN': '编码开发',
     en: 'Development',
     'zh-TW': '編碼開發',
+    ar: 'برمجة وتطوير',
   },
   '内容撰写': {
     'zh-CN': '内容撰写',
     en: 'Writing',
     'zh-TW': '內容撰寫',
+    ar: 'كتابة محتوى',
   },
   '资料阅读': {
     'zh-CN': '资料阅读',
     en: 'Reading',
     'zh-TW': '資料閱讀',
+    ar: 'قراءة',
   },
   '资料调研': {
     'zh-CN': '资料调研',
     en: 'Research',
     'zh-TW': '資料調研',
+    ar: 'بحث واستقصاء',
   },
   '任务规划': {
     'zh-CN': '任务规划',
     en: 'Planning',
     'zh-TW': '任務規劃',
+    ar: 'تخطيط المهام',
   },
   '设计创作': {
     'zh-CN': '设计创作',
     en: 'Design',
     'zh-TW': '設計創作',
+    ar: 'تصميم وإبداع',
   },
   'AI 协作': {
     'zh-CN': 'AI 协作',
     en: 'AI Collaboration',
     'zh-TW': 'AI 協作',
+    ar: 'تعاون مع الذكاء الاصطناعي',
   },
   '即时聊天': {
     'zh-CN': '即时聊天',
     en: 'Chat',
     'zh-TW': '即時聊天',
+    ar: 'محادثة فورية',
   },
   '会议沟通': {
     'zh-CN': '会议沟通',
     en: 'Meetings',
     'zh-TW': '會議溝通',
+    ar: 'اجتماعات وتواصل',
   },
   '视频内容': {
     'zh-CN': '视频内容',
     en: 'Video',
     'zh-TW': '影片內容',
+    ar: 'محتوى فيديو',
   },
   '音乐音频': {
     'zh-CN': '音乐音频',
     en: 'Audio',
     'zh-TW': '音樂音訊',
+    ar: 'صوتيات وموسيقى',
   },
   '休息娱乐': {
     'zh-CN': '休息娱乐',
     en: 'Leisure',
     'zh-TW': '休息娛樂',
+    ar: 'راحة وترفيه',
   },
   '未知活动': {
     'zh-CN': '未知活动',
     en: 'Unknown',
     'zh-TW': '未知活動',
+    ar: 'نشاط غير معروف',
   },
 };
 
@@ -135,6 +160,7 @@ const MESSAGES = {
   'zh-CN': zhCN,
   en,
   'zh-TW': zhTW,
+  ar,
 };
 
 
@@ -160,6 +186,10 @@ function normalizeLocale(value) {
 
   if (normalized.toLowerCase().startsWith('en')) {
     return 'en';
+  }
+
+  if (normalized.toLowerCase().startsWith('ar')) {
+    return 'ar';
   }
 
   return DEFAULT_LOCALE;
@@ -271,8 +301,9 @@ export function applyLocaleToDocument(nextLocale = get(locale)) {
     return;
   }
 
-  document.documentElement.lang = normalizeLocale(nextLocale);
-  document.documentElement.dir = 'ltr';
+  const normalized = normalizeLocale(nextLocale);
+  document.documentElement.lang = normalized;
+  document.documentElement.dir = normalized === 'ar' ? 'rtl' : 'ltr';
 }
 
 export function formatLocalizedDate(date, options) {
@@ -285,13 +316,16 @@ export function formatLocalizedTime(date, options) {
 
 export function formatDurationLocalized(seconds, { compact = false } = {}) {
   const currentLocale = get(locale);
-  const hourUnit = currentLocale === 'zh-TW' ? (compact ? '時' : '小時') : (compact ? 'h' : '小时');
-  const minuteUnit = currentLocale === 'zh-TW' ? (compact ? '分' : '分鐘') : (compact ? 'm' : '分钟');
-  const secondUnit = currentLocale === 'zh-TW' ? '秒' : '秒';
+  const hourUnit = currentLocale === 'zh-TW' ? (compact ? '時' : '小時') : currentLocale === 'ar' ? (compact ? 'س' : ' ساعة ') : (compact ? 'h' : '小时');
+  const minuteUnit = currentLocale === 'zh-TW' ? (compact ? '分' : '分鐘') : currentLocale === 'ar' ? (compact ? 'د' : ' دقيقة ') : (compact ? 'm' : '分钟');
+  const secondUnit = currentLocale === 'zh-TW' ? '秒' : currentLocale === 'ar' ? 'ث' : '秒';
 
   if (!seconds || seconds <= 0) {
     if (currentLocale === 'en') {
       return compact ? '0m' : '0s';
+    }
+    if (currentLocale === 'ar') {
+      return compact ? '0د' : '0 ثانية';
     }
     return `0${minuteUnit}`;
   }
@@ -308,6 +342,16 @@ export function formatDurationLocalized(seconds, { compact = false } = {}) {
       return compact ? `${minutes}m` : `${minutes}m`;
     }
     return compact ? `${secs}s` : `${secs}s`;
+  }
+  
+  if (currentLocale === 'ar') {
+    if (hours > 0) {
+      return compact ? (minutes > 0 ? `${hours}س ${minutes}د` : `${hours}س`) : (minutes > 0 ? `${hours} ساعة و ${minutes} دقيقة` : `${hours} ساعة`);
+    }
+    if (minutes > 0) {
+      return compact ? `${minutes}د` : `${minutes} دقيقة`;
+    }
+    return compact ? `${secs}ث` : `${secs} ثانية`;
   }
 
   if (hours > 0) {

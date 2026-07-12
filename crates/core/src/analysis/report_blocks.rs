@@ -94,6 +94,7 @@ fn section_number_prefix(locale: AppLocale, index: usize) -> String {
 
     match locale {
         AppLocale::En => format!("{index}. "),
+        AppLocale::Ar => format!("{index}. "),
         _ => {
             let number = cjk
                 .get(index.saturating_sub(1))
@@ -392,6 +393,9 @@ fn category_table_takeaway(
         AppLocale::En => format!(
             "> **Takeaway:** Most tracked time went to {name}, totaling {duration} ({percentage}% of the recorded day).\n\n"
         ),
+        AppLocale::Ar => format!(
+            "> **الخلاصة:** ذهب معظم الوقت المتتبع إلى {name}، بإجمالي {duration} ({percentage}% من اليوم المسجل).\n\n"
+        ),
     }
 }
 
@@ -413,6 +417,10 @@ fn app_usage_table_takeaway(stats: &DailyStats, locale: AppLocale) -> String {
         ),
         AppLocale::En => format!(
             "> **Takeaway:** The most-used app was {}, totaling {}; {} apps were recorded today.\n\n",
+            top_app.app_name, duration, app_count
+        ),
+        AppLocale::Ar => format!(
+            "> **الخلاصة:** التطبيق الأكثر استخداماً كان {}، بإجمالي {}؛ تم تسجيل {} تطبيقات اليوم.\n\n",
             top_app.app_name, duration, app_count
         ),
     }
@@ -449,6 +457,9 @@ fn hourly_summary_takeaway(stats: &DailyStats, locale: AppLocale) -> String {
         AppLocale::En => format!(
             "> **Takeaway:** Activity peaked at {peak_range}, with {duration} recorded in that hour across {active_hours} active hours.\n\n"
         ),
+        AppLocale::Ar => format!(
+            "> **الخلاصة:** بلغ النشاط ذروته في {peak_range}، حيث تم تسجيل {duration} في تلك الساعة عبر {active_hours} ساعات نشطة.\n\n"
+        ),
     }
 }
 
@@ -474,6 +485,9 @@ fn domain_usage_table_takeaway(
         AppLocale::En => format!(
             "> **Takeaway:** The longest website visit was {domain}, totaling {duration}; {domain_count} websites were recorded today.\n\n"
         ),
+        AppLocale::Ar => format!(
+            "> **الخلاصة:** أطول زيارة لموقع ويب كانت {domain}، بإجمالي {duration}؛ تم تسجيل {domain_count} مواقع اليوم.\n\n"
+        ),
     }
 }
 
@@ -490,12 +504,14 @@ pub fn render_category_table(
         AppLocale::ZhCn => "## 时间分配\n\n",
         AppLocale::ZhTw => "## 時間分配\n\n",
         AppLocale::En => "## Time Allocation\n\n",
+        AppLocale::Ar => "## تخصيص الوقت\n\n",
     });
     out.push_str(&category_table_takeaway(stats, locale, category_overrides));
     out.push_str(match locale {
         AppLocale::ZhCn => "| 类别 | 时长 | 占比 |\n|:--|--:|--:|\n",
         AppLocale::ZhTw => "| 類別 | 時長 | 佔比 |\n|:--|--:|--:|\n",
         AppLocale::En => "| Category | Duration | Share |\n|:--|--:|--:|\n",
+        AppLocale::Ar => "| الفئة | المدة | النسبة |\n|:--|--:|--:|\n",
     });
     for cat in &stats.category_usage {
         let percentage = usage_percentage(cat.duration, stats.total_duration);
@@ -519,12 +535,14 @@ pub fn render_app_usage_table(stats: &DailyStats, locale: AppLocale) -> String {
         AppLocale::ZhCn => "## 应用使用明细\n\n",
         AppLocale::ZhTw => "## 應用使用明細\n\n",
         AppLocale::En => "## App Details\n\n",
+        AppLocale::Ar => "## تفاصيل التطبيقات\n\n",
     });
     out.push_str(&app_usage_table_takeaway(stats, locale));
     out.push_str(match locale {
         AppLocale::ZhCn => "| 序号 | 应用名称 | 使用时长 |\n|--:|:--|--:|\n",
         AppLocale::ZhTw => "| 序號 | 應用名稱 | 使用時長 |\n|--:|:--|--:|\n",
         AppLocale::En => "| # | App | Duration |\n|--:|:--|--:|\n",
+        AppLocale::Ar => "| # | التطبيق | المدة |\n|--:|:--|--:|\n",
     });
     for (index, app) in stats.app_usage.iter().enumerate() {
         out.push_str(&format!(
@@ -547,6 +565,7 @@ pub fn render_hourly_summary(stats: &DailyStats, locale: AppLocale) -> String {
         AppLocale::ZhCn => "## 按小时活跃度\n\n",
         AppLocale::ZhTw => "## 按小時活躍度\n\n",
         AppLocale::En => "## Hourly Activity\n\n",
+        AppLocale::Ar => "## النشاط بالساعة\n\n",
     });
     out.push_str(&hourly_summary_takeaway(stats, locale));
     out.push_str(&hourly);
@@ -567,6 +586,7 @@ pub fn render_domain_usage_table(
         AppLocale::ZhCn => "## 网站访问明细\n\n",
         AppLocale::ZhTw => "## 網站造訪明細\n\n",
         AppLocale::En => "## Website Details\n\n",
+        AppLocale::Ar => "## تفاصيل المواقع\n\n",
     });
     out.push_str(&domain_usage_table_takeaway(
         stats,
@@ -577,6 +597,7 @@ pub fn render_domain_usage_table(
         AppLocale::ZhCn => "| 序号 | 网站域名 | 访问时长 |\n|--:|:--|--:|\n",
         AppLocale::ZhTw => "| 序號 | 網站網域 | 造訪時長 |\n|--:|:--|--:|\n",
         AppLocale::En => "| # | Domain | Duration |\n|--:|:--|--:|\n",
+        AppLocale::Ar => "| # | الموقع | المدة |\n|--:|:--|--:|\n",
     });
     for (index, domain) in stats.domain_usage.iter().enumerate() {
         out.push_str(&format!(
@@ -598,6 +619,7 @@ pub fn render_local_overview(stats: &DailyStats, locale: AppLocale) -> String {
         AppLocale::ZhCn => "## 今日概览\n\n",
         AppLocale::ZhTw => "## 今日概覽\n\n",
         AppLocale::En => "## Overview\n\n",
+        AppLocale::Ar => "## نظرة عامة\n\n",
     });
     let line = match locale {
         AppLocale::ZhCn => format!(
@@ -614,6 +636,12 @@ pub fn render_local_overview(stats: &DailyStats, locale: AppLocale) -> String {
         ),
         AppLocale::En => format!(
             "- **Total work duration**: {}\n- **Screenshots**: {}\n- **Apps used**: {}\n",
+            format_duration_for_locale(stats.total_duration, locale),
+            stats.screenshot_count,
+            stats.app_usage.len()
+        ),
+        AppLocale::Ar => format!(
+            "- **إجمالي مدة العمل**: {}\n- **لقطات الشاشة**: {}\n- **التطبيقات المستخدمة**: {}\n",
             format_duration_for_locale(stats.total_duration, locale),
             stats.screenshot_count,
             stats.app_usage.len()
@@ -636,6 +664,7 @@ pub fn render_local_category_list(
         AppLocale::ZhCn => "## 时间分配\n\n",
         AppLocale::ZhTw => "## 時間分配\n\n",
         AppLocale::En => "## Time allocation\n\n",
+        AppLocale::Ar => "## تخصيص الوقت\n\n",
     });
     for cat in &stats.category_usage {
         let percentage = if stats.total_duration > 0 {
@@ -662,6 +691,7 @@ pub fn render_local_app_usage_list(stats: &DailyStats, locale: AppLocale) -> Str
         AppLocale::ZhCn => "## 应用使用情况\n\n",
         AppLocale::ZhTw => "## 應用使用情況\n\n",
         AppLocale::En => "## App usage\n\n",
+        AppLocale::Ar => "## استخدام التطبيقات\n\n",
     });
     for (index, app) in stats.app_usage.iter().take(5).enumerate() {
         out.push_str(&format!(
@@ -687,6 +717,7 @@ pub fn render_local_domain_usage_list(
         AppLocale::ZhCn => "## 网站访问\n\n",
         AppLocale::ZhTw => "## 網站造訪\n\n",
         AppLocale::En => "## Website visits\n\n",
+        AppLocale::Ar => "## زيارات المواقع\n\n",
     });
     for domain in stats.domain_usage.iter().take(5) {
         out.push_str(&format!(
@@ -709,6 +740,7 @@ fn format_domain_label_local(
                 translate_semantic_category_name(semantic_category, locale, semantic_overrides);
             match locale {
                 AppLocale::En => format!("{} ({})", domain.domain, semantic_category),
+                AppLocale::Ar => format!("{} ({})", domain.domain, semantic_category),
                 _ => format!("{}（{}）", domain.domain, semantic_category),
             }
         }

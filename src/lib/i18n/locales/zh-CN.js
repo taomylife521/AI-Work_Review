@@ -58,6 +58,7 @@ export default {
         zhCN: '简体中文',
         zhTW: '繁體中文',
         en: '英语',
+        ar: '阿拉伯语',
       },
       themeTitle: {
         system: '自动模式',

@@ -15,6 +15,7 @@ pub enum AppLocale {
     ZhCn,
     ZhTw,
     En,
+    Ar,
 }
 
 impl AppLocale {
@@ -24,6 +25,8 @@ impl AppLocale {
             Self::ZhTw
         } else if normalized.starts_with("en") {
             Self::En
+        } else if normalized.starts_with("ar") {
+            Self::Ar
         } else {
             Self::ZhCn
         }
@@ -38,6 +41,7 @@ impl AppLocale {
             Self::ZhCn => "zh-CN",
             Self::ZhTw => "zh-TW",
             Self::En => "en",
+            Self::Ar => "ar",
         }
     }
 }
@@ -92,6 +96,9 @@ pub fn append_custom_prompt_for_locale(
             ),
             AppLocale::En => format!(
                 "{base_prompt}\n\n## Additional Preferences\nPlease follow the user's extra report preferences below as much as possible without breaking the structure and constraints above:\n{custom_prompt}"
+            ),
+            AppLocale::Ar => format!(
+                "{base_prompt}\n\n## تفضيلات إضافية\nيرجى اتباع تفضيلات التقرير الإضافية للمستخدم أدناه قدر الإمكان دون كسر الهيكل والقيود أعلاه:\n{custom_prompt}"
             ),
         }
     } else {
@@ -169,6 +176,15 @@ pub fn format_duration_for_locale(seconds: i64, locale: AppLocale) -> String {
                 format!("{secs}s")
             }
         }
+        AppLocale::Ar => {
+            if hours > 0 {
+                format!("{hours}س {minutes}د {secs}ث")
+            } else if minutes > 0 {
+                format!("{minutes}د {secs}ث")
+            } else {
+                format!("{secs}ث")
+            }
+        }
         AppLocale::ZhTw => {
             if hours > 0 {
                 format!("{hours}小時{minutes}分{secs}秒")
@@ -198,7 +214,14 @@ pub fn translate_category_name(
     category_overrides: &HashMap<String, String>,
 ) -> String {
     if let Some(name) = category_overrides.get(category_key) {
-        return name.clone();
+        let is_default_zh = matches!(
+            name.as_str(),
+            "开发工具" | "浏览器" | "通讯协作" | "办公软件" | "设计工具" | "娱乐摸鱼" | "其他"
+        );
+        let is_zh_locale = matches!(locale, AppLocale::ZhCn | AppLocale::ZhTw);
+        if !is_default_zh || is_zh_locale {
+            return name.clone();
+        }
     }
     match locale {
         AppLocale::ZhCn => match category_key {
@@ -231,6 +254,16 @@ pub fn translate_category_name(
             "other" => "Other".to_string(),
             _ => category_key.to_string(),
         },
+        AppLocale::Ar => match category_key {
+            "development" => "تطوير".to_string(),
+            "browser" => "تصفح".to_string(),
+            "communication" => "تواصل".to_string(),
+            "office" => "أعمال مكتبية".to_string(),
+            "design" => "تصميم".to_string(),
+            "entertainment" => "ترفيه".to_string(),
+            "other" => "غير معروف".to_string(),
+            _ => "غير معروف".to_string(),
+        },
     }
 }
 
@@ -240,7 +273,14 @@ pub fn translate_semantic_category_name(
     semantic_overrides: &HashMap<String, String>,
 ) -> String {
     if let Some(name) = semantic_overrides.get(category_label) {
-        return name.clone();
+        let is_default_zh = matches!(
+            name.as_str(),
+            "编码开发" | "内容撰写" | "资料阅读" | "资料调研" | "任务规划" | "设计创作" | "AI 协作" | "即时聊天" | "会议沟通" | "视频内容" | "音乐音频" | "休息娱乐" | "未知活动" | "代码评审" | "工作跟进"
+        );
+        let is_zh_locale = matches!(locale, AppLocale::ZhCn | AppLocale::ZhTw);
+        if !is_default_zh || is_zh_locale {
+            return name.clone();
+        }
     }
     match locale {
         AppLocale::ZhCn => match category_label {
@@ -297,6 +337,24 @@ pub fn translate_semantic_category_name(
             "工作跟进" => "Follow-up".to_string(),
             _ => category_label.to_string(),
         },
+        AppLocale::Ar => match category_label {
+            "编码开发" => "تطوير".to_string(),
+            "内容撰写" => "كتابة".to_string(),
+            "资料阅读" => "قراءة".to_string(),
+            "资料调研" => "أبحاث".to_string(),
+            "任务规划" => "تخطيط".to_string(),
+            "设计创作" => "تصميم".to_string(),
+            "AI 协作" => "تعاون AI".to_string(),
+            "即时聊天" => "دردشة".to_string(),
+            "会议沟通" => "اجتماعات".to_string(),
+            "视频内容" => "فيديو".to_string(),
+            "音乐音频" => "صوتيات".to_string(),
+            "休息娱乐" => "ترفيه".to_string(),
+            "未知活动" => "غير معروف".to_string(),
+            "代码评审" => "مراجعة كود".to_string(),
+            "工作跟进" => "متابعة".to_string(),
+            _ => category_label.to_string(),
+        },
     }
 }
 
@@ -312,6 +370,7 @@ fn format_hour_range(hour: i32) -> String {
 fn wrap_with_range_label(range: String, duration: String, locale: AppLocale) -> String {
     match locale {
         AppLocale::En => format!("{range} ({duration})"),
+        AppLocale::Ar => format!("{range} ({duration})"),
         _ => format!("{range}（{duration}）"),
     }
 }
@@ -338,7 +397,7 @@ pub fn generate_hourly_activity_summary_for_locale(
     });
 
     let (peak_hour, peak_duration) = active_buckets[0];
-    let separator = if locale == AppLocale::En { ", " } else { "、" };
+    let separator = if locale == AppLocale::En { ", " } else if locale == AppLocale::Ar { "، " } else { "、" };
     let top_ranges = active_buckets
         .iter()
         .take(3)
@@ -369,6 +428,13 @@ pub fn generate_hourly_activity_summary_for_locale(
         ),
         AppLocale::En => format!(
             "- Peak hour: {} ({})\n- Active hours: {}\n- Main active ranges: {}\n",
+            format_hour_range(peak_hour),
+            format_duration_for_locale(peak_duration, locale),
+            active_buckets.len(),
+            top_ranges
+        ),
+        AppLocale::Ar => format!(
+            "- ساعة الذروة: {} ({})\n- الساعات النشطة: {}\n- النطاقات النشطة الرئيسية: {}\n",
             format_hour_range(peak_hour),
             format_duration_for_locale(peak_duration, locale),
             active_buckets.len(),
@@ -416,6 +482,15 @@ pub fn generate_stats_summary_for_locale(
             ));
             summary.push_str("### App usage\n\n");
         }
+        AppLocale::Ar => {
+            summary.push_str("## إحصائيات العمل اليومية\n\n");
+            summary.push_str(&format!(
+                "- إجمالي وقت العمل: {}\n",
+                format_duration_for_locale(stats.total_duration, locale)
+            ));
+            summary.push_str(&format!("- عدد لقطات الشاشة: {}\n\n", stats.screenshot_count));
+            summary.push_str("### استخدام التطبيقات\n\n");
+        }
     }
 
     for app in &stats.app_usage {
@@ -430,6 +505,7 @@ pub fn generate_stats_summary_for_locale(
         AppLocale::ZhCn => "\n### 分类时间分布\n\n",
         AppLocale::ZhTw => "\n### 分類時間分布\n\n",
         AppLocale::En => "\n### Category breakdown\n\n",
+        AppLocale::Ar => "\n### توزيع الفئات\n\n",
     });
     for cat in &stats.category_usage {
         let percentage = if stats.total_duration > 0 {
@@ -450,6 +526,7 @@ pub fn generate_stats_summary_for_locale(
             AppLocale::ZhCn => "\n### 按小时活跃度\n\n",
             AppLocale::ZhTw => "\n### 按小時活躍度\n\n",
             AppLocale::En => "\n### Hourly activity\n\n",
+            AppLocale::Ar => "\n### النشاط بالساعة\n\n",
         });
         summary.push_str(&hourly_summary);
     }
@@ -471,6 +548,7 @@ pub fn generate_activity_timeline(
         AppLocale::ZhCn => "活动时间线",
         AppLocale::ZhTw => "活動時間線",
         AppLocale::En => "Activity Timeline",
+        AppLocale::Ar => "سجل الأنشطة الزمني",
     };
 
     let count = activities.len();
@@ -511,12 +589,22 @@ pub fn generate_activity_timeline(
         AppLocale::En => {
             "| Period | Duration | App | Window |\n|--------|----------|-----|--------|\n"
         }
+        AppLocale::Ar => {
+            "| الفترة | المدة | التطبيق | النافذة |\n|--------|-------|---------|---------|\n"
+        }
+    };
+
+    let count_label = match locale {
+        AppLocale::ZhCn => format!("（{}条记录）", count),
+        AppLocale::ZhTw => format!("（{}條記錄）", count),
+        AppLocale::En => format!(" ({} records)", count),
+        AppLocale::Ar => format!(" ({} سجلات)", count),
     };
 
     format!(
-        "<details>\n<summary>{}（{}条记录）</summary>\n\n{}{}</details>",
+        "<details>\n<summary>{}{}</summary>\n\n{}{}</details>",
         summary_label,
-        count,
+        count_label,
         col_header,
         lines.join("\n")
     )
@@ -545,6 +633,7 @@ pub fn generate_session_timeline(
         AppLocale::ZhCn => format!("### 工作段（{}段）", sessions.len()),
         AppLocale::ZhTw => format!("### 工作段（{}段）", sessions.len()),
         AppLocale::En => format!("### Work Sessions ({})", sessions.len()),
+        AppLocale::Ar => format!("### جلسات العمل ({})", sessions.len()),
     };
 
     let mut lines = vec![header_label];

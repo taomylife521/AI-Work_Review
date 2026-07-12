@@ -26,6 +26,7 @@ fn screenshot_prompt(locale: AppLocale) -> &'static str {
         AppLocale::ZhCn => "请简要描述这张截图中的工作内容，用简体中文回答，限制在 50 字以内。",
         AppLocale::ZhTw => "請簡要描述這張截圖中的工作內容，請用繁體中文回答，限制在 50 字內。",
         AppLocale::En => "Briefly describe the work shown in this screenshot in under 50 words.",
+        AppLocale::Ar => "صف العمل الموضح في هذه اللقطة بإيجاز في أقل من 50 كلمة.",
     }
 }
 
@@ -34,6 +35,7 @@ fn report_system_prompt(locale: AppLocale) -> &'static str {
         AppLocale::ZhCn => "你是一位有温度的工作日报助手，擅长将一天的工作记录整理成自然、具体、可信的回顾。",
         AppLocale::ZhTw => "你是一位有溫度的工作日報助手，擅長將一天的工作記錄整理成自然、具體、可信的回顧。",
         AppLocale::En => "You are a thoughtful daily work-report assistant. Turn the user's work records into a natural, concrete, and trustworthy recap.",
+        AppLocale::Ar => "أنت مساعد تقرير عمل يومي دقيق ومهتم. حول سجلات عمل المستخدم إلى ملخص طبيعي وملموس وموثوق.",
     }
 }
 
@@ -147,6 +149,9 @@ impl CloudAnalyzer {
             AppLocale::En => format!(
                 "Below is a user's work data for today:\n\n{stats_summary}\n\n{timeline}\n\n### Work content identified from screenshots\n{insights_text}\n\nWrite a valuable daily work report in English Markdown based on this information.",
             ),
+            AppLocale::Ar => format!(
+                "فيما يلي بيانات عمل المستخدم لهذا اليوم:\n\n{stats_summary}\n\n{timeline}\n\n### محتوى العمل المستخرج من لقطات الشاشة\n{insights_text}\n\nاكتب تقرير عمل يومي ذو قيمة بتنسيق Markdown باللغة العربية بناءً على هذه المعلومات.",
+            ),
         };
         let prompt = append_custom_prompt_for_locale(base_prompt, &self.custom_prompt, self.locale);
 
@@ -188,6 +193,7 @@ impl CloudAnalyzer {
             AppLocale::ZhCn => format!("# 工作日报 - {date}\n\n{report}"),
             AppLocale::ZhTw => format!("# 工作日報 - {date}\n\n{report}"),
             AppLocale::En => format!("# Daily Report - {date}\n\n{report}"),
+            AppLocale::Ar => format!("# تقرير اليوم - {date}\n\n{report}"),
         })
     }
 }
@@ -254,6 +260,9 @@ impl Analyzer for CloudAnalyzer {
                     AppLocale::En => {
                         "the AI request failed, so the report fell back to the base template"
                             .to_string()
+                    }
+                    AppLocale::Ar => {
+                        "فشل طلب الذكاء الاصطناعي، لذا رجع التقرير إلى القالب الأساسي".to_string()
                     }
                 };
                 let mut base = generate_stats_summary_for_locale(

@@ -48,6 +48,7 @@ fn format_domain_label(
                 translate_semantic_category_name(semantic_category, locale, semantic_overrides);
             match locale {
                 AppLocale::En => format!("{} ({})", domain.domain, semantic_category),
+                AppLocale::Ar => format!("{} ({})", domain.domain, semantic_category),
                 _ => format!("{}（{}）", domain.domain, semantic_category),
             }
         }
@@ -60,11 +61,12 @@ fn empty_value(locale: AppLocale) -> &'static str {
         AppLocale::ZhCn => "无",
         AppLocale::ZhTw => "無",
         AppLocale::En => "None",
+        AppLocale::Ar => "لا يوجد",
     }
 }
 
 fn join_list(locale: AppLocale, items: Vec<String>) -> String {
-    items.join(if locale == AppLocale::En { ", " } else { "、" })
+    items.join(if locale == AppLocale::En { ", " } else if locale == AppLocale::Ar { "، " } else { "、" })
 }
 
 fn ai_system_prompt(locale: AppLocale) -> &'static str {
@@ -78,6 +80,9 @@ fn ai_system_prompt(locale: AppLocale) -> &'static str {
         AppLocale::En => {
             "You are a professional work-efficiency analysis assistant. Summarize and analyze the user's workday in English."
         }
+        AppLocale::Ar => {
+            "أنت مساعد محترف في تحليل كفاءة العمل. قم بتلخيص وتحليل يوم عمل المستخدم باللغة العربية."
+        }
     }
 }
 
@@ -87,6 +92,10 @@ fn empty_ai_fallback_reason(locale: AppLocale) -> String {
         AppLocale::ZhTw => "回傳空內容，已回退到基礎模板".to_string(),
         AppLocale::En => {
             "the model returned empty content, so the report fell back to the base template"
+                .to_string()
+        }
+        AppLocale::Ar => {
+            "عاد النموذج بمحتوى فارغ، لذا رجع التقرير إلى القالب الأساسي"
                 .to_string()
         }
     }
@@ -112,6 +121,13 @@ fn request_ai_fallback_reason(locale: AppLocale, error_text: &str) -> String {
         }
         (AppLocale::En, false) => {
             "the AI request failed, so the report fell back to the base template".to_string()
+        }
+        (AppLocale::Ar, true) => {
+            "تكوين الذكاء الاصطناعي غير متوفر، لذا رجع التقرير إلى القالب الأساسي"
+                .to_string()
+        }
+        (AppLocale::Ar, false) => {
+            "فشل طلب الذكاء الاصطناعي، لذا رجع التقرير إلى القالب الأساسي".to_string()
         }
     }
 }
@@ -530,6 +546,7 @@ impl SummaryAnalyzer {
                 AppLocale::ZhCn => "暂无按小时活跃度数据".to_string(),
                 AppLocale::ZhTw => "暫無按小時活躍度資料".to_string(),
                 AppLocale::En => "No hourly activity data available".to_string(),
+                AppLocale::Ar => "لا تتوفر بيانات نشاط بالساعة".to_string(),
             });
 
         let timeline = generate_activity_timeline(activities, self.locale);
@@ -705,6 +722,61 @@ Close with one sentence about the day's work state."#,
                 },
                 timeline = timeline,
             ),
+            AppLocale::Ar => format!(
+                r#"استخدم البيانات أدناه لكتابة قسم تحليل الذكاء الاصطناعي لتقرير العمل اليومي. ركز على الرؤى والتلخيص بدلاً من تكرار الأرقام الخام سطراً بسطر.
+
+[التاريخ]
+{date}
+
+[البيانات الأولية]
+مدة العمل: {}
+أهم التطبيقات: {}
+المواقع المزارة: {}
+النشاط بالساعة: {}
+الكلمات المفتاحية للشاشة: {}
+
+[سجل الأنشطة الزمني]
+{timeline}
+
+[المتطلبات]
+1. استنتج تركيز العمل الرئيسي للمستخدم من التطبيقات والمواقع والكلمات المفتاحية.
+2. قم بتقييم التركيز والإيقاع من توزيع الوقت.
+3. قدم اقتراحاً واحداً أو اقتراحين ملموسين.
+4. إذا كانت إحدى البيانات مفقودة، اذكر ذلك بوضوح بدلاً من اختلاقها.
+
+[تنسيق الإخراج]
+اكتب باللغة العربية واستخدم العناوين الأربعة من المستوى الثالث التالية بالضبط:
+
+### الملاحظة
+لخص نمط العمل الأكثر وضوحاً في فقرة واحدة.
+
+### الأدلة
+اذكر من 2 إلى 4 إشارات ملموسة من التطبيقات أو المواقع أو الكلمات المفتاحية أو التوزيع بالساعة.
+
+### الاقتراحات
+قدم اقتراحاً واحداً أو اقتراحين قابلين للتنفيذ.
+
+### الخلاصة
+اختتم بجملة واحدة حول حالة العمل في هذا اليوم."#,
+                format_duration_for_locale(stats.total_duration, self.locale),
+                if apps_list.is_empty() {
+                    empty_value(self.locale).to_string()
+                } else {
+                    apps_list
+                },
+                if urls_list.is_empty() {
+                    empty_value(self.locale).to_string()
+                } else {
+                    urls_list
+                },
+                hourly_summary,
+                if top_keywords.is_empty() {
+                    empty_value(self.locale).to_string()
+                } else {
+                    top_keywords
+                },
+                timeline = timeline,
+            ),
         };
 
         // 如果用户覆盖了系统提示词模板，则用它替代硬编码的 base_prompt
@@ -745,6 +817,16 @@ Close with one sentence about the day's work state."#,
                         if keywords_for_override.is_empty() { empty_value(self.locale).to_string() } else { keywords_for_override.clone() },
                         timeline,
                     ),
+                    AppLocale::Ar => format!(
+                        "[التاريخ]\n{}\n\n[البيانات الأولية]\nمدة العمل: {}\nأهم التطبيقات: {}\nالمواقع: {}\nالنشاط بالساعة: {}\nالكلمات المفتاحية للشاشة: {}\n\n[سجل الأنشطة الزمني]\n{}",
+                        date,
+                        format_duration_for_locale(stats.total_duration, self.locale),
+                        if apps_list_for_override.is_empty() { empty_value(self.locale).to_string() } else { apps_list_for_override.clone() },
+                        if urls_list_for_override.is_empty() { empty_value(self.locale).to_string() } else { urls_list_for_override.clone() },
+                        hourly_summary,
+                        if keywords_for_override.is_empty() { empty_value(self.locale).to_string() } else { keywords_for_override.clone() },
+                        timeline,
+                    ),
                 };
                 format!("{}\n\n{}", trimmed, injected)
             }
@@ -768,6 +850,10 @@ Close with one sentence about the day's work state."#,
             AppLocale::En => format!(
                 "### Observation\n\nToday's work mainly revolved around tools such as {}, and the overall direction stayed fairly clear.\n\n### Evidence\n\n- The recorded activity is concentrated around the main work tools.\n- The day includes continuous activity records that can support a rhythm assessment.\n\n### Suggestions\n\nReserve a longer uninterrupted block for the most important task to reduce context switching.\n\n### Wrap-up\n\nThe day moved forward at a stable pace and produced solid progress.\n\n---\n*Note: This section was generated from the base template because AI analysis was unavailable.*",
                 if apps_list.is_empty() { "several apps".to_string() } else { apps_list.to_string() }
+            ),
+            AppLocale::Ar => format!(
+                "### الملاحظة\n\nتمحور عمل اليوم بشكل رئيسي حول أدوات مثل {}، وبقي الاتجاه العام واضحاً إلى حد كبير.\n\n### الأدلة\n\n- يتركز النشاط المسجل حول أدوات العمل الرئيسية.\n- يتضمن اليوم سجلات نشاط مستمرة يمكن أن تدعم تقييم إيقاع العمل.\n\n### الاقتراحات\n\nتخصيص فترة أطول دون انقطاع للمهمة الأكثر أهمية لتقليل التبديل بين السياقات.\n\n### الخلاصة\n\nسار اليوم بوتيرة مستقرة وحقق تقدماً ملموساً.\n\n---\n*ملاحظة: تم إنشاء هذا القسم من القالب الأساسي لأن تحليل الذكاء الاصطناعي لم يكن متوفراً.*",
+                if apps_list.is_empty() { "عدة تطبيقات".to_string() } else { apps_list.to_string() }
             ),
         }
     }
@@ -841,6 +927,9 @@ impl Analyzer for SummaryAnalyzer {
             AppLocale::En => {
                 report.push_str(&format!("# Daily Report\n\n**Date:** {date}\n\n"));
             }
+            AppLocale::Ar => {
+                report.push_str(&format!("# تقرير اليوم\n\n**التاريخ:** {date}\n\n"));
+            }
         }
 
         // 统计区块：AI 编排顺序 + 用户偏好
@@ -875,6 +964,7 @@ impl Analyzer for SummaryAnalyzer {
             AppLocale::ZhCn => "AI 分析",
             AppLocale::ZhTw => "AI 分析",
             AppLocale::En => "AI Analysis",
+            AppLocale::Ar => "تحليل الذكاء الاصطناعي",
         };
         let apps_list = join_list(
             locale,
