@@ -95,7 +95,7 @@
     "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "",
+        "title": "Work Review",
         "width": 1000,
         "height": 700,
         "visible": false,

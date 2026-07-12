@@ -1492,6 +1492,13 @@
   border: none;
   border-radius: 0;
 }
+/* 活动时间线（details 内表格）保持干净：豁免表头灰底 + 斑马纹 */
+.markdown-body details table thead {
+  background: transparent;
+}
+.markdown-body details table tbody tr:nth-child(even) {
+  background: transparent;
+}
 
 /* ===== A 包：核心工作流统一升级 ===== */
 
@@ -2341,10 +2348,12 @@
   word-break: break-word;
 }
 
+/* 助手页表格：与全局 .markdown-body table 一致（display:table + width:100%）。
+   不用 display:block，否则窄内容表格右侧留大空白（同 #124 根因）。
+   overflow-x 兜底由 .markdown-body 的 overflow-x:auto 负责。 */
 .assistant-markdown table {
-  display: block;
-  max-width: 100%;
-  overflow-x: auto;
+  display: table;
+  width: 100%;
 }
 
 .assistant-markdown h2 {
@@ -2835,6 +2844,13 @@
   --editorial-shell-bg: #0d1117;
   --editorial-surface-featured: #161b22;
   --editorial-surface-subtle: #101820;
+}
+
+/* ui-style-c 深色模式：外框边框/阴影需覆盖，否则浅色 border 会形成"白边"（#129） */
+.dark .app-shell.ui-style-c .app-shell-sidebar-frame,
+.dark .app-shell.ui-style-c .app-shell-main-frame {
+  border-color: rgba(48, 54, 61, 0.82);
+  box-shadow: none;
 }
 
 @media (max-width: 920px) {
