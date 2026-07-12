@@ -213,7 +213,7 @@
     ></button>
 
     <div
-      class="relative z-10 w-full max-w-3xl rounded-[32px] border border-slate-200/80 bg-white p-6 text-left shadow-2xl shadow-slate-950/20 dark:border-[#30363d]/70 dark:bg-[#161b22] sm:p-7"
+      class="relative z-10 w-full max-w-3xl rounded-[28px] border border-slate-200/80 bg-white p-6 text-left shadow-2xl shadow-slate-950/20 dark:border-[#30363d]/70 dark:bg-[#161b22] sm:p-7"
       role="dialog"
       aria-modal="true"
       aria-labelledby="sponsorship-dialog-title"

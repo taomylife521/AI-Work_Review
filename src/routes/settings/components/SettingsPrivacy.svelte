@@ -293,7 +293,7 @@
                       <span>{rule.app_name}</span>
                       <button
                         on:click={() => removeAppRule(rule._idx)}
-                        class="ml-1.5 text-slate-400 hover:text-red-500 opacity-50 group-hover:opacity-100 transition-opacity"
+                        class="ml-1.5 text-slate-400 dark:text-[#7d8590] hover:text-red-500 dark:hover:text-red-400 opacity-50 group-hover:opacity-100 transition-opacity"
                       >
                         ×
                       </button>

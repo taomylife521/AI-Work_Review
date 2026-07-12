@@ -29,7 +29,7 @@
       {#if subtitle}<p class="settings-card-desc">{subtitle}</p>{/if}
     </div>
     <svg
-      class="h-4 w-4 shrink-0 text-slate-400 transition-transform duration-200 {open ? 'rotate-180' : ''}"
+      class="h-4 w-4 shrink-0 text-slate-400 dark:text-[#7d8590] transition-transform duration-200 {open ? 'rotate-180' : ''}"
       fill="none"
       stroke="currentColor"
       viewBox="0 0 24 24"

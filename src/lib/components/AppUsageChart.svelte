@@ -104,7 +104,7 @@
           {#if iconSrc}
             <img src={iconSrc} alt="" class="w-5 h-5 rounded-md object-cover" />
           {:else}
-            <span class="w-5 h-5 flex items-center justify-center rounded bg-slate-100 dark:bg-[#30363d] text-xs text-slate-500">{i + 1}</span>
+            <span class="w-5 h-5 flex items-center justify-center rounded bg-slate-100 dark:bg-[#30363d] text-xs text-slate-500 dark:text-[#adbac7]">{i + 1}</span>
           {/if}
         </div>
         <span class="w-24 text-xs text-slate-700 dark:text-[#adbac7] truncate flex-shrink-0">{app.app_name}</span>

@@ -1132,7 +1132,7 @@
                   <div class="flex justify-end gap-2">
                     <button
                       on:click={() => showCreateSemanticCategory = false}
-                      class="px-3 py-1 text-xs rounded-lg text-slate-500 hover:text-slate-700"
+                      class="px-3 py-1 text-xs rounded-lg text-slate-500 hover:text-slate-700 dark:text-[#7d8590] dark:hover:text-[#adbac7]"
                     >
                       {t('overview.cancel')}
                     </button>
@@ -1160,7 +1160,7 @@
                   <div class="flex justify-end gap-2">
                     <button
                       on:click={() => showRenameSemanticCategory = false}
-                      class="px-3 py-1 text-xs rounded-lg text-slate-500 hover:text-slate-700"
+                      class="px-3 py-1 text-xs rounded-lg text-slate-500 hover:text-slate-700 dark:text-[#7d8590] dark:hover:text-[#adbac7]"
                     >
                       {t('overview.cancel')}
                     </button>

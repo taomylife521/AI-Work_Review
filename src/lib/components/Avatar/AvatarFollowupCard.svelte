@@ -57,7 +57,7 @@
       <div class="relative mt-3 shrink-0 space-y-2">
         <button
           type="button"
-          class={`inline-flex w-full items-center justify-center rounded-[10px] px-3 py-2 text-[12px] font-semibold transition ${copy.primaryClass || 'bg-emerald-500 hover:bg-emerald-600 text-white'}`}
+          class={`inline-flex w-full items-center justify-center rounded-lg px-3 py-2 text-[12px] font-semibold transition ${copy.primaryClass || 'bg-emerald-500 hover:bg-emerald-600 text-white'}`}
           on:click={onTimeline}
         >
           {copy.openTimeline}
@@ -66,7 +66,7 @@
         <div class="flex flex-col gap-2">
           <button
             type="button"
-            class="inline-flex min-h-[34px] w-full items-center justify-center gap-1 rounded-[10px] border border-slate-200 bg-white dark:bg-[#21262d] px-3 py-2 text-[12px] font-medium text-slate-700 dark:text-[#adbac7] transition hover:border-slate-300 dark:hover:border-[#484f58] hover:bg-slate-50 dark:hover:bg-[#30363d]"
+            class="inline-flex min-h-[34px] w-full items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white dark:bg-[#21262d] px-3 py-2 text-[12px] font-medium text-slate-700 dark:text-[#adbac7] transition hover:border-slate-300 dark:hover:border-[#484f58] hover:bg-slate-50 dark:hover:bg-[#30363d]"
             title={copy.focusFull || copy.focus}
             aria-label={copy.focusFull || copy.focus}
             on:click={onFocus}
@@ -75,7 +75,7 @@
           </button>
           <button
             type="button"
-            class="inline-flex min-h-[34px] w-full items-center justify-center gap-1 rounded-[10px] border border-slate-200 bg-white dark:bg-[#21262d] px-3 py-2 text-[12px] font-medium text-slate-700 dark:text-[#adbac7] transition hover:border-slate-300 dark:hover:border-[#484f58] hover:bg-slate-50 dark:hover:bg-[#30363d]"
+            class="inline-flex min-h-[34px] w-full items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white dark:bg-[#21262d] px-3 py-2 text-[12px] font-medium text-slate-700 dark:text-[#adbac7] transition hover:border-slate-300 dark:hover:border-[#484f58] hover:bg-slate-50 dark:hover:bg-[#30363d]"
             title={copy.rememberFull || copy.remember}
             aria-label={copy.rememberFull || copy.remember}
             on:click={onRemember}
@@ -84,7 +84,7 @@
           </button>
           <button
             type="button"
-            class="inline-flex min-h-[34px] w-full items-center justify-center gap-1 rounded-[10px] border border-slate-200 bg-white dark:bg-[#21262d] px-3 py-2 text-[12px] font-medium text-slate-700 dark:text-[#adbac7] transition hover:border-slate-300 dark:hover:border-[#484f58] hover:bg-slate-50 dark:hover:bg-[#30363d]"
+            class="inline-flex min-h-[34px] w-full items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white dark:bg-[#21262d] px-3 py-2 text-[12px] font-medium text-slate-700 dark:text-[#adbac7] transition hover:border-slate-300 dark:hover:border-[#484f58] hover:bg-slate-50 dark:hover:bg-[#30363d]"
             title={copy.snoozeFull || copy.snooze}
             aria-label={copy.snoozeFull || copy.snooze}
             on:click={onSnooze}

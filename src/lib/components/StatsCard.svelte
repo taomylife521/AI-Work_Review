@@ -27,7 +27,7 @@
 
   $: cardClass = embedded
     ? 'block min-h-[108px] rounded-[22px] bg-slate-50/88 px-4 py-4 dark:bg-[#161b22]/30'
-    : 'block min-h-[116px] rounded-2xl border border-slate-100 bg-white p-5 dark:border-[#30363d]/60 dark:bg-[#21262d]/80';
+    : 'block min-h-[116px] rounded-2xl border border-slate-200/80 bg-white p-5 dark:border-[#30363d]/60 dark:bg-[#21262d]/80';
   $: iconClass = embedded
     ? `flex h-10 w-10 items-center justify-center rounded-2xl ${iconBgs[color]} ${iconColors[color]} shrink-0`
     : `flex h-11 w-11 items-center justify-center rounded-2xl border border-white/80 shadow-sm dark:shadow-none dark:border-[#30363d]/80 ${iconBgs[color]} ${iconColors[color]} shrink-0`;
@@ -46,10 +46,10 @@
   >
     <div class="flex h-full items-center justify-between gap-4">
       <div class="min-w-0 flex-1">
-        <span class="text-[13px] font-medium text-slate-400 dark:text-[#636c76] leading-none">{title}</span>
+        <span class="text-[13px] font-medium text-slate-500 dark:text-[#7d8590] leading-none">{title}</span>
         <p class={valueClass}>{value}</p>
         {#if subtitle}
-          <p class="mt-1.5 text-xs font-medium leading-none text-slate-400 dark:text-[#636c76]">{subtitle}</p>
+          <p class="mt-1.5 text-xs font-medium leading-none text-slate-500 dark:text-[#7d8590]">{subtitle}</p>
         {/if}
       </div>
       <div class={iconClass}>
@@ -82,10 +82,10 @@
   <div class={cardClass}>
     <div class="flex h-full items-center justify-between gap-4">
       <div class="min-w-0 flex-1">
-        <span class="text-[13px] font-medium text-slate-400 dark:text-[#636c76] leading-none">{title}</span>
+        <span class="text-[13px] font-medium text-slate-500 dark:text-[#7d8590] leading-none">{title}</span>
         <p class={valueClass}>{value}</p>
         {#if subtitle}
-          <p class="mt-1.5 text-xs font-medium leading-none text-slate-400 dark:text-[#636c76]">{subtitle}</p>
+          <p class="mt-1.5 text-xs font-medium leading-none text-slate-500 dark:text-[#7d8590]">{subtitle}</p>
         {/if}
       </div>
       <div class={iconClass}>

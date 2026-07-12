@@ -1328,7 +1328,7 @@
               </p>
             </div>
             {#if categorySaving}
-              <span class="text-xs text-slate-400">{t('timeline.detail.saving')}</span>
+              <span class="text-xs text-slate-400 dark:text-[#7d8590]">{t('timeline.detail.saving')}</span>
             {/if}
           </div>
           <div class="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
@@ -1403,7 +1403,7 @@
               <div class="flex justify-end gap-2">
                 <button
                   on:click={() => showCreateCategory = false}
-                  class="px-3 py-1 text-xs rounded-lg text-slate-500 hover:text-slate-700"
+                  class="px-3 py-1 text-xs rounded-lg text-slate-500 hover:text-slate-700 dark:text-[#7d8590] dark:hover:text-[#adbac7]"
                 >
                   {t('timeline.cancel')}
                 </button>
@@ -1448,7 +1448,7 @@
               <div class="flex justify-end gap-2">
                 <button
                   on:click={() => showRenameCategory = false}
-                  class="px-3 py-1 text-xs rounded-lg text-slate-500 hover:text-slate-700"
+                  class="px-3 py-1 text-xs rounded-lg text-slate-500 hover:text-slate-700 dark:text-[#7d8590] dark:hover:text-[#adbac7]"
                 >
                   {t('timeline.cancel')}
                 </button>
@@ -1473,7 +1473,7 @@
               </p>
             </div>
             {#if privacySaving}
-              <span class="text-xs text-slate-400">{t('timeline.detail.saving')}</span>
+              <span class="text-xs text-slate-400 dark:text-[#7d8590]">{t('timeline.detail.saving')}</span>
             {/if}
           </div>
           <div class="mt-3 flex gap-2">
@@ -1515,11 +1515,11 @@
               <!-- max-h 限制高度防止超高图片撑开弹窗，object-contain 保持比例居中 -->
               <img src={selectedActivity.thumbnail} alt={t('timeline.detail.screenshotAlt')} class="max-w-full max-h-96 object-contain" />
             {:else if selectedActivity.screenshot_path}
-              <div class="py-12 flex items-center justify-center text-slate-400">
+              <div class="py-12 flex items-center justify-center text-slate-400 dark:text-[#7d8590]">
                 <span>{t('timeline.detail.screenshotLoadFailed')}</span>
               </div>
             {:else}
-              <div class="py-12 flex items-center justify-center text-slate-400">
+              <div class="py-12 flex items-center justify-center text-slate-400 dark:text-[#7d8590]">
                 <span>{t('timeline.detail.screenshotMissing')}</span>
               </div>
             {/if}

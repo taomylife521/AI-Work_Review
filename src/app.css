@@ -3,6 +3,7 @@
 @tailwind utilities;
 
 :root {
+  color-scheme: light;
   font-family: "SF Pro Display", "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Segoe UI Variable Text", "Microsoft YaHei", sans-serif;
   font-size: 15px;
   line-height: 1.6;
@@ -11,12 +12,13 @@
   --editorial-surface-featured: #ffffff;
   --editorial-surface-subtle: #f8fafc;
 
-  /* 设计 token —— 2026 极简现代风：3 级圆角 + 极轻阴影 + 8 点栅格间距 */
-  --radius-sm: 6px;     /* 表格、blockquote、统计卡 */
-  --radius-md: 12px;    /* 按钮、段落容器 */
-  --radius-lg: 20px;    /* 主卡片 */
+  /* 设计 token —— 统一圆角/阴影/间距基准，新样式应引用这些变量而非硬编码 */
+  --radius-sm: 8px;     /* 小元素：表格、blockquote、统计卡、输入框 */
+  --radius-md: 12px;    /* 中元素：按钮、段落容器 */
+  --radius-lg: 20px;    /* 大容器：主卡片 */
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.05);
   --shadow-md: 0 4px 16px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 16px 40px rgba(15, 23, 42, 0.06), 0 2px 10px rgba(15, 23, 42, 0.04);
   --space-section: 1.75rem;  /* 段落间距 */
   --space-block: 1rem;       /* 卡片内边距 */
 
@@ -32,6 +34,7 @@
 
 /* 暗色主题 — 主流深色配色（参考 GitHub Dark / VS Code Dark+）*/
 .dark {
+  color-scheme: dark;
   color: #e6edf3;
   background-color: #0d1117;
   --editorial-shell-bg: linear-gradient(180deg, #010409 0%, #0d1117 22%, #161b22 56%, #0d1117 100%);
@@ -40,6 +43,7 @@
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.20), 0 1px 3px rgba(0, 0, 0, 0.24);
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.20);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.32), 0 2px 10px rgba(0, 0, 0, 0.20);
 }
 
 /* 滚动条样式 */
@@ -95,11 +99,11 @@
 /* 卡片样式 */
 .card {
   @apply bg-white dark:bg-[#21262d] rounded-xl border border-slate-200/80 dark:border-[#30363d]/80;
-  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.05);
+  box-shadow: var(--shadow-sm);
 }
 
 .dark .card {
-  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.3), 0 1px 2px -1px rgb(0 0 0 / 0.3);
+  box-shadow: var(--shadow-sm);
 }
 
 /* 按钮样式 */
@@ -513,19 +517,15 @@
 }
 
 .page-card {
-  @apply rounded-[26px] border border-white/75 dark:border-[#30363d]/60 p-5 backdrop-blur-xl;
+  @apply rounded-[26px] border border-slate-200/80 dark:border-[#30363d]/60 p-5 backdrop-blur-xl;
   background: rgba(255, 255, 255, 0.88);
-  box-shadow:
-    0 16px 40px rgba(15, 23, 42, 0.06),
-    0 2px 10px rgba(15, 23, 42, 0.04);
+  box-shadow: var(--shadow-lg);
 }
 
 .page-card-soft {
-  @apply rounded-[26px] border border-white/75 dark:border-[#30363d]/60 p-5 text-center backdrop-blur-xl;
+  @apply rounded-[26px] border border-slate-200/80 dark:border-[#30363d]/60 p-5 text-center backdrop-blur-xl;
   background: rgba(255, 255, 255, 0.88);
-  box-shadow:
-    0 16px 40px rgba(15, 23, 42, 0.06),
-    0 2px 10px rgba(15, 23, 42, 0.04);
+  box-shadow: var(--shadow-lg);
 }
 
 .dark .page-card,
@@ -713,7 +713,7 @@
 
 .page-banner {
   @apply rounded-2xl border px-4 py-3.5 flex items-start justify-between gap-3 backdrop-blur-sm;
-  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.04);
+  box-shadow: var(--shadow-sm);
 }
 
 .page-banner-error {
@@ -891,21 +891,21 @@
   gap: 0.34rem;
   height: 5.15rem;
   padding: 0.6rem;
-  border-radius: 0.9rem;
+  border-radius: var(--radius-md);
   border: 1px solid rgba(226, 232, 240, 0.9);
   background: #f8fafc;
 }
 
 .settings-style-preview__sidebar {
   grid-row: 1 / -1;
-  border-radius: 0.55rem;
+  border-radius: var(--radius-sm);
   background: rgba(100, 116, 139, 0.24);
 }
 
 .settings-style-preview__topbar,
 .settings-style-preview__metric,
 .settings-style-preview__chart {
-  border-radius: 0.55rem;
+  border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.82);
   border: 1px solid rgba(226, 232, 240, 0.72);
 }
@@ -968,7 +968,7 @@
 
 .settings-style-preview--a {
   gap: 0.28rem;
-  border-radius: 0.65rem;
+  border-radius: var(--radius-md);
   background: #f3f5f7;
 }
 
@@ -997,7 +997,7 @@
 .settings-style-preview--b .settings-style-preview__topbar,
 .settings-style-preview--b .settings-style-preview__metric,
 .settings-style-preview--b .settings-style-preview__chart {
-  border-radius: 0.7rem;
+  border-radius: var(--radius-md);
 }
 
 .settings-style-preview--b .settings-style-preview__sidebar {
@@ -1020,7 +1020,7 @@
 .settings-style-preview--c .settings-style-preview__topbar,
 .settings-style-preview--c .settings-style-preview__metric,
 .settings-style-preview--c .settings-style-preview__chart {
-  border-radius: 0.25rem;
+  border-radius: var(--radius-sm);
 }
 
 .settings-style-preview--c .settings-style-preview__sidebar {
@@ -1035,6 +1035,36 @@
 .settings-style-preview--c .settings-style-preview__chart span {
   background: rgba(15, 23, 42, 0.34);
   border-radius: 0.12rem 0.12rem 0.08rem 0.08rem;
+}
+
+/* 深色模式：样式缩略图改为深色底，避免白块在深色卡片里刺眼 */
+.dark .settings-style-preview {
+  border-color: rgba(48, 54, 61, 0.8);
+  background: #0d1117;
+}
+.dark .settings-style-preview__topbar,
+.dark .settings-style-preview__metric,
+.dark .settings-style-preview__chart {
+  background: rgba(48, 54, 61, 0.5);
+  border-color: rgba(48, 54, 61, 0.6);
+}
+.dark .settings-style-preview--a {
+  background: #161b22;
+}
+.dark .settings-style-preview--b {
+  background:
+    radial-gradient(circle at top left, rgba(56, 139, 253, 0.12), transparent 58%),
+    #0d1117;
+}
+.dark .settings-style-preview--c {
+  background: #0d1117;
+}
+.dark .settings-style-current-mark {
+  background: rgba(129, 140, 248, 0.16);
+  color: #c4b5fd;
+}
+.dark .settings-style-option-active .settings-style-current-mark {
+  background: rgba(129, 140, 248, 0.24);
 }
 
 .settings-section {
@@ -1314,7 +1344,7 @@
 .markdown-body img {
   max-width: 100%;
   height: auto;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   margin: 0.5em 0;
 }
 
@@ -1770,7 +1800,7 @@
 .report-section {
   position: relative;
   padding: 0.55rem 0.65rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   transition:
     background-color 0.15s ease,
     box-shadow 0.15s ease;
@@ -1812,7 +1842,7 @@
   opacity: 0;
   transition: opacity 0.15s;
   padding: 0.375rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   color: var(--color-text-muted);
   margin-top: 0.25rem;
 }
@@ -1845,7 +1875,7 @@
 }
 .modal-panel {
   background: #ffffff;
-  border-radius: 1rem;
+  border-radius: var(--radius-lg);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
   width: 92vw;
   max-width: 48rem;
@@ -1872,7 +1902,7 @@
 }
 .modal-close {
   padding: 0.25rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   color: #94a3b8;
 }
 .modal-close:hover {
@@ -1895,7 +1925,7 @@
   font-size: 15px;
   line-height: 1.8;
   resize: vertical;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   color: #1e293b;
@@ -1959,13 +1989,13 @@
   border-radius: 1.7rem;
   padding: 0.9rem;
   border: 1px solid rgba(226, 232, 240, 0.8);
-  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.05);
+  box-shadow: var(--shadow-sm);
 }
 
 .dark .settings-editorial-shell .page-header {
   background: rgba(15, 23, 42, 0.88);
   border-color: rgba(71, 85, 105, 0.5);
-  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.3), 0 1px 2px -1px rgb(0 0 0 / 0.3);
+  box-shadow: var(--shadow-sm);
 }
 
 .settings-editorial-board {
@@ -2006,7 +2036,7 @@
   min-height: 3rem;
   width: 100%;
   padding: 0.75rem 0.95rem;
-  border-radius: 1.2rem;
+  border-radius: var(--radius-lg);
   color: #64748b;
   font-size: 0.92rem;
   font-weight: 500;
@@ -2039,7 +2069,7 @@
   justify-content: center;
   width: 2rem;
   height: 2rem;
-  border-radius: 0.9rem;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.9);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
   flex-shrink: 0;
@@ -2600,6 +2630,7 @@
     linear-gradient(135deg, rgba(49, 46, 129, 0.58), rgba(30, 41, 59, 0.94));
   border-color: rgba(99, 102, 241, 0.38);
   color: #c4b5fd;
+  box-shadow: none;
 }
 
 /* ===== 界面风格切换：C 为当前默认，A/B/C 只通过根 class 覆盖视觉变量 ===== */
@@ -2637,7 +2668,7 @@
 
 .app-shell.ui-style-a .page-card,
 .app-shell.ui-style-a .page-card-soft {
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
   background: #ffffff;
   border-color: rgba(203, 213, 225, 0.82);
   box-shadow: none;
@@ -2658,7 +2689,7 @@
 .app-shell.ui-style-a .page-control-input,
 .app-shell.ui-style-a .overview-date-trigger,
 .app-shell.ui-style-a .page-status-chip {
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
 }
 
 .app-shell.ui-style-a .overview-panel {
@@ -2683,7 +2714,7 @@
 
 .app-shell.ui-style-a .sidebar-brand,
 .app-shell.ui-style-a .sidebar-toolbelt {
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
 }
 
 .dark .app-shell.ui-style-a {
@@ -2760,7 +2791,7 @@
 .app-shell.ui-style-c .page-card,
 .app-shell.ui-style-c .page-card-soft,
 .app-shell.ui-style-c .settings-card {
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   padding: 0.85rem;
   box-shadow: none;
 }
@@ -2787,14 +2818,14 @@
 
 .app-shell.ui-style-c .sidebar-nav-item {
   padding: 0.5rem 0.65rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   font-size: 0.86rem;
 }
 
 .app-shell.ui-style-c .page-title-badge {
   width: 2.1rem;
   height: 2.1rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
 }
 
 .app-shell.ui-style-c .page-control-btn,
@@ -2804,7 +2835,7 @@
 .app-shell.ui-style-c .localized-date-picker__popover,
 .app-shell.ui-style-c .localized-date-picker__selection-chip,
 .app-shell.ui-style-c .localized-date-picker__nav {
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
 }
 
 .app-shell.ui-style-c .page-title-copy h2 {
@@ -2824,7 +2855,7 @@
 
 .app-shell.ui-style-c .overview-summary-grid > :where(a, div) {
   min-height: 88px;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   padding: 0.85rem;
 }
 
@@ -2845,7 +2876,7 @@
 .app-shell.ui-style-c .overview-summary-grid > :where(a, div) > div > div:last-child {
   width: 2.2rem;
   height: 2.2rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
 }
 
 .dark .app-shell.ui-style-c {

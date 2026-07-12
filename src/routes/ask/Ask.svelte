@@ -665,7 +665,7 @@
                   {/if}
                   <div class="markdown-body assistant-markdown min-w-0 max-w-none">
                     {#if message.streaming}
-                      <div class="streaming-content">{#if message.content}{@html renderStreamingMarkdown(message.content, messageIndex)}{:else}<p class="text-slate-400">{t('ask.thinking')}</p>{/if}<span class="ml-0.5 inline-block animate-pulse text-slate-400 align-text-bottom">▍</span></div>
+                      <div class="streaming-content">{#if message.content}{@html renderStreamingMarkdown(message.content, messageIndex)}{:else}<p class="text-slate-400 dark:text-[#7d8590]">{t('ask.thinking')}</p>{/if}<span class="ml-0.5 inline-block animate-pulse text-slate-400 dark:text-[#7d8590] align-text-bottom">▍</span></div>
                     {:else}
                       {@html renderMarkdown(message.content)}
                     {/if}
@@ -742,7 +742,7 @@
 
     <div class="pointer-events-none sticky bottom-0 bg-gradient-to-t from-slate-50 via-slate-50/90 to-transparent px-4 pb-4 pt-8 dark:from-[#0d1117] dark:via-[#010409]/84">
       <div class="pointer-events-auto mx-auto max-w-4xl">
-        <div class="ask-composer-shell rounded-[30px] border border-slate-200/70 bg-white/94 px-4 py-3 shadow-[0_12px_32px_rgba(15,23,42,0.08)] backdrop-blur dark:border-[#30363d]/70 dark:bg-[#161b22]/88 dark:shadow-[0_12px_32px_rgba(2,6,23,0.32)]">
+        <div class="ask-composer-shell rounded-[28px] border border-slate-200/70 bg-white/94 px-4 py-3 shadow-[0_12px_32px_rgba(15,23,42,0.08)] backdrop-blur dark:border-[#30363d]/70 dark:bg-[#161b22]/88 dark:shadow-[0_12px_32px_rgba(2,6,23,0.32)]">
           <textarea
             bind:this={composer}
             bind:value={input}
