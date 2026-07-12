@@ -1,54 +1,50 @@
 <script>
-  import { createEventDispatcher, onDestroy, onMount } from 'svelte';
+  import { createEventDispatcher, onMount, onDestroy } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { locale, t } from '$lib/i18n/index.js';
-  import { showToast } from '$lib/stores/toast.js';
-  import CollapsibleSection from '$lib/components/CollapsibleSection.svelte';
+  import CollapsibleSection from '../../../lib/components/CollapsibleSection.svelte';
+
+  import McpServerPanel from './nodeGateway/McpServerPanel.svelte';
+  import LocalApiPanel from './nodeGateway/LocalApiPanel.svelte';
+  import TelegramBotPanel from './nodeGateway/TelegramBotPanel.svelte';
+  import BotCredentialsPanel from './nodeGateway/BotCredentialsPanel.svelte';
+  import DeviceIdentityPanel from './nodeGateway/DeviceIdentityPanel.svelte';
+  import DeviceRegistryPanel from './nodeGateway/DeviceRegistryPanel.svelte';
+  import ApiExamplesPanel from './nodeGateway/ApiExamplesPanel.svelte';
 
   export let config;
-  export let dataDir = '';
+  export let dataDir;
 
   const dispatch = createEventDispatcher();
+  $: currentLocale = $locale;
 
-  let nodeStatus = null;
-  let localStatus = null;
+  let nodeStatus = { deviceId: '', protocolVersion: '', deviceName: '' };
+  let localStatus = { enabled: false, baseUrl: '', tokenPreview: '', lastError: null };
   let tgBotStatus = null;
   let loading = true;
   let saving = false;
-  let tokenVisible = false;
-  let tokenValue = '';
-  let tgTokenVisible = false;
-  let feishuSecretVisible = false;
-  let dingtalkSecretVisible = false;
-  let examplesExpanded = false;
-  let activeApiCategory = 'all';
   let tgStatusPollId = null;
-  $: currentLocale = $locale;
 
   $: mcpDbPath = dataDir ? `${dataDir}/work_review.db` : '';
   $: mcpConfigPath = dataDir ? `${dataDir}/config.json` : '';
   $: mcpConfigJson = JSON.stringify({
     mcpServers: {
       'work-review': {
-        command: '/path/to/work-review-mcp-server',
-        args: [],
+        command: 'work-review-mcp-server',
         env: {
-          WORK_REVIEW_DB_PATH: mcpDbPath || '/path/to/work_review.db',
-          WORK_REVIEW_CONFIG_PATH: mcpConfigPath || '/path/to/config.json',
+          WORK_REVIEW_DB_PATH: mcpDbPath,
+          WORK_REVIEW_CONFIG_PATH: mcpConfigPath,
         },
       },
     },
   }, null, 2);
 
   function normalizeConfig() {
-    if (!config.node_gateway || typeof config.node_gateway !== 'object') {
-      config.node_gateway = { device_name: null };
+    if (!config.node_gateway) {
+      config.node_gateway = { device_name: null, endpoint: null };
     }
-    if (
-      typeof config.node_gateway.device_name !== 'string' ||
-      !config.node_gateway.device_name.trim()
-    ) {
-      config.node_gateway.device_name = null;
+    if (typeof config.node_gateway.device_name === 'string') {
+      config.node_gateway.device_name = config.node_gateway.device_name.trim() || null;
     }
     if (
       typeof config.localhost_api_host !== 'string' ||
@@ -68,179 +64,87 @@
   async function refreshTelegramBotStatus() {
     try {
       tgBotStatus = await invoke('get_telegram_bot_status');
-      if (Array.isArray(tgBotStatus?.allowedChatIds)) {
+      if (tgBotStatus?.allowedChatIds) {
         config.telegram_bot_allowed_chat_ids = tgBotStatus.allowedChatIds;
       }
-    } catch (error) {
-      console.warn('刷新 Telegram Bot 状态失败:', error);
+    } catch (e) {
+      /* ignore */
     }
   }
 
   function startTelegramStatusPolling() {
     stopTelegramStatusPolling();
-    if (!config.telegram_bot_enabled) {
-      return;
-    }
-
-    let polls = 0;
+    refreshTelegramBotStatus();
+    let attempts = 0;
     tgStatusPollId = setInterval(async () => {
-      polls += 1;
+      attempts++;
       await refreshTelegramBotStatus();
-      if (polls >= 6 || (tgBotStatus && !tgBotStatus.starting)) {
+      if (attempts >= 6 || (tgBotStatus && !tgBotStatus.starting)) {
         stopTelegramStatusPolling();
       }
     }, 3000);
   }
 
   async function loadStatus() {
-    if (!nodeStatus || !localStatus) {
-      loading = true;
-    }
+    loading = true;
     try {
-      const [nextNodeStatus, nextLocalStatus, nextTgBotStatus] = await Promise.all([
+      const [node, local, tg] = await Promise.all([
         invoke('get_node_gateway_status'),
         invoke('get_localhost_api_status'),
         invoke('get_telegram_bot_status'),
       ]);
-      nodeStatus = nextNodeStatus;
-      localStatus = nextLocalStatus;
-      tgBotStatus = nextTgBotStatus;
-      if (Array.isArray(tgBotStatus?.allowedChatIds)) {
+      nodeStatus = node;
+      localStatus = local;
+      tgBotStatus = tg;
+      if (tgBotStatus?.allowedChatIds) {
         config.telegram_bot_allowed_chat_ids = tgBotStatus.allowedChatIds;
       }
       if (config.telegram_bot_enabled) {
         startTelegramStatusPolling();
-      } else {
-        stopTelegramStatusPolling();
       }
-    } catch (error) {
-      console.error('读取集成页面数据失败:', error);
-      showToast(t('nodeGatewayPage.loadFailed', { error }), 'error');
-    } finally {
-      loading = false;
+    } catch (e) {
+      console.error('加载接入管理状态失败:', e);
     }
+    loading = false;
   }
 
-  async function persistConfig(successMessage = null) {
+  async function persistConfig() {
     saving = true;
+    normalizeConfig();
     try {
-      normalizeConfig();
       await invoke('save_config', { config });
       dispatch('change', config);
-      await loadStatus();
-      if (successMessage) {
-        showToast(successMessage, 'success');
-      }
-      return true;
-    } catch (error) {
-      console.error('保存集成配置失败:', error);
-      showToast(t('nodeGatewayPage.saveFailed', { error }), 'error');
-      return false;
-    } finally {
-      saving = false;
+      // Reload status after save
+      const [node, local, tg] = await Promise.all([
+        invoke('get_node_gateway_status'),
+        invoke('get_localhost_api_status'),
+        invoke('get_telegram_bot_status'),
+      ]);
+      nodeStatus = node;
+      localStatus = local;
+      tgBotStatus = tg;
+    } catch (e) {
+      dispatch('toast', { message: t('nodeGatewayPage.saveFailed', { error: e }), type: 'error' });
     }
+    saving = false;
   }
 
-  async function revealToken() {
-    try {
-      tokenValue = await invoke('reveal_localhost_api_token');
-      tokenVisible = true;
-    } catch (error) {
-      console.error('读取本地 API token 失败:', error);
-      showToast(t('nodeGatewayPage.tokenRevealFailed', { error }), 'error');
-    }
+  function handleToast(e) {
+    dispatch('toast', e.detail);
+  }
+  function handleSave() {
+    persistConfig();
+  }
+  function handleReloadStatus() {
+    loadStatus();
+  }
+  function handleStartTgPolling() {
+    startTelegramStatusPolling();
   }
 
-  async function rotateToken() {
-    try {
-      tokenValue = await invoke('rotate_localhost_api_token');
-      tokenVisible = true;
-      localStatus = await invoke('get_localhost_api_status');
-      showToast(t('nodeGatewayPage.tokenRotated'), 'success');
-    } catch (error) {
-      console.error('轮换本地 API token 失败:', error);
-      showToast(t('nodeGatewayPage.tokenRotateFailed', { error }), 'error');
-    }
-  }
-
-  async function copyToken() {
-    if (!tokenVisible || !tokenValue) {
-      await revealToken();
-    }
-    if (!tokenValue) return;
-
-    try {
-      await navigator.clipboard.writeText(tokenValue);
-      showToast(t('nodeGatewayPage.tokenCopied'), 'success');
-    } catch (error) {
-      console.error('复制本地 API token 失败:', error);
-      showToast(t('nodeGatewayPage.tokenCopyFailed', { error }), 'error');
-    }
-  }
-
-  async function generateTelegramBindCode() {
-    try {
-      const result = await invoke('generate_telegram_bot_bind_code');
-      tgBotStatus = await invoke('get_telegram_bot_status');
-      const code = result?.code || tgBotStatus?.bindCode;
-      if (code) {
-        await navigator.clipboard.writeText(`/bind ${code}`);
-      }
-      showToast(t('nodeGatewayPage.telegramBindCodeGenerated'), 'success');
-    } catch (error) {
-      console.error('生成 Telegram 绑定码失败:', error);
-      showToast(t('nodeGatewayPage.telegramBindCodeFailed', { error }), 'error');
-    }
-  }
-
-  $: curlToken = tokenVisible && tokenValue ? tokenValue : '<your-token>';
-  $: curlBase = localStatus ? localStatus.baseUrl : 'http://127.0.0.1:47831';
-
-  function curlCommand(method, path, body = null) {
-    const sep = path.includes('?') ? '&' : '?';
-    const auth = path === '/health' ? '' : `${sep}token=${curlToken}`;
-    const methodFlag = method === 'GET' ? '' : ` -X ${method}`;
-    const contentType = body ? ` -H "Content-Type: application/json" -d '${JSON.stringify(body)}'` : '';
-    return `curl${methodFlag}${contentType} ${curlBase}${path}${auth}`;
-  }
-
-  async function copyCurl(cmd) {
-    try {
-      await navigator.clipboard.writeText(cmd);
-      showToast(t('nodeGatewayPage.curlCopied'), 'success');
-    } catch (error) {
-      showToast(t('nodeGatewayPage.tokenCopyFailed', { error }), 'error');
-    }
-  }
-
-  async function copyMcpConfig() {
-    try {
-      await navigator.clipboard.writeText(mcpConfigJson);
-      showToast(t('nodeGatewayPage.mcpServerConfigCopied'), 'success');
-    } catch (error) {
-      showToast(t('nodeGatewayPage.tokenCopyFailed', { error }), 'error');
-    }
-  }
-
-  /**
-   * 复制 MCP 路径到剪贴板。labelKey 用于本地化 toast 文案，比如 'mcpServerDbPath'。
-   */
-  async function copyPath(text, labelKey) {
-    if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      showToast(
-        t('nodeGatewayPage.mcpServerPathCopied', { label: t(`nodeGatewayPage.${labelKey}`) }),
-        'success'
-      );
-    } catch (error) {
-      showToast(t('nodeGatewayPage.tokenCopyFailed', { error }), 'error');
-    }
-  }
-
-  onMount(async () => {
+  onMount(() => {
     normalizeConfig();
-    await loadStatus();
+    loadStatus();
   });
 
   onDestroy(() => {
@@ -248,750 +152,120 @@
   });
 </script>
 
-<div class="settings-card node-gateway-settings-shell" data-locale={currentLocale}>
-  <div class="flex items-center justify-between">
-    <div>
-      <h3 class="settings-card-title mb-0">{t('nodeGatewayPage.title')}</h3>
-      <p class="settings-card-desc mb-0">{t('nodeGatewayPage.subtitle')}</p>
-    </div>
-    {#if !loading}
-    <button
-      type="button"
-      class="settings-action-secondary"
-      on:click={loadStatus}
-      disabled={saving}
-    >
-      {t('nodeGatewayPage.refresh')}
-    </button>
-    {/if}
-  </div>
+<div class="settings-card" data-locale={currentLocale}>
+  <h3 class="settings-card-title">{t('nodeGatewayPage.title')}</h3>
+  <p class="settings-card-desc">{t('nodeGatewayPage.subtitle')}</p>
 
   {#if loading}
-    <div class="flex justify-center py-10">
-      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
+    <div class="flex items-center justify-center py-8">
+      <div class="animate-spin h-5 w-5 border-2 border-primary-500 border-t-transparent rounded-full"></div>
     </div>
-  {:else if nodeStatus && localStatus}
-    <div class="settings-section space-y-4">
-
-      <!-- Device Identity -->
-      <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 dark:border-[#30363d]/80 dark:bg-[#21262d]/40">
-        <div class="flex items-center gap-2 mb-3">
-          <div class="flex h-6 w-6 items-center justify-center rounded-md bg-primary-100 dark:bg-primary-900/30">
-            <svg class="w-3.5 h-3.5 text-primary-600 dark:text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z" />
-            </svg>
-          </div>
-          <span class="text-sm font-medium text-slate-700 dark:text-[#c9d1d9]">{t('nodeGatewayPage.deviceIdentity')}</span>
-          <span class="settings-chip-neutral">{nodeStatus.protocolVersion}</span>
+  {:else}
+    <div class="space-y-4">
+      <!-- 分组 1：AI 工具接入（默认展开） -->
+      <CollapsibleSection title={t('nodeGatewayPage.groupAiTools')} storageKey="settings.node.aiTools" defaultOpen={true}>
+        <div class="space-y-3">
+          <McpServerPanel
+            {config}
+            {dataDir}
+            {saving}
+            {mcpDbPath}
+            {mcpConfigPath}
+            {mcpConfigJson}
+            on:save={handleSave}
+            on:toast={handleToast}
+          />
+          <LocalApiPanel
+            {config}
+            {localStatus}
+            {saving}
+            on:save={handleSave}
+            on:reloadStatus={handleReloadStatus}
+            on:toast={handleToast}
+          />
         </div>
-        <div class="space-y-2">
-          <div class="flex items-center justify-between gap-2 rounded-lg bg-white/70 px-3 py-1.5 ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
-            <span class="text-xs text-slate-500 dark:text-[#7d8590]">{t('nodeGatewayPage.deviceId')}</span>
-            <span class="font-mono text-xs text-slate-700 dark:text-[#adbac7]" title={nodeStatus.deviceId}>{nodeStatus.deviceId}</span>
-          </div>
-          <label class="block">
-            <span class="text-xs text-slate-500 dark:text-[#7d8590]">{t('nodeGatewayPage.deviceName')}</span>
-            <input
-              type="text"
-              bind:value={config.node_gateway.device_name}
-              class="mt-0.5 w-full rounded-lg bg-white/70 px-3 py-1.5 text-sm text-slate-900 ring-1 ring-slate-200/70 focus:ring-primary-300 dark:bg-[#161b22]/20 dark:text-[#e6edf3] dark:ring-[#30363d]/70 dark:focus:ring-primary-600 focus:outline-none"
-              placeholder={nodeStatus.deviceName}
-            />
-          </label>
-          <p class="text-[11px] text-slate-400 dark:text-[#636c76]">{t('nodeGatewayPage.deviceNameHint')}</p>
-        </div>
-      </div>
-
-      <!-- ========== Bot 集成（折叠） ========== -->
-      <CollapsibleSection title={t('nodeGatewayPage.botIntegration')} storageKey="settings.node.bots">
-
-        <!-- Local API -->
-        <div class="rounded-xl bg-white/70 px-3.5 py-3 ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
-          <div class="flex items-center justify-between gap-3 mb-2">
-            <div class="flex items-center gap-2">
-              <div class="flex h-5 w-5 items-center justify-center rounded-md bg-primary-100 dark:bg-primary-900/30">
-                <svg class="w-3 h-3 text-primary-600 dark:text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
-                </svg>
-              </div>
-              <span class="text-sm font-medium text-slate-700 dark:text-[#c9d1d9]">{t('nodeGatewayPage.localApi')}</span>
-              {#if localStatus.enabled}
-                <span class="settings-chip-success">{t('nodeGatewayPage.localhostEnabled')}</span>
-              {:else}
-                <span class="settings-chip-neutral">{t('nodeGatewayPage.localhostDisabled')}</span>
-              {/if}
-            </div>
-            <button
-              type="button"
-              on:click={() => {
-                config.localhost_api_enabled = !config.localhost_api_enabled;
-                persistConfig();
-              }}
-              disabled={saving}
-              class="switch-track {config.localhost_api_enabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'} {saving ? 'opacity-60 cursor-not-allowed' : ''}"
-            >
-              <span class="switch-thumb {config.localhost_api_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
-            </button>
-          </div>
-
-          {#if config.localhost_api_enabled}
-          <div class="space-y-2">
-            <div class="grid gap-2 grid-cols-2">
-              <div class="rounded-lg bg-white/70 px-3 py-1.5 ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
-                <div class="text-[11px] text-slate-400 dark:text-[#636c76]">{t('nodeGatewayPage.apiHostLabel')}</div>
-                <input
-                  type="text"
-                  bind:value={config.localhost_api_host}
-                  class="w-full bg-transparent text-sm font-mono text-slate-900 dark:text-[#e6edf3] focus:outline-none"
-                  placeholder="127.0.0.1"
-                />
-              </div>
-              <div class="rounded-lg bg-white/70 px-3 py-1.5 ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
-                <div class="text-[11px] text-slate-400 dark:text-[#636c76]">{t('nodeGatewayPage.apiPortLabel')}</div>
-                <input
-                  type="number"
-                  bind:value={config.localhost_api_port}
-                  on:blur={() => {
-                    if (!Number.isInteger(config.localhost_api_port) || config.localhost_api_port <= 0 || config.localhost_api_port > 65535) {
-                      config.localhost_api_port = 47831;
-                    }
-                  }}
-                  class="w-full bg-transparent text-sm font-mono text-slate-900 dark:text-[#e6edf3] focus:outline-none"
-                  min="1"
-                  max="65535"
-                  placeholder="47831"
-                />
-              </div>
-            </div>
-            <div class="flex items-center justify-between rounded-lg bg-white/70 px-3 py-1.5 ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
-              <span class="text-[11px] text-slate-400 dark:text-[#636c76]">{t('nodeGatewayPage.localhostAddress')}</span>
-              <span class="text-sm font-mono text-slate-700 dark:text-[#adbac7]">{localStatus.baseUrl}</span>
-            </div>
-            <div class="rounded-lg bg-white/70 px-3 py-2 ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
-              <div class="flex items-center justify-between gap-2 mb-1">
-                <span class="text-[11px] text-slate-400 dark:text-[#636c76]">{t('nodeGatewayPage.localhostToken')}</span>
-                <div class="flex gap-1">
-                  <button type="button" class="settings-chip-button" on:click={revealToken}>{t('nodeGatewayPage.revealToken')}</button>
-                  <button type="button" class="settings-chip-button" on:click={copyToken}>{t('nodeGatewayPage.copyToken')}</button>
-                  <button type="button" class="settings-chip-button settings-chip-button-active" on:click={rotateToken}>{t('nodeGatewayPage.rotateToken')}</button>
-                </div>
-              </div>
-              <div class="font-mono text-[11px] text-slate-500 dark:text-[#7d8590] break-all">
-                {tokenVisible ? tokenValue || t('nodeGatewayPage.empty') : localStatus.tokenPreview || t('nodeGatewayPage.empty')}
-              </div>
-            </div>
-            <p class="text-[11px] text-slate-400 dark:text-[#636c76]">{t('nodeGatewayPage.apiHostHint')}</p>
-          </div>
-          {/if}
-        </div>
-
-        {#if config.localhost_api_enabled}
-        <!-- Telegram Bot -->
-        <div class="rounded-xl bg-white/70 px-3.5 py-3 ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
-          <div class="flex items-center justify-between gap-3">
-            <div class="flex items-center gap-2">
-              <svg class="w-4 h-4 text-[#229ED9]" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.479.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
-              </svg>
-              <span class="text-sm text-slate-700 dark:text-[#c9d1d9]">Telegram</span>
-              {#if config.telegram_bot_enabled}
-                <span class="settings-chip-success">{t('nodeGatewayPage.telegramEnabled')}</span>
-              {/if}
-            </div>
-            <button
-              type="button"
-              on:click={() => {
-                config.telegram_bot_enabled = !config.telegram_bot_enabled;
-                persistConfig();
-              }}
-              disabled={saving}
-              class="switch-track {config.telegram_bot_enabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'} {saving ? 'opacity-60 cursor-not-allowed' : ''}"
-            >
-              <span class="switch-thumb {config.telegram_bot_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
-            </button>
-          </div>
-          {#if config.telegram_bot_enabled}
-          <div class="mt-2 space-y-2">
-            <label class="block">
-              <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('nodeGatewayPage.telegramBotToken')}</span>
-              <div class="mt-0.5 relative">
-                {#if tgTokenVisible}
-                  <input
-                    type="text"
-                    bind:value={config.telegram_bot_token}
-                    on:blur={() => persistConfig()}
-                    class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
-                    placeholder="123456:ABC-DEF..."
-                  />
-                {:else}
-                  <input
-                    type="password"
-                    bind:value={config.telegram_bot_token}
-                    on:blur={() => persistConfig()}
-                    class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
-                    placeholder="123456:ABC-DEF..."
-                  />
-                {/if}
-                <button
-                  type="button"
-                  class="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-[#adbac7]"
-                  on:click={() => (tgTokenVisible = !tgTokenVisible)}
-                >
-                  {#if tgTokenVisible}
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L6.59 6.59m7.532 7.532l3.29 3.29M3 3l18 18" /></svg>
-                  {:else}
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                  {/if}
-                </button>
-              </div>
-            </label>
-            {#if tgBotStatus}
-              {#if tgBotStatus.starting}
-                <div class="flex items-center gap-1.5 text-[11px] text-blue-500 dark:text-blue-400">
-                  <div class="animate-spin h-3 w-3 border-[1.5px] border-blue-400 border-t-transparent rounded-full"></div>
-                  ...
-                </div>
-              {:else if tgBotStatus.running}
-                <div class="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400">
-                  <span class="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
-                  Bot running
-                </div>
-              {:else if tgBotStatus.lastError}
-                <div class="flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400">
-                  <span class="inline-block h-1.5 w-1.5 rounded-full bg-amber-500"></span>
-                  {tgBotStatus.lastError}
-                </div>
-              {/if}
-            {/if}
-            <label class="block">
-              <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('nodeGatewayPage.telegramBotProxy')}</span>
-              <input
-                type="text"
-                bind:value={config.telegram_bot_proxy}
-                on:blur={() => persistConfig()}
-                class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
-                placeholder="http://127.0.0.1:7890"
-              />
-            </label>
-            <p class="text-[11px] text-slate-400 dark:text-[#636c76]">{t('nodeGatewayPage.telegramBotProxyHint')}</p>
-            <div class="rounded-lg bg-blue-50/70 px-3 py-2 ring-1 ring-blue-100 dark:bg-blue-950/20 dark:ring-blue-900/50">
-              <div class="flex items-center justify-between gap-3">
-                <div class="min-w-0">
-                  <div class="text-[11px] font-medium text-blue-700 dark:text-blue-300">{t('nodeGatewayPage.telegramBindCodeTitle')}</div>
-                  <div class="mt-0.5 text-[11px] text-blue-600/80 dark:text-blue-300/80">{t('nodeGatewayPage.telegramBindCodeHint')}</div>
-                  {#if tgBotStatus?.bindCode && !tgBotStatus?.bindCodeExpired}
-                    <div class="mt-1 font-mono text-sm font-semibold text-blue-800 dark:text-blue-200">/bind {tgBotStatus.bindCode}</div>
-                  {:else if tgBotStatus?.bindCodeExpired}
-                    <div class="mt-1 text-[11px] text-amber-600 dark:text-amber-300">{t('nodeGatewayPage.telegramBindCodeExpired')}</div>
-                  {/if}
-                </div>
-                <button
-                  type="button"
-                  class="shrink-0 rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-                  on:click={generateTelegramBindCode}
-                  disabled={saving}
-                >
-                  {t('nodeGatewayPage.telegramBindCodeGenerate')}
-                </button>
-              </div>
-            </div>
-            <label class="block mt-2">
-              <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('nodeGatewayPage.telegramAllowedChatIds')}</span>
-              <input
-                type="text"
-                value={(config.telegram_bot_allowed_chat_ids || []).join(', ')}
-                on:blur={(e) => {
-                  const ids = e.target.value.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
-                  config.telegram_bot_allowed_chat_ids = ids;
-                  persistConfig();
-                }}
-                class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
-                placeholder="123456789, 987654321"
-              />
-            </label>
-            <p class="text-[11px] text-slate-400 dark:text-[#636c76]">{t('nodeGatewayPage.telegramAllowedChatIdsHint')}</p>
-            <p class="text-[11px] text-slate-400 dark:text-[#636c76]">{t('nodeGatewayPage.telegramBotHint')}</p>
-          </div>
-          {/if}
-        </div>
-
-        <!-- Feishu Bot -->
-        <div class="rounded-xl bg-white/70 px-3.5 py-3 ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
-          <div class="flex items-center justify-between gap-3">
-            <div class="flex items-center gap-2">
-              <svg class="w-4 h-4 text-[#3370FF]" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M20.487 17.14c.88-1.668 1.388-3.566 1.388-5.576C21.875 5.197 17.263.583 11.896.583 6.53.583 1.917 5.197 1.917 10.564c0 5.367 4.613 9.98 9.98 9.98 1.99 0 3.846-.583 5.417-1.585l3.428 1.485a.77.77 0 00.97-1.034l-1.225-2.27z"/>
-              </svg>
-              <span class="text-sm text-slate-700 dark:text-[#c9d1d9]">{t('nodeGatewayPage.feishuBot')}</span>
-              {#if config.feishu_bot_enabled}
-                <span class="settings-chip-success">{t('nodeGatewayPage.feishuEnabled')}</span>
-              {/if}
-            </div>
-            <button
-              type="button"
-              on:click={() => {
-                config.feishu_bot_enabled = !config.feishu_bot_enabled;
-                persistConfig();
-              }}
-              disabled={saving}
-              class="switch-track {config.feishu_bot_enabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'} {saving ? 'opacity-60 cursor-not-allowed' : ''}"
-            >
-              <span class="switch-thumb {config.feishu_bot_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
-            </button>
-          </div>
-          {#if config.feishu_bot_enabled}
-          <div class="mt-2 space-y-2">
-            <div class="grid gap-2 grid-cols-2">
-              <label class="block">
-                <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('nodeGatewayPage.feishuAppId')}</span>
-                <input
-                  type="text"
-                  bind:value={config.feishu_app_id}
-                  on:blur={() => persistConfig()}
-                  class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
-                  placeholder="cli_xxx"
-                />
-              </label>
-              <label class="block">
-                <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('nodeGatewayPage.feishuAppSecret')}</span>
-                <div class="mt-0.5 relative">
-                  {#if feishuSecretVisible}
-                    <input
-                      type="text"
-                      bind:value={config.feishu_app_secret}
-                      on:blur={() => persistConfig()}
-                      class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
-                      placeholder="Secret"
-                    />
-                  {:else}
-                    <input
-                      type="password"
-                      bind:value={config.feishu_app_secret}
-                      on:blur={() => persistConfig()}
-                      class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
-                      placeholder="Secret"
-                    />
-                  {/if}
-                  <button
-                    type="button"
-                    class="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-[#adbac7]"
-                    on:click={() => (feishuSecretVisible = !feishuSecretVisible)}
-                  >
-                    {#if feishuSecretVisible}
-                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L6.59 6.59m7.532 7.532l3.29 3.29M3 3l18 18" /></svg>
-                    {:else}
-                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                    {/if}
-                  </button>
-                </div>
-              </label>
-            </div>
-            <label class="block">
-              <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('nodeGatewayPage.feishuVerificationToken')}</span>
-              <input
-                type="text"
-                bind:value={config.feishu_verification_token}
-                on:blur={() => persistConfig()}
-                class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
-                placeholder="Verification Token"
-              />
-            </label>
-            <p class="text-[11px] text-slate-400 dark:text-[#636c76]">{t('nodeGatewayPage.feishuBotHint')}</p>
-          </div>
-          {/if}
-        </div>
-
-        <!-- WeCom Bot (企业微信) -->
-        <div class="rounded-xl bg-white/70 px-3.5 py-3 ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
-          <div class="flex items-center justify-between gap-3">
-            <div class="flex items-center gap-2">
-              <svg class="w-4 h-4 text-[#07C160]" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M8.691 2.188C3.891 2.188 0 5.476 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 01.213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.29.295a.326.326 0 00.167-.054l1.903-1.114a.864.864 0 01.717-.098 10.16 10.16 0 002.837.403c.276 0 .543-.027.811-.05-.857-2.578.157-4.972 1.932-6.446 1.703-1.415 3.882-1.98 5.853-1.838-.576-3.583-4.196-6.348-8.596-6.348zM5.785 5.991c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 01-1.162 1.178A1.17 1.17 0 014.623 7.17c0-.651.52-1.18 1.162-1.18zm5.813 0c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 01-1.162 1.178 1.17 1.17 0 01-1.162-1.178c0-.651.52-1.18 1.162-1.18zm3.97 3.44c-1.86-.015-3.666.64-4.996 1.756-1.742 1.463-2.566 3.691-1.745 5.882.82 2.19 3.07 3.508 5.347 3.698.493.041.993.03 1.488-.035a.639.639 0 01.53.073l1.405.823a.234.234 0 00.122.04.213.213 0 00.214-.218c0-.053-.02-.105-.035-.156l-.288-1.093a.44.44 0 01.157-.491c1.358-.998 2.217-2.467 2.217-4.1 0-3.263-2.928-6.079-6.409-6.179zM14.4 13.19c.475 0 .86.39.86.872a.866.866 0 01-.86.872.866.866 0 01-.86-.872c0-.482.385-.872.86-.872zm4.303 0c.475 0 .86.39.86.872a.866.866 0 01-.86.872.866.866 0 01-.86-.872c0-.482.385-.872.86-.872z"/>
-              </svg>
-              <span class="text-sm text-slate-700 dark:text-[#c9d1d9]">{t('nodeGatewayPage.wecomBot')}</span>
-              {#if config.wecom_bot_enabled}
-                <span class="settings-chip-success">{t('nodeGatewayPage.wecomEnabled')}</span>
-              {/if}
-            </div>
-            <button
-              type="button"
-              on:click={() => {
-                config.wecom_bot_enabled = !config.wecom_bot_enabled;
-                persistConfig();
-              }}
-              disabled={saving}
-              class="switch-track {config.wecom_bot_enabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'} {saving ? 'opacity-60 cursor-not-allowed' : ''}"
-            >
-              <span class="switch-thumb {config.wecom_bot_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
-            </button>
-          </div>
-          {#if config.wecom_bot_enabled}
-          <div class="mt-2 space-y-2">
-            <div class="grid gap-2 grid-cols-2">
-              <label class="block">
-                <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('nodeGatewayPage.wecomCorpId')}</span>
-                <input
-                  type="text"
-                  bind:value={config.wecom_corp_id}
-                  on:blur={() => persistConfig()}
-                  class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
-                  placeholder="ww..."
-                />
-              </label>
-              <label class="block">
-                <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('nodeGatewayPage.wecomToken')}</span>
-                <input
-                  type="text"
-                  bind:value={config.wecom_token}
-                  on:blur={() => persistConfig()}
-                  class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
-                  placeholder="Token"
-                />
-              </label>
-            </div>
-            <label class="block">
-              <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('nodeGatewayPage.wecomEncodingAesKey')}</span>
-              <input
-                type="text"
-                bind:value={config.wecom_encoding_aes_key}
-                on:blur={() => persistConfig()}
-                class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
-                placeholder="EncodingAESKey (43 chars)"
-              />
-            </label>
-            <p class="text-[11px] text-slate-400 dark:text-[#636c76]">{t('nodeGatewayPage.wecomBotHint')}</p>
-          </div>
-          {/if}
-        </div>
-
-        <!-- DingTalk Bot (钉钉) -->
-        <div class="rounded-xl bg-white/70 px-3.5 py-3 ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
-          <div class="flex items-center justify-between gap-3">
-            <div class="flex items-center gap-2">
-              <svg class="w-4 h-4 text-[#0089FF]" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 12.152l-3.89 1.26s-.382.124-.274.464c.108.34.542.204.542.204l3.622-.98a.295.295 0 01.36.396l-1.51 3.734s-.15.392-.498.262c-.348-.13-.184-.53-.184-.53l.98-2.32-3.208 1.04s-3.37 1.09-4.478-1.878c-1.108-2.968 1.778-4.576 1.778-4.576l4.998-2.174s.39-.168.254-.496c-.136-.328-.536-.172-.536-.172l-5.458 1.87s-1.906.654-2.69-.642c-.784-1.296.342-2.352.342-2.352l5.024-3.516s.348-.242.18-.57c-.168-.328-.548-.14-.548-.14L6.254 6.12s-4.17 2.768-1.878 7.058c2.292 4.29 7.408 2.174 7.408 2.174l5.778-3.202z"/>
-              </svg>
-              <span class="text-sm text-slate-700 dark:text-[#c9d1d9]">{t('nodeGatewayPage.dingtalkBot')}</span>
-              {#if config.dingtalk_bot_enabled}
-                <span class="settings-chip-success">{t('nodeGatewayPage.dingtalkEnabled')}</span>
-              {/if}
-            </div>
-            <button
-              type="button"
-              on:click={() => {
-                config.dingtalk_bot_enabled = !config.dingtalk_bot_enabled;
-                persistConfig();
-              }}
-              disabled={saving}
-              class="switch-track {config.dingtalk_bot_enabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'} {saving ? 'opacity-60 cursor-not-allowed' : ''}"
-            >
-              <span class="switch-thumb {config.dingtalk_bot_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
-            </button>
-          </div>
-          {#if config.dingtalk_bot_enabled}
-          <div class="mt-2 space-y-2">
-            <label class="block">
-              <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('nodeGatewayPage.dingtalkAppSecret')}</span>
-              <div class="mt-0.5 relative">
-                {#if dingtalkSecretVisible}
-                  <input type="text" bind:value={config.dingtalk_app_secret} on:blur={() => persistConfig()}
-                    class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
-                    placeholder="App Secret" />
-                {:else}
-                  <input type="password" bind:value={config.dingtalk_app_secret} on:blur={() => persistConfig()}
-                    class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
-                    placeholder="App Secret" />
-                {/if}
-                <button type="button"
-                  class="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-[#adbac7]"
-                  on:click={() => (dingtalkSecretVisible = !dingtalkSecretVisible)}>
-                  {#if dingtalkSecretVisible}
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L6.59 6.59m7.532 7.532l3.29 3.29M3 3l18 18" /></svg>
-                  {:else}
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                  {/if}
-                </button>
-                </div>
-              </label>
-            <p class="text-[11px] text-slate-400 dark:text-[#636c76]">{t('nodeGatewayPage.dingtalkBotHint')}</p>
-          </div>
-          {/if}
-        </div>
-
-        <!-- Device Registry -->
-        {#if config.telegram_bot_enabled || config.feishu_bot_enabled || config.wecom_bot_enabled || config.dingtalk_bot_enabled}
-        <div class="space-y-2">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-medium text-slate-700 dark:text-[#adbac7]">{t('nodeGatewayPage.deviceRegistry')}</span>
-            <button
-              type="button"
-              class="settings-chip-button settings-chip-button-active text-[11px]"
-              on:click={() => {
-                if (!config.node_devices) config.node_devices = [];
-                config.node_devices = [...config.node_devices, { name: '', url: '', token: '' }];
-              }}
-            >
-              {t('nodeGatewayPage.addDevice')}
-            </button>
-          </div>
-          <p class="text-[11px] text-slate-400 dark:text-[#636c76]">{t('nodeGatewayPage.deviceRegistryHint')}</p>
-          <div class="flex items-center gap-2 rounded-lg bg-primary-50/60 px-3 py-1.5 ring-1 ring-primary-200/60 dark:bg-primary-900/20 dark:ring-primary-800/40">
-            <span class="text-xs font-medium text-primary-700 dark:text-primary-300">{t('nodeGatewayPage.localDevice')}</span>
-            <span class="text-xs font-mono text-slate-500 dark:text-[#7d8590]">{localStatus?.baseUrl || '-'}</span>
-          </div>
-          {#each config.node_devices || [] as device, i}
-          <div class="flex items-start gap-2 rounded-lg bg-white/70 px-3 py-2 ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
-            <div class="flex-1 min-w-0 grid gap-x-2 gap-y-1 grid-cols-[1fr_2fr]">
-              <label class="block">
-                <span class="text-[10px] text-slate-500 dark:text-[#7d8590]">{t('nodeGatewayPage.deviceNameCol')}</span>
-                <input
-                  type="text"
-                  bind:value={device.name}
-                  class="mt-0.5 w-full rounded-md bg-white/80 px-2 py-1 text-sm text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
-                  placeholder="Office PC"
-                />
-              </label>
-              <label class="block">
-                <span class="text-[10px] text-slate-500 dark:text-[#7d8590]">{t('nodeGatewayPage.deviceUrlCol')}</span>
-                <input
-                  type="text"
-                  bind:value={device.url}
-                  class="mt-0.5 w-full rounded-md bg-white/80 px-2 py-1 text-sm font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
-                  placeholder="http://192.168.1.100:47831"
-                />
-              </label>
-              <label class="col-span-2 block">
-                <span class="text-[10px] text-slate-500 dark:text-[#7d8590]">{t('nodeGatewayPage.deviceTokenCol')}</span>
-                <input
-                  type="password"
-                  bind:value={device.token}
-                  class="mt-0.5 w-full rounded-md bg-white/80 px-2 py-1 text-xs font-mono text-slate-900 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-[#30363d]/50 dark:text-[#e6edf3] dark:ring-[#484f58] dark:focus:ring-primary-600 focus:outline-none"
-                  placeholder="wr-local-..."
-                />
-              </label>
-            </div>
-            <button
-              type="button"
-              class="text-xs text-red-400 hover:text-red-500 mt-3 shrink-0"
-              on:click={() => {
-                config.node_devices = config.node_devices.filter((_, j) => j !== i);
-                persistConfig();
-              }}
-            >
-              {t('nodeGatewayPage.removeDevice')}
-            </button>
-          </div>
-          {/each}
-        </div>
-        {/if}
-
-        <!-- API Examples -->
-        <div>
-          <button
-            type="button"
-            class="flex w-full items-center justify-between gap-2 rounded-xl bg-white/70 px-3.5 py-2.5 ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70"
-            on:click={() => (examplesExpanded = !examplesExpanded)}
-          >
-            <div class="flex items-center gap-2">
-              <svg class="w-3.5 h-3.5 text-slate-500 dark:text-[#7d8590]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-              </svg>
-              <span class="text-sm font-medium text-slate-700 dark:text-[#c9d1d9]">{t('nodeGatewayPage.apiExamples')}</span>
-              <span class="text-[10px] text-slate-400">19 endpoints</span>
-            </div>
-            <svg class="w-4 h-4 text-slate-400 transition-transform {examplesExpanded ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-
-          {#if examplesExpanded}
-          <div class="mt-2 space-y-2">
-            <p class="text-[11px] text-slate-400 dark:text-[#636c76]">{t('nodeGatewayPage.apiExamplesHint')}</p>
-            <!-- Category filter buttons -->
-            <div class="flex flex-wrap gap-1.5">
-              {#each [
-                { key: 'all', label: t('nodeGatewayPage.apiCategoryAll') },
-                { key: 'report', label: t('nodeGatewayPage.apiCategoryReport') },
-                { key: 'timeline', label: t('nodeGatewayPage.apiCategoryTimeline') },
-                { key: 'stats', label: t('nodeGatewayPage.apiCategoryStats') },
-                { key: 'system', label: t('nodeGatewayPage.apiCategorySystem') },
-              ] as cat}
-                <button
-                  type="button"
-                  on:click={() => activeApiCategory = cat.key}
-                  class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors
-                         {activeApiCategory === cat.key
-                           ? 'bg-slate-700 text-white dark:bg-[#30363d] dark:text-[#c9d1d9]'
-                           : 'bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-[#21262d] dark:text-[#7d8590] dark:hover:bg-[#30363d]'}"
-                >{cat.label}</button>
-              {/each}
-            </div>
-
-            {#each [
-              { cat: 'system', method: 'GET', path: '/health', desc: t('nodeGatewayPage.exampleHealthDesc'), cmd: curlCommand('GET', '/health') },
-              { cat: 'system', method: 'GET', path: '/v1/device', desc: t('nodeGatewayPage.exampleDeviceDesc'), cmd: curlCommand('GET', '/v1/device') },
-              { cat: 'system', method: 'GET', path: '/v1/storage/stats', desc: t('nodeGatewayPage.exampleStorageStatsDesc'), cmd: curlCommand('GET', '/v1/storage/stats') },
-              { cat: 'report', method: 'GET', path: '/v1/reports', desc: t('nodeGatewayPage.exampleReportsDesc'), cmd: curlCommand('GET', '/v1/reports') },
-              { cat: 'report', method: 'GET', path: '/v1/reports/:date', desc: t('nodeGatewayPage.exampleReportByDateDesc'), cmd: curlCommand('GET', '/v1/reports/2025-01-15') },
-              { cat: 'report', method: 'GET', path: '/v1/reports/generate', desc: t('nodeGatewayPage.exampleGenerateDesc'), cmd: curlCommand('GET', '/v1/reports/generate?date=2025-01-15') },
-              { cat: 'report', method: 'POST', path: '/v1/reports/export-markdown', desc: t('nodeGatewayPage.exampleExportDesc'), cmd: curlCommand('POST', '/v1/reports/export-markdown', { date: '2025-01-15', content: '# Report', export_dir: '/path/to/dir' }) },
-              { cat: 'report', method: 'GET', path: '/v1/weekly-review', desc: t('nodeGatewayPage.exampleWeeklyReviewDesc'), cmd: curlCommand('GET', '/v1/weekly-review?date_from=2025-01-13&date_to=2025-01-19') },
-              { cat: 'timeline', method: 'GET', path: '/v1/timeline/:date', desc: t('nodeGatewayPage.exampleTimelineDesc'), cmd: curlCommand('GET', '/v1/timeline/2025-01-15') },
-              { cat: 'timeline', method: 'GET', path: '/v1/activities/:date', desc: t('nodeGatewayPage.exampleActivitiesDesc'), cmd: curlCommand('GET', '/v1/activities/2025-01-15') },
-              { cat: 'timeline', method: 'GET', path: '/v1/hourly-summaries/:date', desc: t('nodeGatewayPage.exampleHourlySummariesDesc'), cmd: curlCommand('GET', '/v1/hourly-summaries/2025-01-15') },
-              { cat: 'stats', method: 'GET', path: '/v1/stats/today', desc: t('nodeGatewayPage.exampleStatsTodayDesc'), cmd: curlCommand('GET', '/v1/stats/today') },
-              { cat: 'stats', method: 'GET', path: '/v1/stats/daily/:date', desc: t('nodeGatewayPage.exampleStatsDailyDesc'), cmd: curlCommand('GET', '/v1/stats/daily/2025-01-15') },
-              { cat: 'stats', method: 'GET', path: '/v1/stats/overview', desc: t('nodeGatewayPage.exampleStatsOverviewDesc'), cmd: curlCommand('GET', '/v1/stats/overview?mode=week&date=2025-01-17') },
-              { cat: 'stats', method: 'GET', path: '/v1/hourly-app-breakdown/:date', desc: t('nodeGatewayPage.exampleHourlyBreakdownDesc'), cmd: curlCommand('GET', '/v1/hourly-app-breakdown/2025-01-15') },
-              { cat: 'stats', method: 'GET', path: '/v1/apps/recent', desc: t('nodeGatewayPage.exampleAppsRecentDesc'), cmd: curlCommand('GET', '/v1/apps/recent') },
-              { cat: 'stats', method: 'GET', path: '/v1/apps/category-overview', desc: t('nodeGatewayPage.exampleAppsCategoryDesc'), cmd: curlCommand('GET', '/v1/apps/category-overview') },
-              { cat: 'stats', method: 'GET', path: '/v1/categories', desc: t('nodeGatewayPage.exampleCategoriesDesc'), cmd: curlCommand('GET', '/v1/categories') },
-              { cat: 'stats', method: 'GET', path: '/v1/categories/semantic', desc: t('nodeGatewayPage.exampleSemanticCategoriesDesc'), cmd: curlCommand('GET', '/v1/categories/semantic') },
-            ] as example}
-              {#if activeApiCategory === 'all' || activeApiCategory === example.cat}
-            <div class="rounded-lg ring-1 ring-slate-200/70 dark:ring-[#30363d]/70 overflow-hidden">
-              <!-- Header: method badge + path + copy button -->
-              <div class="flex items-center gap-2 bg-white/90 px-3 py-1.5 dark:bg-[#21262d]/60">
-                <span class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold leading-none
-                  {example.method === 'POST'
-                    ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400'
-                    : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400'}"
-                >{example.method}</span>
-                <span class="min-w-0 text-xs font-mono font-medium text-slate-700 dark:text-[#c9d1d9] truncate">{example.path}</span>
-                <span class="ml-auto shrink-0">
-                  <button type="button" class="rounded-md px-2 py-0.5 text-[10px] font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-[#7d8590] dark:hover:bg-[#30363d] dark:hover:text-[#c9d1d9] transition-colors" on:click={() => copyCurl(example.cmd)}>
-                    {t('nodeGatewayPage.copyCurl')}
-                  </button>
-                </span>
-              </div>
-              <!-- Body: description + curl -->
-              <div class="border-t border-slate-100 dark:border-[#30363d]/50">
-                <div class="px-3 py-1 text-[11px] text-slate-500 dark:text-[#7d8590]">{example.desc}</div>
-                <button
-                  type="button"
-                  class="mx-2 mb-1.5 block w-[calc(100%-1rem)] overflow-x-auto rounded-md bg-slate-800/90 px-2.5 py-1.5 text-left text-[10.5px] font-mono leading-relaxed text-emerald-300/90 dark:bg-[#161b22]/90"
-                  on:click={() => copyCurl(example.cmd)}
-                ><span class="whitespace-pre">{example.cmd}</span></button>
-              </div>
-            </div>
-              {/if}
-            {/each}
-          </div>
-          {/if}
-        </div>
-        {/if}
       </CollapsibleSection>
 
-      <!-- ========== MCP Server 大卡片 ========== -->
-      <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 space-y-4 dark:border-[#30363d]/80 dark:bg-[#21262d]/40">
-        <!-- MCP Server 标题 + 开关 -->
-        <div class="flex items-center justify-between gap-3">
-          <div class="flex items-center gap-2">
-            <div class="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
-              <svg class="w-4 h-4 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-            </div>
-            <div>
-              <span class="text-sm font-semibold text-slate-700 dark:text-[#c9d1d9]">MCP Server</span>
-              {#if config.mcp_server_enabled}
-                <span class="settings-chip-success ml-1.5">{t('nodeGatewayPage.mcpServerEnabled')}</span>
-              {:else}
-                <span class="settings-chip-neutral ml-1.5">{t('nodeGatewayPage.mcpServerDisabled')}</span>
-              {/if}
-            </div>
-          </div>
-          <button
-            type="button"
-            on:click={() => {
-              config.mcp_server_enabled = !config.mcp_server_enabled;
-              persistConfig();
-            }}
-            disabled={saving}
-            class="switch-track {config.mcp_server_enabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'} {saving ? 'opacity-60 cursor-not-allowed' : ''}"
-          >
-            <span class="switch-thumb {config.mcp_server_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
-          </button>
-        </div>
-
-        <p class="text-[11px] text-slate-400 dark:text-[#636c76]">{t('nodeGatewayPage.mcpServerDescription')}</p>
-
-        {#if config.mcp_server_enabled}
-        <!-- MCP 配置内容 -->
+      <!-- 分组 2：消息通知（默认收起） -->
+      <CollapsibleSection title={t('nodeGatewayPage.groupNotifications')} storageKey="settings.node.bots">
         <div class="space-y-3">
-          <p class="text-[11px] text-slate-400 dark:text-[#636c76]">{t('nodeGatewayPage.mcpServerBinaryHint')}</p>
-
-          <div class="space-y-1.5">
-            {#if mcpDbPath}
-            <div class="flex flex-col gap-0.5 rounded-lg bg-white/70 px-3 py-1.5 ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
-              <div class="flex items-center justify-between gap-2">
-                <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('nodeGatewayPage.mcpServerDbPath')}</span>
-                <button
-                  type="button"
-                  class="text-[10px] text-primary-600 hover:underline focus:outline-none"
-                  on:click={() => copyPath(mcpDbPath, 'mcpServerDbPath')}
-                >
-                  {t('nodeGatewayPage.mcpServerCopyPath')}
-                </button>
-              </div>
-              <span class="font-mono text-[11px] text-slate-700 dark:text-[#adbac7] break-all select-all" title={mcpDbPath}>{mcpDbPath}</span>
-            </div>
-            {/if}
-            {#if mcpConfigPath}
-            <div class="flex flex-col gap-0.5 rounded-lg bg-white/70 px-3 py-1.5 ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
-              <div class="flex items-center justify-between gap-2">
-                <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('nodeGatewayPage.mcpServerConfigPath')}</span>
-                <button
-                  type="button"
-                  class="text-[10px] text-primary-600 hover:underline focus:outline-none"
-                  on:click={() => copyPath(mcpConfigPath, 'mcpServerConfigPath')}
-                >
-                  {t('nodeGatewayPage.mcpServerCopyPath')}
-                </button>
-              </div>
-              <span class="font-mono text-[11px] text-slate-700 dark:text-[#adbac7] break-all select-all" title={mcpConfigPath}>{mcpConfigPath}</span>
-            </div>
-            {/if}
-            <div class="flex flex-col gap-0.5 rounded-lg bg-white/70 px-3 py-1.5 ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
-              <div class="flex items-center justify-between gap-2">
-                <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('nodeGatewayPage.mcpServerBinaryPath')}</span>
-                <button
-                  type="button"
-                  class="text-[10px] text-primary-600 hover:underline focus:outline-none"
-                  on:click={() => copyPath('work-review-mcp-server', 'mcpServerBinaryPath')}
-                >
-                  {t('nodeGatewayPage.mcpServerCopyPath')}
-                </button>
-              </div>
-              <span class="font-mono text-[11px] text-slate-700 dark:text-[#adbac7] break-all select-all">work-review-mcp-server</span>
-            </div>
-          </div>
-
-          <div>
-            <div class="flex items-center justify-between mb-1">
-              <span class="text-xs font-medium text-slate-700 dark:text-[#adbac7]">{t('nodeGatewayPage.mcpServerConfigTitle')}</span>
-              <button type="button" class="settings-chip-button settings-chip-button-active text-[11px]" on:click={copyMcpConfig}>
-                {t('nodeGatewayPage.mcpServerCopyConfig')}
-              </button>
-            </div>
-            <p class="text-[11px] text-slate-400 dark:text-[#636c76] mb-1.5">{t('nodeGatewayPage.mcpServerConfigHint')}</p>
-            <pre class="rounded-lg bg-slate-800 p-3 text-[11px] font-mono text-slate-400 leading-relaxed overflow-x-auto dark:bg-[#161b22]/80">{mcpConfigJson}</pre>
-          </div>
+          <TelegramBotPanel
+            {config}
+            {tgBotStatus}
+            {saving}
+            on:save={handleSave}
+            on:startTgPolling={handleStartTgPolling}
+            on:reloadStatus={handleReloadStatus}
+            on:toast={handleToast}
+          />
+          <BotCredentialsPanel
+            {config}
+            {saving}
+            enabledKey="feishu_bot_enabled"
+            titleKey="nodeGatewayPage.feishuBot"
+            enabledLabelKey="nodeGatewayPage.feishuEnabled"
+            hintKey="nodeGatewayPage.feishuBotHint"
+            iconColor="#3370FF"
+            iconPath="M20.487 17.14c.88-1.668 1.388-3.566 1.388-5.576C21.875 5.197 17.263.583 11.896.583 6.53.583 1.917 5.197 1.917 10.564c0 5.367 4.613 9.98 9.98 9.98 1.99 0 3.846-.583 5.417-1.585l3.428 1.485a.77.77 0 00.97-1.034l-1.225-2.27z"
+            fields={[
+              { key: 'feishu_app_id', labelKey: 'nodeGatewayPage.feishuAppId', placeholder: 'cli_xxx' },
+              { key: 'feishu_app_secret', labelKey: 'nodeGatewayPage.feishuAppSecret', placeholder: 'Secret', secret: true },
+              { key: 'feishu_verification_token', labelKey: 'nodeGatewayPage.feishuVerificationToken', placeholder: 'Verification Token' },
+            ]}
+            on:save={handleSave}
+          />
+          <BotCredentialsPanel
+            {config}
+            {saving}
+            enabledKey="wecom_bot_enabled"
+            titleKey="nodeGatewayPage.wecomBot"
+            enabledLabelKey="nodeGatewayPage.wecomEnabled"
+            hintKey="nodeGatewayPage.wecomBotHint"
+            iconColor="#07C160"
+            iconPath="M9.5 4C5.36 4 2 6.91 2 10.5c0 2.08 1.13 3.93 2.88 5.13-.14.8-.5 2-.5 2l2-.5c.5.24 1.04.42 1.6.54-.13-.5-.2-1.02-.2-1.55C8.78 13.69 12 12 16 12c.3 0 .6.01.89.04C16.96 7.56 13.64 4 9.5 4z"
+            fields={[
+              { key: 'wecom_corp_id', labelKey: 'nodeGatewayPage.wecomCorpId', placeholder: 'Corp ID' },
+              { key: 'wecom_token', labelKey: 'nodeGatewayPage.wecomToken', placeholder: 'Token' },
+              { key: 'wecom_encoding_aes_key', labelKey: 'nodeGatewayPage.wecomEncodingAesKey', placeholder: 'EncodingAESKey' },
+            ]}
+            on:save={handleSave}
+          />
+          <BotCredentialsPanel
+            {config}
+            {saving}
+            enabledKey="dingtalk_bot_enabled"
+            titleKey="nodeGatewayPage.dingtalkBot"
+            enabledLabelKey="nodeGatewayPage.dingtalkEnabled"
+            hintKey="nodeGatewayPage.dingtalkBotHint"
+            iconColor="#1677FF"
+            iconPath="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"
+            fields={[
+              { key: 'dingtalk_app_secret', labelKey: 'nodeGatewayPage.dingtalkAppSecret', placeholder: 'App Secret', secret: true },
+            ]}
+            on:save={handleSave}
+          />
         </div>
-        {/if}
-      </div>
+      </CollapsibleSection>
+
+      <!-- 分组 3：高级（默认收起） -->
+      <CollapsibleSection title={t('nodeGatewayPage.groupAdvanced')} storageKey="settings.node.advanced">
+        <div class="space-y-4">
+          <DeviceIdentityPanel {config} {nodeStatus} />
+          {#if config.telegram_bot_enabled || config.feishu_bot_enabled || config.wecom_bot_enabled || config.dingtalk_bot_enabled}
+            <DeviceRegistryPanel {config} {localStatus} on:save={handleSave} />
+          {/if}
+          {#if config.localhost_api_enabled}
+            <ApiExamplesPanel {localStatus} {saving} on:toast={handleToast} />
+          {/if}
+        </div>
+      </CollapsibleSection>
 
       <!-- Error -->
       {#if localStatus.lastError}
-      <div class="settings-panel-danger">
-        <div class="settings-text text-red-700 dark:text-red-400">{t('nodeGatewayPage.lastError')}</div>
-        <div class="settings-muted mt-1 break-all">{localStatus.lastError}</div>
-      </div>
+        <div class="rounded-lg bg-red-50 px-3 py-2 ring-1 ring-red-200 dark:bg-red-950/20 dark:ring-red-900/50">
+          <p class="text-[11px] text-red-600 dark:text-red-400">{localStatus.lastError}</p>
+        </div>
       {/if}
-
     </div>
   {/if}
 </div>
-
-<style>
-</style>

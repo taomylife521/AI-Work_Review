@@ -517,6 +517,9 @@ export default {
     nodeGatewayPage: {
       title: '接入管理',
       subtitle: '管理 Bot 聯動、MCP Server 及裝置身份',
+      groupAiTools: 'AI 工具接入',
+      groupNotifications: '訊息通知',
+      groupAdvanced: '進階',
       refresh: '重新整理',
       save: '保存設定',
       saving: '保存中...',

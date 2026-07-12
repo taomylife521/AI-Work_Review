@@ -517,6 +517,9 @@ export default {
     nodeGatewayPage: {
       title: 'Integrations',
       subtitle: 'Manage Bot connections, MCP Server, and device identity',
+      groupAiTools: 'AI Tool Access',
+      groupNotifications: 'Notifications',
+      groupAdvanced: 'Advanced',
       refresh: 'Refresh',
       save: 'Save',
       saving: 'Saving...',

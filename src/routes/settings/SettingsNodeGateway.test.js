@@ -31,13 +31,13 @@ test('节点设置组件应复用设置页配置对象并读取节点与本地 A
   assert.match(source, /invoke\('get_localhost_api_status'\)/);
   assert.match(source, /invoke\('get_telegram_bot_status'\)/);
   assert.match(source, /invoke\('save_config', \{ config \}\)/);
-  assert.match(source, /node-gateway-settings-shell/);
   assert.match(source, /nodeGatewayPage\.title/);
 });
 
 test('节点设置组件应提供本地 API 开关和 token 管理', async () => {
+  // 拆分后 token 管理逻辑在 LocalApiPanel 子组件
   const source = await readFile(
-    new URL('./components/SettingsNodeGateway.svelte', import.meta.url),
+    new URL('./components/nodeGateway/LocalApiPanel.svelte', import.meta.url),
     'utf8'
   );
 
@@ -57,4 +57,18 @@ test('Telegram Bot 状态应在页面加载后轮询并在销毁时清理定时�
   assert.match(source, /setInterval\(async \(\) =>/);
   assert.match(source, /if \(config\.telegram_bot_enabled\) \{\s*startTelegramStatusPolling\(\);/);
   assert.match(source, /onDestroy\(\(\) => \{\s*stopTelegramStatusPolling\(\);/);
+});
+
+test('拆分后应包含三个分组的 CollapsibleSection', async () => {
+  const source = await readFile(
+    new URL('./components/SettingsNodeGateway.svelte', import.meta.url),
+    'utf8'
+  );
+  assert.match(source, /groupAiTools/);
+  assert.match(source, /groupNotifications/);
+  assert.match(source, /groupAdvanced/);
+  assert.match(source, /McpServerPanel/);
+  assert.match(source, /LocalApiPanel/);
+  assert.match(source, /TelegramBotPanel/);
+  assert.match(source, /BotCredentialsPanel/);
 });
