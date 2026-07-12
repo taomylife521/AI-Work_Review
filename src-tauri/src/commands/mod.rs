@@ -38,7 +38,7 @@ pub use system::*;
 // 被 main.rs / localhost_api / agent / bot 直接调用的 pub(crate) helper
 // 通过子模块再次 re-export，保持 `commands::xxx_inner` / `commands::xxx` 路径不断。
 pub(crate) use shared::{
-    filter_activities_by_privacy, load_filtered_activities_in_range,
+    collect_privacy_filters, filter_activities_by_privacy, load_filtered_activities_in_range,
     persist_app_config, parse_temporal_range, resolve_single_date,
 };
 pub(crate) use system::apply_dock_visibility;

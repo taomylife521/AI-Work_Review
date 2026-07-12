@@ -582,6 +582,48 @@ fn handle_device_info(state: &Arc<Mutex<AppState>>) -> Result<HttpResponse> {
     ))
 }
 
+/// GET /v1/context — 返回用户当前工作上下文（真实前台窗口 + 最近应用）。
+/// 供 MCP Server 的 get_current_context 工具委托调用，拿到独立进程无法直接采集的前台窗口。
+fn handle_current_context(state: &Arc<Mutex<AppState>>) -> Result<HttpResponse> {
+    let active_window = crate::monitor::get_active_window_fast().ok();
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+
+    let recent_apps: Vec<String> = {
+        let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+        let activities = s.database.get_timeline(&today, Some(10), None).unwrap_or_default();
+        let (ignored_apps, excluded_domains) = commands::collect_privacy_filters(&s);
+        let activities = commands::filter_activities_by_privacy(activities, &ignored_apps, &excluded_domains);
+        let mut seen = std::collections::HashSet::new();
+        activities
+            .iter()
+            .filter_map(|a| {
+                if seen.insert(a.app_name.clone()) {
+                    Some(a.app_name.clone())
+                } else {
+                    None
+                }
+            })
+            .take(5)
+            .collect()
+    };
+
+    let (primary_app, window_title, browser_url) = match &active_window {
+        Some(w) => (w.app_name.clone(), w.window_title.clone(), w.browser_url.clone()),
+        None => (String::new(), String::new(), None),
+    };
+
+    Ok(HttpResponse::json(
+        200,
+        &serde_json::json!({
+            "primary_app": primary_app,
+            "window_title": window_title,
+            "browser_url": browser_url,
+            "recent_apps": recent_apps,
+            "is_live": active_window.is_some(),
+        }),
+    ))
+}
+
 async fn route_request(
     request: ParsedRequest,
     app: &AppHandle,
@@ -722,6 +764,7 @@ async fn route_request(
             commands::get_storage_stats_inner(state).map(|stats| HttpResponse::json(200, &stats))
         }
         ("GET", "/v1/device") => handle_device_info(state),
+        ("GET", "/v1/context") => handle_current_context(state),
         ("GET", "/v1/weekly-review") => {
             let date_from = request.query.get("date_from").cloned();
             let date_to = request.query.get("date_to").cloned();

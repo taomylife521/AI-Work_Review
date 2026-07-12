@@ -226,6 +226,46 @@ fn handle_request(request: &Value, state: &Arc<Mutex<AppState>>) -> Value {
     }
 }
 
+// ══════════════════════════════════════════════════════════
+// Localhost API 委托 —— MCP 进程通过 HTTP 调主应用的 localhost API
+// 获取独立进程无法直接采集的能力（真实前台窗口、AI 报表生成）
+// ══════════════════════════════════════════════════════════
+
+/// 返回主应用 localhost API 的 base URL（如 "http://127.0.0.1:47831"）。
+/// 仅当 localhost_api_enabled = true 且端口有效时返回 Some。
+fn localhost_api_base(config: &AppConfig) -> Option<String> {
+    if !config.localhost_api_enabled {
+        return None;
+    }
+    let port = if config.localhost_api_port == 0 {
+        work_review_core::config::DEFAULT_LOCALHOST_API_PORT
+    } else {
+        config.localhost_api_port
+    };
+    let host = config
+        .localhost_api_host
+        .as_deref()
+        .filter(|h| !h.trim().is_empty())
+        .unwrap_or("127.0.0.1");
+    Some(format!("http://{host}:{port}"))
+}
+
+/// 尝试 GET 主应用的 localhost API，2 秒超时。失败返回 None（不阻塞 MCP 主流程）。
+fn try_localhost_get(config: &AppConfig, path: &str) -> Option<Value> {
+    let base = localhost_api_base(config)?;
+    let url = format!("{base}{path}");
+    match ureq::get(&url)
+        .timeout(std::time::Duration::from_secs(2))
+        .call()
+    {
+        Ok(response) => response.into_json::<Value>().ok(),
+        Err(e) => {
+            log::debug!("localhost API 委托失败 ({url}): {e}");
+            None
+        }
+    }
+}
+
 fn tools_list() -> Vec<Value> {
     vec![
         json!({
@@ -448,19 +488,33 @@ fn load_daily_stats_for_mcp(
 
 fn filter_activities_by_privacy(activities: Vec<Activity>, config: &AppConfig) -> Vec<Activity> {
     let (ignored_apps, excluded_domains) = collect_privacy_filters(config);
-    if ignored_apps.is_empty() && excluded_domains.is_empty() {
-        return activities;
-    }
+    use work_review_core::privacy::{PrivacyAction, PrivacyFilter};
+
+    let privacy = PrivacyFilter::from_config(&config.privacy);
 
     activities
         .into_iter()
         .filter(|activity| {
+            // 第一层：ignored 级别 → 完全排除
             !matches_ignored_app(&activity.app_name, &ignored_apps)
                 && activity
                     .browser_url
                     .as_deref()
                     .map(|url| !matches_excluded_domain(url, &excluded_domains))
                     .unwrap_or(true)
+        })
+        // 第二层：anonymized 级别 → 脱敏标题/URL（与主应用行为一致）
+        .map(|mut activity| {
+            let action = privacy.check_privacy_full(
+                &activity.app_name,
+                &activity.window_title,
+                activity.browser_url.as_deref(),
+            );
+            if action == PrivacyAction::Anonymize {
+                activity.window_title = "[内容已脱敏]".to_string();
+                activity.browser_url = None;
+            }
+            activity
         })
         .collect()
 }
@@ -470,9 +524,9 @@ fn filter_memory_results_by_privacy(
     config: &AppConfig,
 ) -> Vec<MemorySearchItem> {
     let (ignored_apps, excluded_domains) = collect_privacy_filters(config);
-    if ignored_apps.is_empty() && excluded_domains.is_empty() {
-        return results;
-    }
+    use work_review_core::privacy::{PrivacyAction, PrivacyFilter};
+
+    let privacy = PrivacyFilter::from_config(&config.privacy);
 
     results
         .into_iter()
@@ -486,6 +540,15 @@ fn filter_memory_results_by_privacy(
                     .as_deref()
                     .map(|url| !matches_excluded_domain(url, &excluded_domains))
                     .unwrap_or(true)
+        })
+        .map(|mut item| {
+            let app = item.app_name.as_deref().unwrap_or("");
+            let action = privacy.check_privacy_full(app, &item.title, item.browser_url.as_deref());
+            if action == PrivacyAction::Anonymize {
+                item.title = "[内容已脱敏]".to_string();
+                item.browser_url = None;
+            }
+            item
         })
         .collect()
 }
@@ -561,7 +624,24 @@ fn handle_tool_call(name: &str, args: &Value, state: &Arc<Mutex<AppState>>) -> V
             let date = args["date"].as_str().unwrap_or("");
             let locale =
                 work_review_core::analysis::AppLocale::from_option(args["locale"].as_str());
-            // 使用用户配置的工作时段，而不是默认值（默认 9-18，会与 UI 显示对不上）。
+
+            // 坑2修复：用户开了 AI 增强（summary 模式）时，委托主应用 localhost API 生成 AI 报表。
+            // 主应用有完整的 AI 调用链（尊重 ai_mode/工作时段/自定义 prompt/隐私过滤）。
+            // 失败时回退本地模板。
+            if s.config.ai_mode == work_review_core::config::AiMode::Summary {
+                let locale_code = locale.as_code();
+                let path = format!("/v1/reports/generate?date={date}&locale={locale_code}");
+                if let Some(resp) = try_localhost_get(&s.config, &path) {
+                    if let Some(content) = resp.get("content").and_then(|c| c.as_str()) {
+                        return json!({
+                            "content": [{ "type": "text", "text": content }]
+                        });
+                    }
+                }
+                log::debug!("AI 模式报表委托 localhost API 失败，回退本地模板");
+            }
+
+            // 回退/默认：本地模板（使用用户配置的工作时段）
             match load_daily_stats_for_mcp(s, date) {
                 Ok(stats) => {
                     let summary = work_review_core::analysis::generate_stats_summary_for_locale(
@@ -588,6 +668,32 @@ fn handle_tool_call(name: &str, args: &Value, state: &Arc<Mutex<AppState>>) -> V
             }
         }),
         "get_current_context" => with_policy_check(state, name, Permission::ReadActivities, |s| {
+            // 坑1修复：先尝试委托 localhost API 拿真实前台窗口（主应用在跑时）
+            if let Some(ctx) = try_localhost_get(&s.config, "/v1/context") {
+                let primary_app = ctx.get("primary_app").and_then(|v| v.as_str()).unwrap_or("");
+                let window_title = ctx.get("window_title").and_then(|v| v.as_str()).unwrap_or("");
+                let is_live = ctx.get("is_live").and_then(|v| v.as_bool()).unwrap_or(false);
+                if !primary_app.is_empty() {
+                    let context = json!({
+                        "primary_app": primary_app,
+                        "window_title": window_title,
+                        "browser_url": ctx.get("browser_url"),
+                        "recent_apps": ctx.get("recent_apps"),
+                        "is_live": is_live,
+                        "hint": format!("用户当前正在使用 {}{}", primary_app,
+                            if window_title.is_empty() { String::new() }
+                            else { format!("（{}）", window_title) }),
+                    });
+                    return json!({
+                        "content": [{
+                            "type": "text",
+                            "text": serde_json::to_string_pretty(&context).unwrap_or_default()
+                        }]
+                    });
+                }
+            }
+
+            // 回退：主应用未运行，读数据库最新记录（标注为历史数据）
             let today = chrono::Local::now().format("%Y-%m-%d").to_string();
             match s.db.get_timeline(&today, Some(10), None) {
                 Ok(activities) if !activities.is_empty() => {
@@ -622,7 +728,9 @@ fn handle_tool_call(name: &str, args: &Value, state: &Arc<Mutex<AppState>>) -> V
                         "duration_minutes": duration_secs / 60,
                         "browser_url": current.browser_url,
                         "recent_apps": recent_apps,
-                        "hint": format!("用户当前正在使用 {}{}", primary_app,
+                        "is_live": false,
+                        "source": "history",
+                        "hint": format!("最近使用的应用是 {}（主应用未运行，数据来自历史记录）{}", primary_app,
                             if current.window_title.is_empty() { String::new() }
                             else { format!("（{}）", current.window_title) }),
                     });
