@@ -2846,9 +2846,10 @@
   --editorial-surface-subtle: #101820;
 }
 
-/* ui-style-c 深色模式：外框边框/阴影需覆盖，否则浅色 border 会形成"白边"（#129） */
+/* ui-style-c 深色模式：外框边框/阴影/背景需覆盖，否则浅色 border + 半透明白底会形成"白边"（#129） */
 .dark .app-shell.ui-style-c .app-shell-sidebar-frame,
 .dark .app-shell.ui-style-c .app-shell-main-frame {
+  background: rgba(22, 27, 34, 0.36);
   border-color: rgba(48, 54, 61, 0.82);
   box-shadow: none;
 }
