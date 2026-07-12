@@ -2406,6 +2406,7 @@
 .dark .sidebar-nav-item-active {
   background:
     linear-gradient(135deg, rgba(49, 46, 129, 0.56), rgba(30, 41, 59, 0.92));
+  box-shadow: none;
 }
 
 .dark .sidebar-toolbelt {
@@ -2428,6 +2429,12 @@
 .dark .ask-reference-card,
 .dark .ask-composer-shell {
   border-color: rgba(71, 85, 105, 0.5);
+}
+
+/* 深色模式：顶部白色渐变高光（::before）在深色下变刺眼白线，直接隐藏 */
+.dark .overview-panel::before,
+.dark .ask-composer-shell::before {
+  display: none;
 }
 
 .dark .overview-command-deck {
@@ -2483,6 +2490,7 @@
   background:
     radial-gradient(circle at top left, rgba(79, 70, 229, 0.18), rgba(30, 41, 59, 0.94) 44%, rgba(15, 23, 42, 0.92) 100%);
   border-color: rgba(71, 85, 105, 0.5);
+  box-shadow: none;
 }
 
 .dark .ask-kicker {
@@ -2493,6 +2501,7 @@
 .dark .ask-message-card-assistant {
   background:
     radial-gradient(circle at top left, rgba(71, 85, 105, 0.18), rgba(30, 41, 59, 0.92) 46%, rgba(15, 23, 42, 0.96) 100%);
+  box-shadow: none;
 }
 
 .dark .ask-reference-card {
@@ -2508,12 +2517,9 @@
 .dark .settings-tab-rail,
 .dark .settings-stage-shell {
   border-color: rgba(71, 85, 105, 0.5);
-}
-
-.dark .settings-tab-rail,
-.dark .settings-stage-shell {
   background:
     linear-gradient(180deg, rgba(30, 41, 59, 0.84), rgba(15, 23, 42, 0.76));
+  box-shadow: none;
 }
 
 .dark .settings-tab-rail-item {
@@ -2529,10 +2535,12 @@
   background:
     linear-gradient(135deg, rgba(49, 46, 129, 0.56), rgba(30, 41, 59, 0.92));
   color: #c4b5fd;
+  box-shadow: none;
 }
 
 .dark .settings-tab-rail-icon {
   background: rgba(15, 23, 42, 0.68);
+  box-shadow: none;
 }
 
 .dark .about-brand-card,
