@@ -21,7 +21,7 @@
 </script>
 
 {#if toastState}
-  <div class="fixed inset-x-0 bottom-6 z-[200] flex justify-center px-4 animate-fadeIn pointer-events-none">
+  <div class="fixed inset-x-0 bottom-6 z-[210] flex justify-center px-4 animate-fadeIn pointer-events-none">
     <button
       type="button"
       on:click={clearToast}

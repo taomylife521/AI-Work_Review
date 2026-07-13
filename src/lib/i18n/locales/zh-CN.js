@@ -561,7 +561,7 @@ export default {
       workGoalNotifications: '达到目标时桌宠庆祝提醒',
       memoryTitle: 'AI 工作记忆',
       memoryEnabled: '自动学习工作模式',
-      memoryHint: '每天分析工作数据，自动生成洞察（高峰时段、分心源、效率趋势），随时间积累越来越了解你的工作习惯',
+      memoryHint: '记录每天的工作活动，供 AI 助手检索和回顾，提问时能引用历史数据',
       standardWorkHours: '每日标准工时',
       standardWorkHoursHint: '下班后的活动时长将显示为加班时长（弹性工时时按标准工时计算）',
       hours: '小时',

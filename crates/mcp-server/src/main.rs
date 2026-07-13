@@ -168,23 +168,30 @@ fn handle_request(request: &Value, state: &Arc<Mutex<AppState>>) -> Value {
     let params = request.get("params").cloned().unwrap_or(json!({}));
 
     match method {
-        "initialize" => json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {
-                    "tools": { "listChanged": false },
-                    "resources": { "subscribe": false, "listChanged": false },
-                    "prompts": { "listChanged": false }
-                },
-                "serverInfo": {
-                    "name": "work-review-mcp-server",
-                    "version": "0.1.0"
+        "initialize" => {
+            // 版本协商：接受客户端请求的版本（如果在支持列表里），否则回退到最新。
+            // Cherry Studio / Claude Code 等客户端会校验返回的 protocolVersion。
+            const SUPPORTED: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
+            let client_version = params.get("protocolVersion").and_then(|v| v.as_str()).unwrap_or("2024-11-05");
+            let negotiated = if SUPPORTED.contains(&client_version) { client_version } else { "2025-11-25" };
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "protocolVersion": negotiated,
+                    "capabilities": {
+                        "tools": { "listChanged": false },
+                        "resources": { "subscribe": false, "listChanged": false },
+                        "prompts": { "listChanged": false }
+                    },
+                    "serverInfo": {
+                        "name": "work-review-mcp-server",
+                        "version": "0.1.0"
+                    }
                 }
-            }
-        }),
-        "notifications/initialized" => json!({ "jsonrpc": "2.0" }),
+            })
+        }
+        "notifications/initialized" => json!(Value::Null),
         "tools/list" => json!({
             "jsonrpc": "2.0",
             "id": id,

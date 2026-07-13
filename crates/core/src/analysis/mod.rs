@@ -214,12 +214,14 @@ pub fn translate_category_name(
     category_overrides: &HashMap<String, String>,
 ) -> String {
     if let Some(name) = category_overrides.get(category_key) {
-        let is_default_zh = matches!(
-            name.as_str(),
-            "开发工具" | "浏览器" | "通讯协作" | "办公软件" | "设计工具" | "娱乐摸鱼" | "其他"
-        );
         let is_zh_locale = matches!(locale, AppLocale::ZhCn | AppLocale::ZhTw);
-        if !is_default_zh || is_zh_locale {
+        if is_zh_locale {
+            return name.clone();
+        }
+        // 非中文 locale：只有当 override 值不含 CJK 字符时才使用（用户自定义了英文名）
+        // 含 CJK 的 override（包括默认中文名和变体如"娱乐"而非"娱乐摸鱼"）在非中文 locale 下跳过
+        let has_cjk = name.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
+        if !has_cjk {
             return name.clone();
         }
     }
@@ -273,12 +275,12 @@ pub fn translate_semantic_category_name(
     semantic_overrides: &HashMap<String, String>,
 ) -> String {
     if let Some(name) = semantic_overrides.get(category_label) {
-        let is_default_zh = matches!(
-            name.as_str(),
-            "编码开发" | "内容撰写" | "资料阅读" | "资料调研" | "任务规划" | "设计创作" | "AI 协作" | "即时聊天" | "会议沟通" | "视频内容" | "音乐音频" | "休息娱乐" | "未知活动" | "代码评审" | "工作跟进"
-        );
         let is_zh_locale = matches!(locale, AppLocale::ZhCn | AppLocale::ZhTw);
-        if !is_default_zh || is_zh_locale {
+        if is_zh_locale {
+            return name.clone();
+        }
+        let has_cjk = name.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
+        if !has_cjk {
             return name.clone();
         }
     }

@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### 新增
+- **阿拉伯语支持（RTL）**（#128）：新增阿拉伯语界面翻译 + RTL 布局适配（CSS 逻辑属性替换硬编码方向），后端日报/分类名/活动时间线同步支持阿拉伯语输出。社区贡献 by algethamy。
+- **MCP Server 功能增强**：
+  - `get_current_context` 通过 localhost API 获取真实前台窗口（主应用运行时），不再仅返回数据库历史记录；回退时标注 `"source": "history"`。
+  - `generate_report` 在 AI 增强模式下委托主应用生成 AI 日报，尊重用户的模型配置、工作时段、自定义 prompt 和隐私过滤。
+  - 隐私过滤对齐主应用：MCP 查询结果现支持 `Anonymized` 级别脱敏，与主应用的 `PrivacyFilter` 行为一致。
+- **接入管理页面重构**：将 997 行单文件拆分为容器 + 7 个子面板（`nodeGateway/`），分 3 组折叠（AI 工具接入 / 消息通知 / 高级）。飞书/钉钉/企业微信统一为泛型 `BotCredentialsPanel` 组件。
+- **设计 Token 体系**：建立 `--radius-sm/md/lg`（8/12/20px）+ `--shadow-sm/md/lg` + `--space-section/block` 统一基准，app.css 中 35 处硬编码值迁移到 token 变量。
+- **localhost API `/v1/context` 端点**：返回当前前台窗口 + 最近应用列表，供 MCP Server 委托调用。
+
+### 修复
+- **创意类应用活动时长漏记**：PS/C4D 等创意软件操作时画面几乎不变，但旧逻辑把"键鼠超时 + 画面静止"判定为空闲导致丢时长。反转哈希判定语义：画面静止不再判空闲，仅键鼠 10 分钟硬超时兜底。
+- **助手页表格右侧大空白**（#124 回归）：`.assistant-markdown table` 仍为 `display:block`，窄内容表格右侧留白。统一为 `display:table; width:100%`。
+- **紧凑数据风格深色模式白边**（#129）：`ui-style-c` 外框浅色 border + 半透明白底在深色模式下显示为白边。补齐 dark 覆盖（border-color + box-shadow + background）。
+- **深色模式白色高光线**（#129）：9 个元素（settings-tab-rail、ask-welcome-panel、overview-panel::before 等）的 `inset 0 1px 0 rgba(255,255,255,X)` 在深色下未被覆盖。统一补齐 `box-shadow: none` 或 `display:none`。
+- **深色模式原生控件浅色**：新增 `color-scheme: light/dark`，原生 `<select>/<option>` 下拉列表在深色模式下正确渲染。
+- **Windows 任务栏不显示应用名**（#129）：窗口标题为空字符串导致任务栏/任务视图无名称。设为 `"Work Review"`。
+- **时间线节点未对齐时间轴**（#129）：轴线（absolute + calc）和节点（flex margin:auto）两套独立定位算法差约 14px。统一为共享水平基准。
+- **日报活动时间线表格斑马纹误伤**：details 内表格被全局 zebra striping + 表头灰底覆盖。补豁免规则。
+- **亮色模式视觉不一致**：StatsCard 文字灰度统一为 slate-500；主卡片圆角极端值收敛（32px→28px）；卡片边框统一为 `border-slate-200/80`。
+- **设置页 memoryHint 文案过时**：移除洞察卡片后文案仍提及"自动生成洞察"，改为描述 memory 实际功能。
+
+### 优化
+- **日报页面视觉重设计**：去玻璃拟态 + 斜纹纹理，改极简现代风（统一 token、轻阴影、大留白、统计卡重做、表格去重阴影 + zebra、活动时间线折叠样式现代化）。
 
 ## [1.0.55] - 2026-07-09
 ### 修复

@@ -1843,7 +1843,7 @@
   transition: opacity 0.15s;
   padding: 0.375rem;
   border-radius: var(--radius-sm);
-  color: var(--color-text-muted);
+  color: #94a3b8;
   margin-top: 0.25rem;
 }
 .report-section:hover .report-section-edit-btn {
@@ -1851,10 +1851,14 @@
 }
 .report-section-edit-btn:hover {
   background: rgba(0, 0, 0, 0.05);
-  color: var(--color-text);
+  color: #475569;
+}
+.dark .report-section-edit-btn {
+  color: #7d8590;
 }
 .dark .report-section-edit-btn:hover {
   background: rgba(255, 255, 255, 0.08);
+  color: #c9d1d9;
 }
 
 /* 通用弹窗 */

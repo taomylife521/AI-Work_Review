@@ -440,7 +440,7 @@ export default {
       workGoalNotifications: 'Avatar celebration when goal reached',
       memoryTitle: 'AI Work Memory',
       memoryEnabled: 'Auto-learn work patterns',
-      memoryHint: 'Analyzes your work data daily, auto-generating insights (peak hours, distraction sources, efficiency trends) that deepen over time',
+      memoryHint: 'Records daily work activities for AI search and recall, so questions can reference historical data',
       standardWorkHours: 'Standard Work Hours',
       standardWorkHoursHint: 'Activity after work hours is shown as overtime (flexible schedule uses standard hours)',
       hours: 'hours',
