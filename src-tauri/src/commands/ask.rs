@@ -715,10 +715,19 @@ pub async fn chat_work_assistant(
         .collect();
 
     // 从 AppState 中 clone Database + 收集隐私过滤器（Arc 引用计数 +1，可跨 await）
-    let (database, ignored_apps, excluded_domains) = {
+    let (database, ignored_apps, excluded_domains, web_tools) = {
         let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
         let (ignored_apps, excluded_domains) = collect_privacy_filters(&s);
-        (s.database.clone(), ignored_apps, excluded_domains)
+        // 联网工具配置：仅在用户显式开启时传入（隐私默认关）
+        let web_tools = if s.config.assistant_web_access_enabled {
+            Some(crate::agent::WebToolsConfig {
+                provider: s.config.assistant_search_provider.clone(),
+                api_key: s.config.assistant_search_api_key.clone(),
+            })
+        } else {
+            None
+        };
+        (s.database.clone(), ignored_apps, excluded_domains, web_tools)
     };
 
     // 流式桥接：agent 用 mpsc 推事件，这里转发到 Tauri ipc::Channel（前端 onmessage 收）。
@@ -744,6 +753,7 @@ pub async fn chat_work_assistant(
         Some(system_prompt),
         &ignored_apps,
         &excluded_domains,
+        web_tools,
         Some(tx),
     )
     .await;
@@ -755,7 +765,7 @@ pub async fn chat_work_assistant(
         Ok(r) => r,
         Err(e) => {
             let msg = e.to_string();
-            let _ = on_event.send(crate::agent::StreamEvent::Error(msg));
+            let _ = on_event.send(crate::agent::StreamEvent::Error { error: msg });
             return Err(e);
         }
     };

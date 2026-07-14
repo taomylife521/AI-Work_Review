@@ -559,6 +559,54 @@
         {textTestMessage}
       </div>
     {/if}
+
+    <!-- 助手联网能力：默认关闭；开启后助手可读网页/查天气，配搜索 Key 后可联网搜索 -->
+    <div class="pt-3 border-t border-slate-200 dark:border-[#30363d] space-y-3">
+      <label class="flex items-center justify-between gap-3 cursor-pointer">
+        <div class="min-w-0">
+          <span class="settings-text text-sm">{t('settingsAI.webAccess.title')}</span>
+          <p class="settings-muted mt-0.5">{t('settingsAI.webAccess.hint')}</p>
+        </div>
+        <input
+          type="checkbox"
+          bind:checked={config.assistant_web_access_enabled}
+          on:change={handleChange}
+          class="accent-primary-500 shrink-0"
+        />
+      </label>
+
+      {#if config.assistant_web_access_enabled}
+        <div class="space-y-2">
+          <div class="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
+            <label class="settings-muted text-xs" for="assistant-search-provider">{t('settingsAI.webAccess.searchProvider')}</label>
+            <select
+              id="assistant-search-provider"
+              bind:value={config.assistant_search_provider}
+              on:change={handleChange}
+              class="control-input"
+            >
+              <option value="duckduckgo">DuckDuckGo（{t('settingsAI.webAccess.providerFree')}）</option>
+              <option value="tavily">Tavily</option>
+              <option value="bocha">{t('settingsAI.webAccess.providerBocha')}</option>
+            </select>
+
+            {#if config.assistant_search_provider !== 'duckduckgo'}
+            <label class="settings-muted text-xs" for="assistant-search-key">{t('settingsAI.webAccess.searchKey')}</label>
+            <input
+              id="assistant-search-key"
+              type="password"
+              bind:value={config.assistant_search_api_key}
+              on:change={handleChange}
+              class="control-input"
+              placeholder={t('settingsAI.webAccess.searchKeyPlaceholder')}
+              autocomplete="off"
+            />
+            {/if}
+          </div>
+          <p class="settings-muted">{config.assistant_search_provider === 'duckduckgo' ? t('settingsAI.webAccess.duckDuckGoHint') : t('settingsAI.webAccess.keyHint')}</p>
+        </div>
+      {/if}
+    </div>
   </div>
 {:else}
   <div class="pt-3 border-t border-slate-200 dark:border-[#30363d]">

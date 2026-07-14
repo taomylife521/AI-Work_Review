@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **接入管理页面重构**：将 997 行单文件拆分为容器 + 7 个子面板（`nodeGateway/`），分 3 组折叠（AI 工具接入 / 消息通知 / 高级）。飞书/钉钉/企业微信统一为泛型 `BotCredentialsPanel` 组件。
 - **设计 Token 体系**：建立 `--radius-sm/md/lg`（8/12/20px）+ `--shadow-sm/md/lg` + `--space-section/block` 统一基准，app.css 中 35 处硬编码值迁移到 token 变量。
 - **localhost API `/v1/context` 端点**：返回当前前台窗口 + 最近应用列表，供 MCP Server 委托调用。
+- **工作助手 Token 流式输出（阶段 2）**：Agent 回答现按 token 逐字流式推送到前端（`StreamEvent::Token`，后端 64 字节/100ms 批量合并降低 IPC 频率），长回答不再"憋到最后一次性蹦出"。四类 provider（OpenAI 兼容/Ollama/Claude/Gemini）各自实现 SSE/NDJSON 增量解析 + 工具调用分片拼装，流式失败自动回退非流式；请求格式转换抽取为流式/非流式共享函数，超时改为逐块空闲 30s + 总时长 120s 双护栏。新增 10 个装配器/批量器单测。
+- **工作助手联网工具（阶段 1）**：工具系统从"仅同步本地工具"扩展为支持异步工具（`ToolExecutor::Sync/Async` 双通道，5 个本地工具零改动），新增三个联网工具——`fetch_url`（读网页正文，零依赖）、`get_weather`（open-meteo 免费天气，零 Key）、`web_search`（Tavily / 博查，需配 Key）。默认全关，需在「设置 → AI 模型 → 助手联网能力」显式开启（守住隐私默认关立场）；开启后才把联网配置传入 Agent，问题才会发给搜索服务商/目标网站。含 SSRF 护栏（拦本机/内网/链路本地地址，防模型被诱导抓取本机 localhost API），联网提示注入帮助小模型正确选工具。四语言 i18n + 14 个单测（工具门控、SSRF、HTML 提取、天气/搜索格式化、异步统一入口）。
 
 ### 修复
 - **创意类应用活动时长漏记**：PS/C4D 等创意软件操作时画面几乎不变，但旧逻辑把"键鼠超时 + 画面静止"判定为空闲导致丢时长。反转哈希判定语义：画面静止不再判空闲，仅键鼠 10 分钟硬超时兜底。
@@ -27,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **日报活动时间线表格斑马纹误伤**：details 内表格被全局 zebra striping + 表头灰底覆盖。补豁免规则。
 - **亮色模式视觉不一致**：StatsCard 文字灰度统一为 slate-500；主卡片圆角极端值收敛（32px→28px）；卡片边框统一为 `border-slate-200/80`。
 - **设置页 memoryHint 文案过时**：移除洞察卡片后文案仍提及"自动生成洞察"，改为描述 memory 实际功能。
+- **助手流式事件从未到达前端的两处线格式错误**：`StreamEvent::Error(String)` 为内部标签 + newtype 组合，serde 序列化直接失败且被静默吞掉，前端从未收到错误事件（改 struct 变体 `{ error }`）；`Done` 事件的 `tool_labels` 字段以蛇形上线而前端读 `event.toolLabels`（枚举顶层 rename_all 不作用于字段），一直靠命令返回值双通道掩盖（补字段级 camelCase）。新增线格式契约测试锁定。
 
 ### 优化
 - **日报页面视觉重设计**：去玻璃拟态 + 斜纹纹理，改极简现代风（统一 token、轻阴影、大留白、统计卡重做、表格去重阴影 + zebra、活动时间线折叠样式现代化）。

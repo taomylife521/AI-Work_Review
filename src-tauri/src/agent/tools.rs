@@ -83,8 +83,43 @@ pub struct ToolDefinition {
     pub description: &'static str,
     /// 参数的 JSON Schema — 和 OpenAI/Claude API 的格式完全一致
     pub parameters_schema: Value,
-    /// 执行函数 — LLM 选了这个工具后，调用这个函数干活
-    pub execute_fn: fn(&ToolContext, Value) -> Result<String, String>,
+    /// 执行体 — LLM 选了这个工具后，调用它干活
+    pub executor: ToolExecutor,
+}
+
+/// 异步工具的装箱 Future（生命周期绑定到 ToolContext 借用）。
+pub type BoxedToolFuture<'a> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + 'a>>;
+
+/// 工具执行体。
+/// 本地工具（SQLite 查询，微秒级）保持同步函数指针；
+/// 联网工具（HTTP，秒级）走异步函数指针，避免阻塞 tokio worker。
+pub enum ToolExecutor {
+    Sync(fn(&ToolContext, Value) -> Result<String, String>),
+    Async(for<'a> fn(&'a ToolContext<'a>, Value) -> BoxedToolFuture<'a>),
+}
+
+/// 联网工具配置（来自 AppConfig，仅在用户显式开启联网能力时存在）。
+#[derive(Debug, Clone)]
+pub struct WebToolsConfig {
+    /// 搜索服务商："tavily" / "bocha" / "duckduckgo"（免费，无需 Key）
+    pub provider: String,
+    /// 搜索服务 API Key；为空时 web_search 不注册（网页读取/天气不依赖它）。
+    /// DuckDuckGo 不需要 Key，走 search_key() 特判。
+    pub api_key: Option<String>,
+}
+
+impl WebToolsConfig {
+    fn search_key(&self) -> Option<&str> {
+        // DuckDuckGo 是免费的，不需要 API Key，直接返回 Some（空串占位）
+        if self.provider == "duckduckgo" {
+            return Some("");
+        }
+        self.api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+    }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -102,6 +137,8 @@ pub struct ToolContext<'a> {
     pub ignored_apps: Vec<String>,
     /// 隐私过滤：被用户排除的域名。
     pub excluded_domains: Vec<String>,
+    /// 联网工具配置；None = 用户未开启联网能力（web_search 执行时读取 Key）。
+    pub web: Option<WebToolsConfig>,
     /// 工具执行时收集的引用记录（供前端展示"依据"）。
     /// 用 Arc<Mutex> 是因为 execute_fn 是函数指针、ToolContext 以 `&` 借用传递，
     /// 需要内部可变性；多轮工具调用会持续累积。
@@ -749,6 +786,490 @@ fn trend_comparison_execute(ctx: &ToolContext, args: Value) -> Result<String, St
 }
 
 // ══════════════════════════════════════════════════════════
+// 第四点五部分：联网工具（阶段 1）
+// ══════════════════════════════════════════════════════════
+// 隐私边界：仅当用户在设置中显式开启"联网能力"时注册。开启后，
+// 搜索词会发给所配搜索服务商、URL 会直接请求目标网站，不经任何中转。
+
+fn web_search_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "query": { "type": "string", "description": "搜索关键词，尽量具体" }
+        },
+        "required": ["query"]
+    })
+}
+
+fn fetch_url_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "url": { "type": "string", "description": "要读取的网页地址，http/https 完整 URL" }
+        },
+        "required": ["url"]
+    })
+}
+
+/// SSRF 护栏：仅放行公网 http(s) 目标。
+/// 拒绝回环/内网/链路本地地址，防止模型被页面内容诱导去抓本机
+/// localhost API（47831 端口持有工作数据）或内网服务。
+/// 注：域名解析到内网 IP 的绕过（DNS rebinding）不在此防护范围——
+/// 单用户本地应用的主要威胁是字面量地址，完整防护需逐跳解析校验。
+fn ensure_public_http_url(url: &str) -> Result<(), String> {
+    let lower = url.trim().to_ascii_lowercase();
+    let rest = lower
+        .strip_prefix("https://")
+        .or_else(|| lower.strip_prefix("http://"))
+        .ok_or_else(|| "仅支持 http/https 链接".to_string())?;
+
+    // 主机段：截到 path/query/fragment 之前，剥离 userinfo 与端口
+    let host_port = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host_port = host_port.rsplit('@').next().unwrap_or(host_port);
+    let host = if let Some(inner) = host_port.strip_prefix('[') {
+        inner.split(']').next().unwrap_or("")
+    } else {
+        host_port.split(':').next().unwrap_or(host_port)
+    };
+
+    if host.is_empty() {
+        return Err("URL 缺少主机名".to_string());
+    }
+    if host == "localhost" || host.ends_with(".localhost") || host.ends_with(".local") {
+        return Err("不允许访问本机/局域网地址".to_string());
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        let private = match ip {
+            std::net::IpAddr::V4(v4) => {
+                v4.is_loopback()
+                    || v4.is_private()
+                    || v4.is_link_local()
+                    || v4.is_unspecified()
+                    || v4.is_broadcast()
+            }
+            std::net::IpAddr::V6(v6) => {
+                v6.is_loopback()
+                    || v6.is_unspecified()
+                    // 唯一本地 fc00::/7 与链路本地 fe80::/10
+                    || (v6.segments()[0] & 0xfe00) == 0xfc00
+                    || (v6.segments()[0] & 0xffc0) == 0xfe80
+            }
+        };
+        if private {
+            return Err("不允许访问本机/内网 IP".to_string());
+        }
+    }
+    Ok(())
+}
+
+/// 极简 HTML → 正文：剥 script/style/注释与标签，解码常见实体，压缩空白。
+/// 输出给 LLM 当上下文用，不追求排版还原。
+fn html_to_text(html: &str) -> String {
+    // 用 ASCII 小写副本定位边界（字节偏移与原文一致，不破坏 UTF-8）
+    let mut ascii_lower = html.as_bytes().to_vec();
+    ascii_lower.make_ascii_lowercase();
+    let lower = String::from_utf8_lossy(&ascii_lower).into_owned();
+
+    // 1) 去掉 script/style/noscript 整块与 HTML 注释
+    let mut cleaned = String::with_capacity(html.len());
+    let mut pos = 0;
+    while pos < html.len() {
+        let rest_lower = &lower[pos..];
+        let next_block = ["<script", "<style", "<noscript", "<!--"]
+            .iter()
+            .filter_map(|tag| rest_lower.find(tag).map(|i| (i, *tag)))
+            .min_by_key(|(i, _)| *i);
+        match next_block {
+            Some((offset, tag)) => {
+                cleaned.push_str(&html[pos..pos + offset]);
+                let close = if tag == "<!--" { "-->" } else { ">" };
+                let close_tag = match tag {
+                    "<script" => "</script",
+                    "<style" => "</style",
+                    "<noscript" => "</noscript",
+                    _ => "-->",
+                };
+                let search_from = pos + offset + tag.len();
+                let end = if tag == "<!--" {
+                    lower[search_from..].find("-->").map(|i| search_from + i + 3)
+                } else {
+                    lower[search_from..]
+                        .find(close_tag)
+                        .and_then(|i| {
+                            let after = search_from + i;
+                            lower[after..].find('>').map(|j| after + j + 1)
+                        })
+                };
+                let _ = close;
+                match end {
+                    Some(e) => pos = e,
+                    None => {
+                        pos = html.len(); // 未闭合：丢弃余下内容
+                    }
+                }
+            }
+            None => {
+                cleaned.push_str(&html[pos..]);
+                break;
+            }
+        }
+    }
+
+    // 2) 剥标签（块级标签换行，行内标签置空）
+    let mut text = String::with_capacity(cleaned.len());
+    let mut in_tag = false;
+    for ch in cleaned.chars() {
+        match ch {
+            '<' => {
+                in_tag = true;
+                text.push('\n');
+            }
+            '>' => in_tag = false,
+            c if !in_tag => text.push(c),
+            _ => {}
+        }
+    }
+
+    // 3) 常见实体
+    let text = text
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'");
+
+    // 4) 空白压缩：行内空白折叠，去空行
+    let mut lines: Vec<String> = Vec::new();
+    for raw_line in text.lines() {
+        let line = raw_line.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !line.is_empty() {
+            lines.push(line);
+        }
+    }
+    let joined = lines.join("\n");
+
+    // 5) 截断到约 4000 字符（按字符边界）
+    match joined.char_indices().nth(4000) {
+        Some((idx, _)) => format!("{}…", &joined[..idx]),
+        None => joined,
+    }
+}
+
+
+/// 构造联网工具共用的 HTTP 客户端（重定向逐跳过 SSRF 校验）。
+fn web_client(total_timeout_secs: u64) -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(total_timeout_secs))
+        .user_agent("WorkReviewAssistant/1.0 (+local personal tool)")
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() > 5 {
+                return attempt.stop();
+            }
+            match ensure_public_http_url(attempt.url().as_str()) {
+                Ok(()) => attempt.follow(),
+                Err(_) => attempt.stop(),
+            }
+        }))
+        .build()
+        .map_err(|e| format!("HTTP 客户端初始化失败: {e}"))
+}
+
+/// query_activities：按日期返回活动记录（按应用聚合 + 代表性标题）。
+fn query_activities_execute(ctx: &ToolContext, args: Value) -> Result<String, String> {
+    let date = args["date"]
+        .as_str()
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .ok_or_else(|| "缺少 date 参数（格式 YYYY-MM-DD）".to_string())?;
+
+    let activities = ctx
+        .database
+        .get_timeline(date, Some(500), None)
+        .map_err(|e| format!("查询活动记录失败: {e}"))?;
+    let activities = ctx.filter_activities(activities);
+
+    if activities.is_empty() {
+        return Ok(format!("{} 没有活动记录。", date));
+    }
+
+    // 按应用聚合：app_name → (total_duration, count, sample_title)
+    let mut app_map: std::collections::HashMap<String, (i64, usize, String)> =
+        std::collections::HashMap::new();
+    let mut total: i64 = 0;
+    for act in &activities {
+        let app = normalize_display_app_name(&act.app_name);
+        let entry = app_map.entry(app.clone()).or_insert((0, 0, String::new()));
+        entry.0 += act.duration;
+        entry.1 += 1;
+        total += act.duration;
+        // 保留第一个非空标题作为代表
+        if entry.2.is_empty() && !act.window_title.is_empty() {
+            entry.2 = act.window_title.chars().take(60).collect();
+        }
+    }
+
+    let mut sorted: Vec<_> = app_map.into_iter().collect();
+    sorted.sort_by(|a, b| b.1 .0.cmp(&a.1 .0));
+
+    let mut lines = vec![format!(
+        "{} 共记录 {} 条活动，总时长 {}（Top {} 应用）：",
+        date,
+        activities.len(),
+        format_duration_compact(total),
+        sorted.len().min(15)
+    )];
+    for (app, (dur, count, title)) in sorted.iter().take(15) {
+        let mins = dur / 60;
+        let pct = if total > 0 { dur * 100 / total } else { 0 };
+        let title_part = if title.is_empty() {
+            String::new()
+        } else {
+            format!(" — {title}")
+        };
+        lines.push(format!(
+            "- {app}：{} 分钟（{}%，{} 条记录）{title_part}",
+            mins, pct, count
+        ));
+    }
+    Ok(lines.join("\n"))
+}
+
+/// fetch_url：读取网页正文（1MB 体积上限 + 4000 字正文截断）。
+async fn fetch_url_execute(args: Value) -> Result<String, String> {
+    let url = args["url"]
+        .as_str()
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+        .ok_or_else(|| "缺少 url 参数".to_string())?;
+    ensure_public_http_url(url)?;
+
+    let client = web_client(15)?;
+    let mut response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("请求失败: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!("目标网页返回 HTTP {}", response.status()));
+    }
+
+    let mut body: Vec<u8> = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| format!("读取响应失败: {e}"))?
+    {
+        body.extend_from_slice(&chunk);
+        if body.len() > 1_000_000 {
+            break; // 1MB 上限，正文提取对超大页面照样有效
+        }
+    }
+
+    let html = String::from_utf8_lossy(&body);
+    let text = html_to_text(&html);
+    if text.trim().is_empty() {
+        return Err("页面没有可提取的正文（可能是纯 JS 渲染页面）".to_string());
+    }
+    Ok(format!("网页 {url} 的正文内容：\n{text}"))
+}
+
+/// web_search：按配置分发到搜索服务商。
+async fn web_search_execute(ctx: &ToolContext<'_>, args: Value) -> Result<String, String> {
+    let query = args["query"]
+        .as_str()
+        .map(str::trim)
+        .filter(|q| !q.is_empty())
+        .ok_or_else(|| "缺少 query 参数".to_string())?;
+    let web = ctx
+        .web
+        .as_ref()
+        .ok_or_else(|| "联网能力未启用".to_string())?;
+    let key = web
+        .search_key()
+        .ok_or_else(|| "未配置搜索服务 API Key".to_string())?;
+
+    let client = web_client(12)?;
+    let results = match web.provider.as_str() {
+        "duckduckgo" => {
+            // Bing 免费搜索（无需 API Key），国内可直连。
+            // DuckDuckGo 在中国被墙，改用 Bing HTML 搜索作为免费方案。
+            let resp = client
+                .get("https://www.bing.com/search")
+                .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+                .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+                .query(&[("q", query), ("count", "5")])
+                .send()
+                .await
+                .map_err(|e| format!("搜索请求失败: {e}"))?;
+            let html = resp
+                .text()
+                .await
+                .map_err(|e| format!("搜索响应读取失败: {e}"))?;
+            parse_bing_html(&html)
+        }
+        "bocha" => {
+            let resp: Value = client
+                .post("https://api.bochaai.com/v1/web-search")
+                .header("Authorization", format!("Bearer {key}"))
+                .json(&json!({ "query": query, "count": 5, "summary": true }))
+                .send()
+                .await
+                .map_err(|e| format!("搜索请求失败: {e}"))?
+                .json()
+                .await
+                .map_err(|e| format!("搜索结果解析失败: {e}"))?;
+            parse_bocha_results(&resp)
+        }
+        _ => {
+            let resp: Value = client
+                .post("https://api.tavily.com/search")
+                .json(&json!({ "api_key": key, "query": query, "max_results": 5 }))
+                .send()
+                .await
+                .map_err(|e| format!("搜索请求失败: {e}"))?
+                .json()
+                .await
+                .map_err(|e| format!("搜索结果解析失败: {e}"))?;
+            parse_tavily_results(&resp)
+        }
+    };
+
+    if results.is_empty() {
+        return Err(format!("「{query}」没有搜到结果"));
+    }
+    Ok(format_search_results(query, &results))
+}
+
+/// Tavily 响应 → (标题, URL, 摘要) 列表（纯函数，可单测）。
+fn parse_tavily_results(resp: &Value) -> Vec<(String, String, String)> {
+    resp["results"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let title = item["title"].as_str()?.to_string();
+                    let url = item["url"].as_str().unwrap_or("").to_string();
+                    let snippet = item["content"].as_str().unwrap_or("").to_string();
+                    Some((title, url, snippet))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 博查响应 → (标题, URL, 摘要) 列表（纯函数，可单测）。
+fn parse_bocha_results(resp: &Value) -> Vec<(String, String, String)> {
+    resp["data"]["webPages"]["value"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let title = item["name"].as_str()?.to_string();
+                    let url = item["url"].as_str().unwrap_or("").to_string();
+                    let snippet = item["summary"]
+                        .as_str()
+                        .or_else(|| item["snippet"].as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    Some((title, url, snippet))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Bing HTML 搜索结果 → (标题, URL, 摘要) 列表（纯函数，可单测）。
+/// Bing 的搜索结果标题在 <h2><a href="..."> 标题 </a></h2> 中。
+/// Bing 的 URL 是重定向的（bing.com/ck/a），我们保留它（仍可点击）。
+fn parse_bing_html(html: &str) -> Vec<(String, String, String)> {
+    let mut results = Vec::new();
+
+    // Bing 结果标题在 <h2> 内的 <a> 标签中
+    // 匹配模式：<h2...><a ...href="URL"...>TITLE</a></h2>
+    let mut search_pos = 0;
+    while results.len() < 5 {
+        let h2_start = match html[search_pos..].find("<h2") {
+            Some(p) => search_pos + p,
+            None => break,
+        };
+        let h2_end = match html[h2_start..].find("</h2>") {
+            Some(p) => h2_start + p,
+            None => break,
+        };
+        let h2_block = &html[h2_start..h2_end];
+        search_pos = h2_end + 5;
+
+        // 提取 <a href="URL">TITLE</a>
+        let a_start = match h2_block.find("<a ") {
+            Some(p) => &h2_block[p..],
+            None => continue,
+        };
+        let href_pos = match a_start.find("href=\"") {
+            Some(p) => p + 6,
+            None => continue,
+        };
+        let href_rest = &a_start[href_pos..];
+        let href_end = match href_rest.find('"') {
+            Some(p) => p,
+            None => continue,
+        };
+        let url = href_rest[..href_end].to_string();
+
+        // 标题文本：href 结束后到 </a>
+        let after_href = &href_rest[href_end..];
+        let tag_end = match after_href.find('>') {
+            Some(p) => p + 1,
+            None => continue,
+        };
+        let close_a = match after_href[tag_end..].find("</a>") {
+            Some(p) => tag_end + p,
+            None => continue,
+        };
+        let title = strip_html_tags(&after_href[tag_end..close_a]).trim().to_string();
+
+        if title.is_empty() || url.is_empty() {
+            continue;
+        }
+        // 跳过 Bing 内部链接（广告/侧边栏等）
+        if url.contains("bing.com/search") || url.contains("go.microsoft") {
+            continue;
+        }
+
+        results.push((title, url, String::new()));
+    }
+    results
+}
+
+/// 移除 HTML 标签，保留纯文本。
+fn strip_html_tags(html: &str) -> String {
+    let mut result = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for ch in html.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => result.push(ch),
+            _ => {}
+        }
+    }
+    result
+}
+
+/// 搜索结果 → 面向 LLM 的紧凑文本（每条摘要截断 300 字）。
+fn format_search_results(query: &str, results: &[(String, String, String)]) -> String {
+    let mut out = format!("「{query}」的搜索结果（{} 条）：\n", results.len());
+    for (i, (title, url, snippet)) in results.iter().enumerate() {
+        let snippet: String = snippet.chars().take(300).collect();
+        out.push_str(&format!("{}. {title}\n   {snippet}\n   来源: {url}\n", i + 1));
+    }
+    out
+}
+
+// ══════════════════════════════════════════════════════════
 // 第五部分：ToolRegistry — 工具注册中心
 // ══════════════════════════════════════════════════════════
 
@@ -761,12 +1282,21 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
-    /// 创建一个注册了所有内置工具的 Registry
+    /// 创建一个注册了所有内置（本地）工具的 Registry
     pub fn new() -> Self {
         let mut registry = Self {
             tools: HashMap::new(),
         };
         registry.register_builtin_tools();
+        registry
+    }
+
+    /// 在内置工具之上，按用户配置追加联网工具。
+    /// - 网页读取（fetch_url）零依赖，只要开启联网即注册；
+    /// - 网络搜索（web_search）需要搜索 Key，未配置则不注册（模型行为回落到不联网）。
+    pub fn with_web_tools(web: &WebToolsConfig) -> Self {
+        let mut registry = Self::new();
+        registry.register_web_tools(web);
         registry
     }
 
@@ -776,36 +1306,70 @@ impl ToolRegistry {
             name: "search_memory",
             description: "搜索工作记录记忆库。支持关键词搜索和日期范围过滤。当用户问到具体做了什么、工作时间安排、某个项目的进展时使用。",
             parameters_schema: search_memory_parameters(),
-            execute_fn: search_memory_execute,
+            executor: ToolExecutor::Sync(search_memory_execute),
         });
 
         self.register(ToolDefinition {
             name: "analyze_intents",
             description: "分析指定日期范围内的工作意图分布。返回各意图类别（如编码开发、会议沟通、文档撰写等）的时间和占比。当用户问时间分布、时间占比、各类型工作时长时使用。",
             parameters_schema: analyze_intents_parameters(),
-            execute_fn: analyze_intents_execute,
+            executor: ToolExecutor::Sync(analyze_intents_execute),
         });
 
         self.register(ToolDefinition {
             name: "aggregate_stats",
             description: "统计指定日期范围内的应用和分类使用时长。可按应用、分类或总览维度输出排名。当用户问到「花时间最多的是什么」「编码占比多少」「哪个类别最多」「时间分布」时使用。",
             parameters_schema: aggregate_stats_parameters(),
-            execute_fn: aggregate_stats_execute,
+            executor: ToolExecutor::Sync(aggregate_stats_execute),
         });
 
         self.register(ToolDefinition {
             name: "category_search",
             description: "按分类筛选活动记录，返回该分类下的应用使用明细。当用户问到「开发做了什么」「通讯花了多久」「浏览器使用详情」时使用。category 参数支持中文简称如'开发'、'通讯'、'办公'。",
             parameters_schema: category_search_parameters(),
-            execute_fn: category_search_execute,
+            executor: ToolExecutor::Sync(category_search_execute),
+        });
+
+        self.register(ToolDefinition {
+            name: "query_activities",
+            description: "按日期查询活动记录。当用户问「今天做了什么」「昨天的工作」「某一天的活动」时使用，返回该日各应用的使用时长和代表性窗口标题。",
+            parameters_schema: json!({
+                "type": "object",
+                "properties": {
+                    "date": { "type": "string", "description": "日期，格式 YYYY-MM-DD，如 2026-07-14" }
+                },
+                "required": ["date"]
+            }),
+            executor: ToolExecutor::Sync(query_activities_execute),
         });
 
         self.register(ToolDefinition {
             name: "trend_comparison",
             description: "对比两个时间段的活动时长和分类分布变化。计算各分类的增减量和百分比变化。当用户问到「效率变化」「对比前后两周」「最近工作趋势」时使用。",
             parameters_schema: trend_comparison_parameters(),
-            execute_fn: trend_comparison_execute,
+            executor: ToolExecutor::Sync(trend_comparison_execute),
         });
+    }
+
+    /// 注册联网工具（详见 with_web_tools）。
+    fn register_web_tools(&mut self, web: &WebToolsConfig) {
+        self.register(ToolDefinition {
+            name: "fetch_url",
+            description: "读取指定网页的正文内容（自动去除 HTML 标签，截断到约 4000 字）。当用户给出链接、或需要读取某个已知网址的内容时使用。",
+            parameters_schema: fetch_url_parameters(),
+            executor: ToolExecutor::Async(|_ctx, args| Box::pin(fetch_url_execute(args))),
+        });
+
+        // 网络搜索依赖搜索服务商 Key；无 Key 时不注册，避免模型选了却必然失败。
+        // Key/服务商在执行时从 ToolContext.web 读取（与注册来源同一份配置）。
+        if web.search_key().is_some() {
+            self.register(ToolDefinition {
+                name: "web_search",
+                description: "联网搜索实时信息（新闻、资料、事实核查等）。当问题涉及你训练数据之外或需要最新信息时使用。返回若干条标题+摘要+链接，可再用 fetch_url 深入某条。",
+                parameters_schema: web_search_parameters(),
+                executor: ToolExecutor::Async(|ctx, args| Box::pin(web_search_execute(ctx, args))),
+            });
+        }
     }
 
     fn register(&mut self, tool: ToolDefinition) {
@@ -832,20 +1396,21 @@ impl ToolRegistry {
             .collect()
     }
 
-    /// 执行 LLM 选择的工具
-    ///
-    /// 对应 Python: registry.execute(tool_name, arguments)
-    pub fn execute(
+    /// 执行 LLM 选择的工具（同步工具直接调，异步工具 await）。
+    pub async fn execute(
         &self,
         tool_name: &str,
         arguments: Value,
-        ctx: &ToolContext,
+        ctx: &ToolContext<'_>,
     ) -> Result<String, String> {
         let tool = self
             .tools
             .get(tool_name)
             .ok_or_else(|| format!("未知的工具: {tool_name}"))?;
-        (tool.execute_fn)(ctx, arguments)
+        match tool.executor {
+            ToolExecutor::Sync(f) => f(ctx, arguments),
+            ToolExecutor::Async(f) => f(ctx, arguments).await,
+        }
     }
 }
 
@@ -1015,5 +1580,174 @@ mod tests {
         assert_eq!(resolve_category_key("xyz"), None);
         assert_eq!(resolve_category_key("未知分类"), None);
         assert_eq!(resolve_category_key(""), None);
+    }
+
+    // ── 联网工具测试（阶段 1）──────────────────────────────
+
+    fn tool_names(registry: &ToolRegistry) -> Vec<String> {
+        let mut names: Vec<String> = registry
+            .to_openai_tools()
+            .iter()
+            .filter_map(|t| t["function"]["name"].as_str().map(|s| s.to_string()))
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// 联网工具注册门控：默认不注册；开联网注册 fetch_url；有搜索 provider 才注册 web_search。
+    #[test]
+    fn 联网工具应按配置门控注册() {
+        // 默认：只有 5 个本地工具
+        let base = ToolRegistry::new();
+        let names = tool_names(&base);
+        assert_eq!(names.len(), 6);
+        assert!(!names.iter().any(|n| n == "fetch_url"));
+
+        // 开联网、无搜索 Key：+fetch_url，无 web_search
+        let no_key = ToolRegistry::with_web_tools(&WebToolsConfig {
+            provider: "tavily".to_string(),
+            api_key: None,
+        });
+        let names = tool_names(&no_key);
+        assert!(names.iter().any(|n| n == "fetch_url"));
+        assert!(!names.iter().any(|n| n == "web_search"));
+
+        // 有 Key：两个都有
+        let with_key = ToolRegistry::with_web_tools(&WebToolsConfig {
+            provider: "tavily".to_string(),
+            api_key: Some("tvly-test".to_string()),
+        });
+        let names = tool_names(&with_key);
+        assert!(names.iter().any(|n| n == "web_search"));
+        assert_eq!(names.len(), 8);
+
+        // 空白 Key 视为无 Key
+        let blank_key = ToolRegistry::with_web_tools(&WebToolsConfig {
+            provider: "tavily".to_string(),
+            api_key: Some("   ".to_string()),
+        });
+        assert!(!tool_names(&blank_key).iter().any(|n| n == "web_search"));
+    }
+
+    /// SSRF 护栏：放行公网，拦回环/内网/非 http。
+    #[test]
+    fn ssrf护栏应拦截本机与内网地址() {
+        // 放行
+        assert!(ensure_public_http_url("https://example.com/page?q=1").is_ok());
+        assert!(ensure_public_http_url("http://8.8.8.8/x").is_ok());
+        assert!(ensure_public_http_url("HTTPS://News.Site.COM").is_ok());
+
+        // 协议
+        assert!(ensure_public_http_url("ftp://example.com").is_err());
+        assert!(ensure_public_http_url("file:///etc/passwd").is_err());
+
+        // 本机/内网（关键：本机 localhost API 47831 持有工作数据）
+        assert!(ensure_public_http_url("http://localhost:47831/v1/context").is_err());
+        assert!(ensure_public_http_url("http://127.0.0.1:47831/").is_err());
+        assert!(ensure_public_http_url("http://[::1]:47831/").is_err());
+        assert!(ensure_public_http_url("http://192.168.1.10/admin").is_err());
+        assert!(ensure_public_http_url("http://10.0.0.5/").is_err());
+        assert!(ensure_public_http_url("http://172.16.0.1/").is_err());
+        assert!(ensure_public_http_url("http://169.254.169.254/metadata").is_err());
+        assert!(ensure_public_http_url("http://0.0.0.0/").is_err());
+        assert!(ensure_public_http_url("http://myhost.local/").is_err());
+        assert!(ensure_public_http_url("http://user@127.0.0.1/").is_err());
+    }
+
+    /// HTML 提取：剥 script/style/注释/标签，解实体，压空白，可截断。
+    #[test]
+    fn html正文提取应剥离脚本样式与标签() {
+        let html = r#"<html><head><style>body{color:red}</style>
+            <script>alert("x")</script></head>
+            <body><!-- 注释 --><h1>标题</h1>
+            <p>第一段 &amp; 符号 &lt;转义&gt;</p>
+            <div>  多   空  格  </div></body></html>"#;
+        let text = html_to_text(html);
+        assert!(text.contains("标题"));
+        assert!(text.contains("第一段 & 符号 <转义>"));
+        assert!(text.contains("多 空 格"));
+        assert!(!text.contains("alert"));
+        assert!(!text.contains("color:red"));
+        assert!(!text.contains("注释"));
+
+        // 截断：超长文本 4000 字符 + 省略号
+        let long_html = format!("<p>{}</p>", "字".repeat(5000));
+        let truncated = html_to_text(&long_html);
+        assert_eq!(truncated.chars().count(), 4001); // 4000 + '…'
+        assert!(truncated.ends_with('…'));
+    }
+
+    /// 搜索结果解析：Tavily 与博查两种响应形状。
+    #[test]
+    fn 搜索结果解析应兼容两家服务商格式() {
+        let tavily = json!({
+            "results": [
+                {"title": "Rust 1.88 发布", "url": "https://blog.rust-lang.org/x", "content": "新版本说明"},
+                {"title": "无摘要条目", "url": "https://example.com"}
+            ]
+        });
+        let parsed = parse_tavily_results(&tavily);
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].0, "Rust 1.88 发布");
+        assert_eq!(parsed[1].2, "");
+
+        let bocha = json!({
+            "data": { "webPages": { "value": [
+                {"name": "标题A", "url": "https://a.com", "summary": "摘要A"},
+                {"name": "标题B", "url": "https://b.com", "snippet": "片段B"}
+            ]}}
+        });
+        let parsed = parse_bocha_results(&bocha);
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].2, "摘要A");
+        assert_eq!(parsed[1].2, "片段B"); // summary 缺失时回退 snippet
+
+        let formatted = format_search_results("rust", &parsed);
+        assert!(formatted.contains("「rust」"));
+        assert!(formatted.contains("1. 标题A"));
+        assert!(formatted.contains("来源: https://b.com"));
+    }
+
+    /// 异步工具经 execute 统一入口可执行（用无效参数走纯校验路径，不发网络请求）。
+    #[tokio::test]
+    async fn 异步工具经统一入口执行并返回参数错误() {
+        let registry = ToolRegistry::with_web_tools(&WebToolsConfig {
+            provider: "tavily".to_string(),
+            api_key: Some("tvly-test".to_string()),
+        });
+        let db = crate::database::Database::new(std::path::Path::new(
+            &std::env::temp_dir().join("wr-web-tools-test.db"),
+        ))
+        .expect("临时库创建失败");
+        let ctx = ToolContext {
+            database: &db,
+            ignored_apps: vec![],
+            excluded_domains: vec![],
+            web: Some(WebToolsConfig {
+                provider: "tavily".to_string(),
+                api_key: Some("tvly-test".to_string()),
+            }),
+            collected_references: Arc::new(Mutex::new(Vec::new())),
+        };
+
+        // 缺参数 → 校验错误（不触网）
+        let err = registry
+            .execute("fetch_url", json!({}), &ctx)
+            .await
+            .unwrap_err();
+        assert!(err.contains("url"));
+
+        // SSRF 拦截（不触网）
+        let err = registry
+            .execute("fetch_url", json!({"url": "http://127.0.0.1:47831/"}), &ctx)
+            .await
+            .unwrap_err();
+        assert!(err.contains("本机") || err.contains("内网"));
+
+        let err = registry
+            .execute("web_search", json!({}), &ctx)
+            .await
+            .unwrap_err();
+        assert!(err.contains("query"));
     }
 }

@@ -505,7 +505,7 @@
         assistantStore.updateLastStreaming((m) => ({
           ...m,
           steps: m.steps.map((s, i) =>
-            i === m.steps.length - 1 ? { ...s, status: 'done', hits: event.hits } : s
+            i === m.steps.length - 1 ? { ...s, status: 'done', hits: event.hits, references: event.references || [] } : s
           ),
           references: event.references?.length
             ? mergeReferences(m.references, event.references)
@@ -646,20 +646,36 @@
               >
                 {#if message.role === 'assistant'}
                   {#if message.steps?.length}
-                    <div class="mb-3 flex flex-col gap-1.5">
-                      {#each message.steps as step}
-                        <div
-                          class="flex items-center gap-2 text-xs text-slate-500 dark:text-[#7d8590]"
-                          in:fly={{ x: -4, duration: 160 }}
-                        >
-                          {#if step.status === 'running'}
-                            <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-500 dark:border-indigo-900/60 dark:border-t-indigo-400"></span>
-                          {:else}
-                            <span class="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
+                    <div class="mb-3 flex flex-col gap-1">
+                      {#each message.steps as step, si}
+                        <details class="group/step rounded-lg bg-slate-50/60 dark:bg-[#161b22]/30 overflow-hidden">
+                          <summary
+                            class="flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-500 dark:text-[#7d8590] cursor-pointer select-none list-none transition-colors hover:bg-slate-100/60 dark:hover:bg-[#21262d]/40"
+                            in:fly={{ x: -4, duration: 160 }}
+                          >
+                            {#if step.status === 'running'}
+                              <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-500 dark:border-indigo-900/60 dark:border-t-indigo-400"></span>
+                            {:else}
+                              <span class="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
+                            {/if}
+                            <span class="font-medium">{step.label}</span>
+                            {#if step.status === 'done' && step.hits != null}<span class="text-slate-400 dark:text-[#636c76]">· {step.hits} {t('ask.hits')}</span>{/if}
+                            {#if step.references?.length}
+                              <svg class="w-3 h-3 ml-auto shrink-0 text-slate-400 transition-transform group-open/step:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                            {/if}
+                          </summary>
+                          {#if step.references?.length}
+                            <div class="px-2.5 pb-2 pt-1 space-y-1 border-t border-slate-200/60 dark:border-[#30363d]/40">
+                              {#each step.references as ref}
+                                <div class="text-[11px] leading-relaxed text-slate-500 dark:text-[#7d8590]">
+                                  {#if ref.app_name}<span class="font-medium text-slate-600 dark:text-[#adbac7]">{ref.app_name}</span> · {/if}
+                                  <span>{ref.title}</span>
+                                  <span class="text-slate-400 dark:text-[#636c76]">— {ref.date}</span>
+                                </div>
+                              {/each}
+                            </div>
                           {/if}
-                          <span>{step.label}</span>
-                          {#if step.status === 'done' && step.hits != null}<span class="text-slate-400 dark:text-[#636c76]">· {step.hits} {t('ask.hits')}</span>{/if}
-                        </div>
+                        </details>
                       {/each}
                     </div>
                   {/if}

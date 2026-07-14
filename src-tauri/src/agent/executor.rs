@@ -7,12 +7,12 @@
 
 use super::events::{default_tool_label, StreamEvent};
 use super::model::{self, Message, StopReason};
-use super::tools::ToolRegistry;
+use super::tools::{ToolRegistry, WebToolsConfig};
 use crate::config::ModelConfig;
 use crate::database::Database;
 use crate::error::AppError;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use work_review_core::database::MemorySearchItem;
 
@@ -109,24 +109,36 @@ impl AgentExecutor {
         max_iterations: Option<usize>,
         ignored_apps: Vec<String>,
         excluded_domains: Vec<String>,
+        web_tools: Option<WebToolsConfig>,
         event_tx: Option<mpsc::Sender<StreamEvent>>,
     ) -> Result<AgentResult, AppError> {
         // 注入当前日期上下文（issue #122）：让模型能正确理解"今天/本周/上周"
         // 等相对时间词，避免工具调用时把日期算错。
+        // 联网开启时追加一句能力说明，帮助小模型正确选择联网工具。
+        let web_hint = if web_tools.is_some() {
+            "\n\n[联网能力] 已启用联网工具：需要实时/外部信息（天气、新闻、网页内容等）时，优先调用对应工具获取真实数据，不要凭记忆编造。"
+        } else {
+            ""
+        };
         let sys = format!(
-            "{}{}",
+            "{}{}{}",
             system_prompt.unwrap_or(DEFAULT_SYSTEM_PROMPT),
-            build_date_context_suffix()
+            build_date_context_suffix(),
+            web_hint
         );
         let max_iter = max_iterations.unwrap_or(DEFAULT_MAX_ITERATIONS);
 
-        // 工具注册中心（Stage 1）
-        let registry = ToolRegistry::new();
+        // 工具注册中心（Stage 1）：联网工具按用户配置追加
+        let registry = match &web_tools {
+            Some(web) => ToolRegistry::with_web_tools(web),
+            None => ToolRegistry::new(),
+        };
         let tools = registry.to_openai_tools();
         let tool_context = super::tools::ToolContext {
             database,
             ignored_apps,
             excluded_domains,
+            web: web_tools,
             collected_references: Arc::new(Mutex::new(Vec::new())),
         };
 
@@ -139,9 +151,28 @@ impl AgentExecutor {
 
         for _ in 0..max_iter {
             // ── 第 1 步：调用 LLM（Stage 2） ──
-            let response = model::chat_with_tools(model_config, &sys, &messages, &tools)
-                .await
-                .map_err(|e| AppError::Analysis(format!("Agent 调用失败: {e}")))?;
+            // 有事件通道时走 token 流式（文本增量实时推给前端，批量合并降低
+            // IPC 频率）；无通道（单测/非流式调用方）保持原非流式路径。
+            let response = if event_tx.is_some() {
+                let mut batcher = TokenBatcher::new();
+                let result = {
+                    let mut on_text =
+                        |delta: &str| batcher.push(delta, &event_tx);
+                    model::chat_with_tools_streaming(
+                        model_config,
+                        &sys,
+                        &messages,
+                        &tools,
+                        &mut on_text,
+                    )
+                    .await
+                };
+                batcher.flush(&event_tx);
+                result
+            } else {
+                model::chat_with_tools(model_config, &sys, &messages, &tools).await
+            }
+            .map_err(|e| AppError::Analysis(format!("Agent 调用失败: {e}")))?;
 
             // ── 第 2 步：判断 LLM 的意图 ──
             match response.stop_reason {
@@ -199,12 +230,11 @@ impl AgentExecutor {
                             );
                             let ref_base = tool_context.references_len();
 
-                            // 执行工具（Stage 1）
-                            let result = match registry.execute(
-                                &tc.name,
-                                tc.arguments.clone(),
-                                &tool_context,
-                            ) {
+                            // 执行工具（Stage 1；联网工具为异步）
+                            let result = match registry
+                                .execute(&tc.name, tc.arguments.clone(), &tool_context)
+                                .await
+                            {
                                 Ok(r) => r,
                                 Err(e) => format!("工具执行失败: {e}"),
                             };
@@ -271,6 +301,46 @@ impl AgentExecutor {
     }
 }
 
+/// Token 增量批量合并器：避免每个 token 一条 IPC 消息打爆通道（容量 64）。
+/// 攒够 64 字节或距上次发送 ≥100ms 就 flush 一次；答案完整性由终态 Done
+/// 事件兜底（前端会用完整答案覆盖流式内容），丢帧只影响过程观感。
+struct TokenBatcher {
+    buf: String,
+    last_flush: Instant,
+}
+
+impl TokenBatcher {
+    const MAX_BYTES: usize = 64;
+    const MAX_INTERVAL: Duration = Duration::from_millis(100);
+
+    fn new() -> Self {
+        Self {
+            buf: String::new(),
+            last_flush: Instant::now(),
+        }
+    }
+
+    fn push(&mut self, delta: &str, tx: &Option<mpsc::Sender<StreamEvent>>) {
+        self.buf.push_str(delta);
+        if self.buf.len() >= Self::MAX_BYTES || self.last_flush.elapsed() >= Self::MAX_INTERVAL {
+            self.flush(tx);
+        }
+    }
+
+    fn flush(&mut self, tx: &Option<mpsc::Sender<StreamEvent>>) {
+        if self.buf.is_empty() {
+            return;
+        }
+        emit_event(
+            tx,
+            StreamEvent::Token {
+                token: std::mem::take(&mut self.buf),
+            },
+        );
+        self.last_flush = Instant::now();
+    }
+}
+
 /// 推送一个流式事件；channel 满/关闭都不影响主流程。
 fn emit_event(tx: &Option<mpsc::Sender<StreamEvent>>, evt: StreamEvent) {
     if let Some(tx) = tx {
@@ -307,6 +377,40 @@ mod tests {
     #[test]
     fn test_max_iterations_default() {
         assert_eq!(DEFAULT_MAX_ITERATIONS, 8);
+    }
+
+    /// TokenBatcher：小增量攒批发送，flush 清空缓冲；事件形如 Token{token}。
+    #[test]
+    fn token批量合并应攒批发送并在flush时清空() {
+        let (tx, mut rx) = mpsc::channel::<StreamEvent>(64);
+        let tx = Some(tx);
+        let mut batcher = TokenBatcher::new();
+
+        // 未达 64 字节且未超时间隔 → 不发送
+        batcher.push("你好", &tx);
+        assert!(rx.try_recv().is_err());
+
+        // 攒够字节数 → 自动 flush（"你好" 6 字节 + 62 个 'a' = 68 字节 ≥ 64）
+        batcher.push(&"a".repeat(62), &tx);
+        match rx.try_recv() {
+            Ok(StreamEvent::Token { token }) => {
+                assert!(token.starts_with("你好"));
+                assert_eq!(token.len(), 68);
+            }
+            other => panic!("应收到 Token 事件，实际: {other:?}"),
+        }
+
+        // flush 空缓冲 → 不发送
+        batcher.flush(&tx);
+        assert!(rx.try_recv().is_err());
+
+        // 有余量时 flush → 发送剩余
+        batcher.push("尾", &tx);
+        batcher.flush(&tx);
+        match rx.try_recv() {
+            Ok(StreamEvent::Token { token }) => assert_eq!(token, "尾"),
+            other => panic!("应收到 Token 事件，实际: {other:?}"),
+        }
     }
 
     #[test]

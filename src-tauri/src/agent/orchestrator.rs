@@ -175,6 +175,7 @@ impl Orchestrator {
         system_prompt: Option<&str>,
         ignored_apps: &[String],
         excluded_domains: &[String],
+        web_tools: Option<super::tools::WebToolsConfig>,
         event_tx: Option<mpsc::Sender<StreamEvent>>,
     ) -> Result<OrchestratorResult, AppError> {
         let has_model = model_config
@@ -225,6 +226,7 @@ impl Orchestrator {
                     None,
                     ignored_apps.to_vec(),
                     excluded_domains.to_vec(),
+                    web_tools,
                     event_tx.clone(),
                 )
                 .await

@@ -12,3 +12,4 @@ pub mod tools;
 pub use events::StreamEvent;
 pub use model::Message;
 pub use orchestrator::Orchestrator;
+pub use tools::WebToolsConfig;

@@ -853,6 +853,15 @@ pub struct AppConfig {
     /// 上次记忆合成日期（防同天重复）
     #[serde(default)]
     pub memory_last_synthesis_date: Option<String>,
+    /// 助手联网能力总开关（隐私默认关：开启后问题可能发给搜索服务商/目标网站）
+    #[serde(default)]
+    pub assistant_web_access_enabled: bool,
+    /// 搜索服务商："tavily" / "bocha"
+    #[serde(default = "default_assistant_search_provider")]
+    pub assistant_search_provider: String,
+    /// 搜索服务 API Key（为空时 web_search 工具不注册，网页读取/天气不受影响）
+    #[serde(default)]
+    pub assistant_search_api_key: Option<String>,
     /// 是否启用桌面化身窗口
     #[serde(default)]
     pub avatar_enabled: bool,
@@ -914,6 +923,9 @@ fn default_break_reminder_interval_minutes() -> u64 {
 }
 fn default_avatar_scale() -> f64 {
     0.9
+}
+fn default_assistant_search_provider() -> String {
+    "tavily".to_string()
 }
 fn default_standard_work_hours() -> f64 {
     8.0
@@ -1022,6 +1034,9 @@ impl Default for AppConfig {
             goal_notifications: false,
             memory_enabled: false,
             memory_last_synthesis_date: None,
+            assistant_web_access_enabled: false,
+            assistant_search_provider: default_assistant_search_provider(),
+            assistant_search_api_key: None,
             avatar_enabled: false,
             avatar_scale: default_avatar_scale(),
             avatar_opacity: default_avatar_opacity(),
