@@ -724,6 +724,7 @@ export default {
       presetNamePlaceholder: '預設名稱',
       presetPromptPlaceholder: '輸入提示詞內容…',
       addPreset: '添加預設',
+      editPreset: '編輯預設',
       confirmDeletePreset: '確定刪除預設「{name}」？',
       currentReportLabel: '目前日報',
       currentConfigLabel: '目前配置',

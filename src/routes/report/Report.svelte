@@ -700,11 +700,25 @@
                       </button>
                       <button
                         type="button"
+                        class="p-1 text-slate-400 hover:text-indigo-500 dark:text-[#484f58] dark:hover:text-indigo-400 rounded-md hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors shrink-0 opacity-0 group-hover:opacity-100"
+                        title={t('report.editPreset')}
+                        on:click|stopPropagation={() => {
+                          editingPresetIndex = i;
+                          editingPresetName = preset.name;
+                          editingPresetPrompt = preset.prompt;
+                          showPresetDropdown = false;
+                          showPresetModal = true;
+                        }}
+                      >
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.38-2.83-2.828z" /></svg>
+                      </button>
+                      <button
+                        type="button"
                         class="p-1 text-slate-400 hover:text-rose-500 dark:text-[#484f58] dark:hover:text-rose-400 rounded-md hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors shrink-0 opacity-0 group-hover:opacity-100"
                         title={t('common.delete')}
                         on:click|stopPropagation={() => { pendingDeletePreset = i; }}
                       >
-                        <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 011.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
                       </button>
                     </div>
                   {/if}

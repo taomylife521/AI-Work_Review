@@ -721,6 +721,7 @@ export default {
       presetNamePlaceholder: 'اسم الإعداد',
       presetPromptPlaceholder: 'أدخل محتوى المطالبة...',
       addPreset: 'إضافة إعداد',
+      editPreset: 'تحرير الإعداد',
       confirmDeletePreset: 'حذف الإعداد "{name}"؟',
       currentReportLabel: 'التقرير الحالي',
       currentConfigLabel: 'التكوين الحالي',
