@@ -15,6 +15,7 @@ use work_review_skills_engine::model::Permission as SkillPermission;
 struct AppState {
     db: Database,
     config: AppConfig,
+    localhost_api_token_path: std::path::PathBuf,
     policy: PolicyEnforcer,
     skills: SkillEngine,
 }
@@ -32,12 +33,14 @@ fn main() {
             .to_string()
     });
 
-    let config_path = std::env::var("WORK_REVIEW_CONFIG_PATH").unwrap_or_else(|_| {
-        let data_dir = dirs::data_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("work-review");
-        data_dir.join("config.json").to_string_lossy().to_string()
-    });
+    let config_path = std::env::var("WORK_REVIEW_CONFIG_PATH")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            let data_dir = dirs::data_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join("work-review");
+            data_dir.join("config.json")
+        });
 
     let db = match Database::new(std::path::Path::new(&db_path)) {
         Ok(db) => db,
@@ -47,13 +50,13 @@ fn main() {
         }
     };
 
-    let config = match AppConfig::load(std::path::Path::new(&config_path)) {
+    let config = match AppConfig::load(&config_path) {
         Ok(cfg) => cfg,
         Err(e) => {
             // 显式提示配置加载失败，避免静默回退到 default 让用户误以为配置生效。
             log::error!(
                 "无法加载配置文件 {}: {}（将使用默认配置，工作时段/AI 提供方等可能与 UI 显示不一致）",
-                config_path,
+                config_path.display(),
                 e
             );
             AppConfig::default()
@@ -100,6 +103,7 @@ fn main() {
     let state = Arc::new(Mutex::new(AppState {
         db,
         config,
+        localhost_api_token_path: localhost_api_token_path(&config_path),
         policy,
         skills,
     }));
@@ -238,6 +242,26 @@ fn handle_request(request: &Value, state: &Arc<Mutex<AppState>>) -> Value {
 // 获取独立进程无法直接采集的能力（真实前台窗口、AI 报表生成）
 // ══════════════════════════════════════════════════════════
 
+fn localhost_api_token_path(config_path: &std::path::Path) -> std::path::PathBuf {
+    config_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("localhost_api_token.txt")
+}
+
+fn read_localhost_api_token(token_path: &std::path::Path) -> Option<String> {
+    let token = std::fs::read_to_string(token_path)
+        .ok()
+        .map(|token| token.trim().to_string())
+        .filter(|token| !token.is_empty())?;
+    let suffix = token.strip_prefix("wr-local-")?;
+    if suffix.len() == 32 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Some(token)
+    } else {
+        None
+    }
+}
+
 /// 返回主应用 localhost API 的 base URL（如 "http://127.0.0.1:47831"）。
 /// 仅当 localhost_api_enabled = true 且端口有效时返回 Some。
 fn localhost_api_base(config: &AppConfig) -> Option<String> {
@@ -257,17 +281,38 @@ fn localhost_api_base(config: &AppConfig) -> Option<String> {
     Some(format!("http://{host}:{port}"))
 }
 
-/// 尝试 GET 主应用的 localhost API，2 秒超时。失败返回 None（不阻塞 MCP 主流程）。
-fn try_localhost_get(config: &AppConfig, path: &str) -> Option<Value> {
+fn build_localhost_get_request(
+    config: &AppConfig,
+    token_path: &std::path::Path,
+    path: &str,
+) -> Option<ureq::Request> {
     let base = localhost_api_base(config)?;
+    let token = read_localhost_api_token(token_path)?;
     let url = format!("{base}{path}");
-    match ureq::get(&url)
-        .timeout(std::time::Duration::from_secs(2))
-        .call()
-    {
+    Some(
+        ureq::get(&url)
+            .set("Authorization", &format!("Bearer {token}"))
+            .timeout(std::time::Duration::from_secs(2)),
+    )
+}
+
+/// 尝试 GET 主应用的 localhost API，2 秒超时。失败返回 None（不阻塞 MCP 主流程）。
+fn try_localhost_get(
+    config: &AppConfig,
+    token_path: &std::path::Path,
+    path: &str,
+) -> Option<Value> {
+    let request = build_localhost_get_request(config, token_path, path)?;
+    let url = request.url().to_string();
+    match request.call() {
         Ok(response) => response.into_json::<Value>().ok(),
-        Err(e) => {
-            log::debug!("localhost API 委托失败 ({url}): {e}");
+        Err(ureq::Error::Status(status, _)) => {
+            log::debug!("localhost API 委托失败 ({url}): HTTP {status}");
+            None
+        }
+        Err(ureq::Error::Transport(_)) => {
+            // 不记录第三方错误详情，避免非法请求头把 Bearer Token 带入日志。
+            log::debug!("localhost API 委托失败 ({url}): 传输错误");
             None
         }
     }
@@ -638,7 +683,8 @@ fn handle_tool_call(name: &str, args: &Value, state: &Arc<Mutex<AppState>>) -> V
             if s.config.ai_mode == work_review_core::config::AiMode::Summary {
                 let locale_code = locale.as_code();
                 let path = format!("/v1/reports/generate?date={date}&locale={locale_code}");
-                if let Some(resp) = try_localhost_get(&s.config, &path) {
+                if let Some(resp) = try_localhost_get(&s.config, &s.localhost_api_token_path, &path)
+                {
                     if let Some(content) = resp.get("content").and_then(|c| c.as_str()) {
                         return json!({
                             "content": [{ "type": "text", "text": content }]
@@ -676,7 +722,9 @@ fn handle_tool_call(name: &str, args: &Value, state: &Arc<Mutex<AppState>>) -> V
         }),
         "get_current_context" => with_policy_check(state, name, Permission::ReadActivities, |s| {
             // 坑1修复：先尝试委托 localhost API 拿真实前台窗口（主应用在跑时）
-            if let Some(ctx) = try_localhost_get(&s.config, "/v1/context") {
+            if let Some(ctx) =
+                try_localhost_get(&s.config, &s.localhost_api_token_path, "/v1/context")
+            {
                 let primary_app = ctx.get("primary_app").and_then(|v| v.as_str()).unwrap_or("");
                 let window_title = ctx.get("window_title").and_then(|v| v.as_str()).unwrap_or("");
                 let is_live = ctx.get("is_live").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -975,6 +1023,137 @@ fn tool_error(message: &str) -> Value {
 mod tests {
     use super::*;
     use work_review_core::privacy::{apply_excluded_domains_to_stats, apply_ignored_apps_to_stats};
+
+    const TEST_LOCALHOST_API_TOKEN: &str =
+        "wr-local-0123456789abcdef0123456789abcdef";
+    const ROTATED_LOCALHOST_API_TOKEN: &str =
+        "wr-local-fedcba9876543210fedcba9876543210";
+
+    fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("系统时间应晚于 UNIX_EPOCH")
+            .as_nanos();
+        std::env::temp_dir().join(format!("{prefix}-{}-{unique}", std::process::id()))
+    }
+
+    #[test]
+    fn token路径应跟随自定义配置文件目录() {
+        let config_path = std::path::Path::new("/tmp/work-review-custom/config.json");
+        assert_eq!(
+            localhost_api_token_path(config_path),
+            std::path::PathBuf::from("/tmp/work-review-custom/localhost_api_token.txt")
+        );
+    }
+
+    #[test]
+    fn token读取应去除空白并拒绝缺失读取失败或空内容() {
+        let dir = unique_temp_dir("mcp-token");
+        std::fs::create_dir_all(&dir).expect("应创建临时目录");
+        let token_path = dir.join("localhost_api_token.txt");
+
+        assert_eq!(read_localhost_api_token(&token_path), None);
+        assert_eq!(read_localhost_api_token(&dir), None);
+
+        std::fs::write(&token_path, format!("  {TEST_LOCALHOST_API_TOKEN}\n"))
+            .expect("应写入 Token");
+        assert_eq!(
+            read_localhost_api_token(&token_path).as_deref(),
+            Some(TEST_LOCALHOST_API_TOKEN)
+        );
+
+        std::fs::write(&token_path, " \n ").expect("应覆盖 Token");
+        assert_eq!(read_localhost_api_token(&token_path), None);
+        std::fs::remove_dir_all(dir).expect("应清理临时目录");
+    }
+
+    #[test]
+    fn token读取应拒绝可能污染请求头或日志的非法内容() {
+        let dir = unique_temp_dir("mcp-invalid-token");
+        std::fs::create_dir_all(&dir).expect("应创建临时目录");
+        let token_path = dir.join("localhost_api_token.txt");
+
+        for invalid_token in [
+            "wr-local-secret",
+            "wr-local-0123456789abcdef\n0123456789abcdef",
+            "wr-local-0123456789abcdef\r0123456789abcdef",
+            "wr-local-0123456789abcdef0123456789abcde中",
+            "wr-local-0123456789abcdef0123456789abcdeg",
+        ] {
+            std::fs::write(&token_path, invalid_token).expect("应写入非法 Token");
+            assert_eq!(
+                read_localhost_api_token(&token_path),
+                None,
+                "非法 Token 不应进入 Authorization 请求头"
+            );
+        }
+
+        std::fs::remove_dir_all(dir).expect("应清理临时目录");
+    }
+
+    #[test]
+    fn localhost委托请求应携带bearer且url不含token() {
+        let dir = unique_temp_dir("mcp-request");
+        std::fs::create_dir_all(&dir).expect("应创建临时目录");
+        let token_path = dir.join("localhost_api_token.txt");
+        std::fs::write(&token_path, TEST_LOCALHOST_API_TOKEN).expect("应写入 Token");
+        let mut config = AppConfig::default();
+        config.localhost_api_enabled = true;
+        config.localhost_api_host = Some("127.0.0.1".to_string());
+        config.localhost_api_port = 47_831;
+
+        let request = build_localhost_get_request(&config, &token_path, "/v1/context")
+            .expect("有效配置和 Token 应构造请求");
+        assert_eq!(request.method(), "GET");
+        assert_eq!(
+            request.header("Authorization"),
+            Some("Bearer wr-local-0123456789abcdef0123456789abcdef")
+        );
+        assert_eq!(request.url(), "http://127.0.0.1:47831/v1/context");
+        assert!(!request.url().contains(TEST_LOCALHOST_API_TOKEN));
+        std::fs::remove_dir_all(dir).expect("应清理临时目录");
+    }
+
+    #[test]
+    fn localhost委托请求每次构造应重新读取token() {
+        let dir = unique_temp_dir("mcp-token-rotation");
+        std::fs::create_dir_all(&dir).expect("应创建临时目录");
+        let token_path = dir.join("localhost_api_token.txt");
+        let mut config = AppConfig::default();
+        config.localhost_api_enabled = true;
+
+        std::fs::write(&token_path, TEST_LOCALHOST_API_TOKEN).expect("应写入初始 Token");
+        let first = build_localhost_get_request(&config, &token_path, "/v1/context")
+            .expect("初始 Token 应构造请求");
+        assert_eq!(
+            first.header("Authorization"),
+            Some("Bearer wr-local-0123456789abcdef0123456789abcdef")
+        );
+
+        std::fs::write(&token_path, ROTATED_LOCALHOST_API_TOKEN).expect("应轮换 Token");
+        let second = build_localhost_get_request(&config, &token_path, "/v1/context")
+            .expect("轮换后的 Token 应构造请求");
+        assert_eq!(
+            second.header("Authorization"),
+            Some("Bearer wr-local-fedcba9876543210fedcba9876543210")
+        );
+        std::fs::remove_dir_all(dir).expect("应清理临时目录");
+    }
+
+    #[test]
+    fn localhost委托缺失或空token时不应构造请求() {
+        let dir = unique_temp_dir("mcp-missing-token");
+        std::fs::create_dir_all(&dir).expect("应创建临时目录");
+        let token_path = dir.join("localhost_api_token.txt");
+        let mut config = AppConfig::default();
+        config.localhost_api_enabled = true;
+
+        assert!(build_localhost_get_request(&config, &token_path, "/v1/context").is_none());
+
+        std::fs::write(&token_path, " \n ").expect("应写入空 Token");
+        assert!(build_localhost_get_request(&config, &token_path, "/v1/context").is_none());
+        std::fs::remove_dir_all(dir).expect("应清理临时目录");
+    }
 
     #[test]
     fn tools_list_应包含已注册的12个工具() {
