@@ -67,6 +67,16 @@ struct ExportReportRequest {
     export_dir: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct GenerateReportRequest {
+    #[serde(default)]
+    date: String,
+    #[serde(default)]
+    force: Option<bool>,
+    #[serde(default)]
+    locale: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RequestAuthMode {
     None,
@@ -590,9 +600,13 @@ fn handle_current_context(state: &Arc<Mutex<AppState>>) -> Result<HttpResponse> 
 
     let recent_apps: Vec<String> = {
         let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-        let activities = s.database.get_timeline(&today, Some(10), None).unwrap_or_default();
+        let activities = s
+            .database
+            .get_timeline(&today, Some(10), None)
+            .unwrap_or_default();
         let (ignored_apps, excluded_domains) = commands::collect_privacy_filters(&s);
-        let activities = commands::filter_activities_by_privacy(activities, &ignored_apps, &excluded_domains);
+        let activities =
+            commands::filter_activities_by_privacy(activities, &ignored_apps, &excluded_domains);
         let mut seen = std::collections::HashSet::new();
         activities
             .iter()
@@ -608,7 +622,11 @@ fn handle_current_context(state: &Arc<Mutex<AppState>>) -> Result<HttpResponse> 
     };
 
     let (primary_app, window_title, browser_url) = match &active_window {
-        Some(w) => (w.app_name.clone(), w.window_title.clone(), w.browser_url.clone()),
+        Some(w) => (
+            w.app_name.clone(),
+            w.window_title.clone(),
+            w.browser_url.clone(),
+        ),
         None => (String::new(), String::new(), None),
     };
 
@@ -622,6 +640,47 @@ fn handle_current_context(state: &Arc<Mutex<AppState>>) -> Result<HttpResponse> 
             "is_live": active_window.is_some(),
         }),
     ))
+}
+
+fn parse_generate_report_params(
+    request: &ParsedRequest,
+) -> Result<(String, Option<bool>, Option<String>)> {
+    let (date, force, locale) = match request.method.as_str() {
+        "GET" => (
+            request.query.get("date").cloned().unwrap_or_default(),
+            request
+                .query
+                .get("force")
+                .and_then(|value| value.parse().ok()),
+            request.query.get("locale").cloned(),
+        ),
+        "POST" => {
+            let body = parse_json_body::<GenerateReportRequest>(request)?;
+            (body.date, body.force, body.locale)
+        }
+        _ => {
+            return Err(AppError::Config(
+                "日报生成接口仅支持 GET 或 POST".to_string(),
+            ))
+        }
+    };
+
+    if date.trim().is_empty() {
+        Err(AppError::Config("date 参数不能为空".to_string()))
+    } else {
+        Ok((date, force, locale))
+    }
+}
+
+async fn handle_generate_report_request(
+    request: &ParsedRequest,
+    app: &AppHandle,
+    state: &Arc<Mutex<AppState>>,
+) -> Result<HttpResponse> {
+    let (date, force, locale) = parse_generate_report_params(request)?;
+    commands::generate_report_inner(date, force, locale, app, state)
+        .await
+        .map(|content| HttpResponse::json(200, &serde_json::json!({ "content": content })))
 }
 
 async fn route_request(
@@ -642,19 +701,8 @@ async fn route_request(
     }
 
     let result = match (request.method.as_str(), request.path.as_str()) {
-        ("GET", "/v1/reports/generate") => {
-            let date = request.query.get("date").cloned().unwrap_or_default();
-            let force = request.query.get("force").and_then(|v| v.parse().ok());
-            let locale = request.query.get("locale").cloned();
-            if date.is_empty() {
-                Err(AppError::Config("date 参数不能为空".to_string()))
-            } else {
-                commands::generate_report_inner(date, force, locale, app, state)
-                    .await
-                    .map(|content| {
-                        HttpResponse::json(200, &serde_json::json!({ "content": content }))
-                    })
-            }
+        ("GET" | "POST", "/v1/reports/generate") => {
+            handle_generate_report_request(&request, app, state).await
         }
         ("POST", "/v1/reports/export-markdown") => parse_json_body::<ExportReportRequest>(&request)
             .and_then(|body| {
@@ -1014,9 +1062,80 @@ fn authorize_request(request: &ParsedRequest, state: &Arc<Mutex<AppState>>) -> R
 #[cfg(test)]
 mod tests {
     use super::{
-        effective_api_host, extract_bearer_token, mask_localhost_api_token, request_auth_mode,
-        RequestAuthMode,
+        effective_api_host, extract_bearer_token, mask_localhost_api_token,
+        parse_generate_report_params, request_auth_mode, ParsedRequest, RequestAuthMode,
     };
+    use std::collections::HashMap;
+
+    fn parsed_request(
+        method: &str,
+        query: &[(&str, &str)],
+        body: serde_json::Value,
+    ) -> ParsedRequest {
+        ParsedRequest {
+            method: method.to_string(),
+            path: "/v1/reports/generate".to_string(),
+            query: query
+                .iter()
+                .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+                .collect(),
+            headers: HashMap::new(),
+            body: serde_json::to_vec(&body).expect("请求体应可序列化"),
+        }
+    }
+
+    #[test]
+    fn post日报生成参数应从json请求体解析() {
+        let request = parsed_request(
+            "POST",
+            &[],
+            serde_json::json!({ "date": "2026-07-21", "force": true, "locale": "zh-CN" }),
+        );
+
+        assert_eq!(
+            parse_generate_report_params(&request).expect("POST 参数应合法"),
+            (
+                "2026-07-21".to_string(),
+                Some(true),
+                Some("zh-CN".to_string())
+            )
+        );
+    }
+
+    #[test]
+    fn post日报生成参数可省略force和locale() {
+        let request = parsed_request("POST", &[], serde_json::json!({ "date": "2026-07-21" }));
+
+        assert_eq!(
+            parse_generate_report_params(&request).expect("可选参数应允许省略"),
+            ("2026-07-21".to_string(), None, None)
+        );
+    }
+
+    #[test]
+    fn get日报生成参数应继续从query解析() {
+        let request = parsed_request(
+            "GET",
+            &[("date", "2026-07-21"), ("force", "false"), ("locale", "en")],
+            serde_json::Value::Null,
+        );
+
+        assert_eq!(
+            parse_generate_report_params(&request).expect("GET 参数应保持兼容"),
+            (
+                "2026-07-21".to_string(),
+                Some(false),
+                Some("en".to_string())
+            )
+        );
+    }
+
+    #[test]
+    fn 日报生成参数缺少日期时应返回配置错误() {
+        let request = parsed_request("POST", &[], serde_json::json!({ "force": true }));
+        let error = parse_generate_report_params(&request).expect_err("缺少日期必须失败");
+        assert!(error.to_string().contains("date 参数不能为空"));
+    }
 
     #[test]
     fn 监听地址应允许局域网与全部网卡绑定() {

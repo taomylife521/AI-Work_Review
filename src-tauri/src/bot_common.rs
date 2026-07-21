@@ -242,6 +242,19 @@ pub fn normalize_report_for_chat(content: &str) -> String {
     lines.join("\n")
 }
 
+fn build_generate_report_request(
+    client: &Client,
+    device: &DeviceEndpoint,
+    date: &str,
+) -> reqwest::RequestBuilder {
+    let url = format!("{}/v1/reports/generate", device.url.trim_end_matches('/'));
+    client
+        .post(url)
+        .bearer_auth(&device.token)
+        .json(&serde_json::json!({ "date": date }))
+        .timeout(Duration::from_secs(120))
+}
+
 pub async fn handle_cmd(client: &Client, devices: &[DeviceEndpoint], text: &str) -> Option<String> {
     let parts: Vec<&str> = text.split_whitespace().collect();
     let cmd = normalize_command(parts.first().copied().unwrap_or(""));
@@ -378,11 +391,7 @@ pub async fn handle_cmd(client: &Client, devices: &[DeviceEndpoint], text: &str)
                 Some(d) => d,
                 None => return Some(no_available_device_reply()),
             };
-            let url = format!("{}/v1/reports/generate?token={}", device.url, device.token);
-            match client
-                .post(&url)
-                .json(&serde_json::json!({"date": date}))
-                .timeout(Duration::from_secs(120))
+            match build_generate_report_request(client, device, &date)
                 .send()
                 .await
             {
@@ -433,6 +442,42 @@ pub async fn handle_cmd(client: &Client, devices: &[DeviceEndpoint], text: &str)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bot生成日报请求应使用post_json和bearer鉴权() {
+        let client = dummy_client();
+        let device = DeviceEndpoint {
+            name: "本机".to_string(),
+            url: "http://127.0.0.1:47831/".to_string(),
+            token: "wr-local-secret".to_string(),
+            is_local: true,
+        };
+
+        let request = build_generate_report_request(&client, &device, "2026-07-21")
+            .build()
+            .expect("请求应可构造");
+
+        assert_eq!(request.method(), reqwest::Method::POST);
+        assert_eq!(
+            request.url().as_str(),
+            "http://127.0.0.1:47831/v1/reports/generate"
+        );
+        assert!(!request.url().as_str().contains("wr-local-secret"));
+        assert_eq!(
+            request
+                .headers()
+                .get(reqwest::header::AUTHORIZATION)
+                .and_then(|value| value.to_str().ok()),
+            Some("Bearer wr-local-secret")
+        );
+        let body = request
+            .body()
+            .and_then(|body| body.as_bytes())
+            .expect("JSON Body 应存在");
+        let payload: serde_json::Value = serde_json::from_slice(body).expect("JSON Body 应合法");
+        assert_eq!(payload, serde_json::json!({ "date": "2026-07-21" }));
+        assert_eq!(request.timeout(), Some(&Duration::from_secs(120)));
+    }
 
     #[test]
     fn 命令应支持斜杠和机器人后缀() {
