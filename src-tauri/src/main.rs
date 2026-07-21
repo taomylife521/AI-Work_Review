@@ -38,7 +38,7 @@ mod telegram_bot;
 mod wecom_bot;
 mod work_intelligence;
 
-use config::{AppConfig, AvatarFollowupItem};
+use config::{config_backup_path, AppConfig, AvatarFollowupItem, ConfigLoadStatus};
 use database::Database;
 use once_cell::sync::OnceCell;
 use privacy::PrivacyFilter;
@@ -412,6 +412,7 @@ fn build_tray_icon(app: &tauri::App) -> tauri::image::Image<'static> {
 /// 应用状态
 pub struct AppState {
     pub config: AppConfig,
+    pub config_load_status: ConfigLoadStatus,
     pub database: Database,
     pub privacy_filter: PrivacyFilter,
     pub screenshot_service: ScreenshotService,
@@ -485,6 +486,37 @@ fn should_request_screen_capture_permission(
     already_prompted: bool,
 ) -> bool {
     !has_screen_capture_permission && !already_prompted
+}
+
+fn should_initialize_startup_permissions(status: ConfigLoadStatus) -> bool {
+    !status.requires_fail_safe()
+}
+
+fn should_run_startup_cleanup(status: ConfigLoadStatus) -> bool {
+    !status.requires_fail_safe()
+}
+
+fn should_initialize_avatar_input(status: ConfigLoadStatus) -> bool {
+    !status.requires_fail_safe()
+}
+
+fn should_run_duplicate_cleanup(status: ConfigLoadStatus) -> bool {
+    !status.requires_fail_safe()
+}
+
+fn describe_config_file_issue(path: &Path, error: Option<&str>) -> String {
+    match error {
+        Some(error) => format!("{} 读取或解析失败: {error}", path.display()),
+        None => format!("{} 不存在", path.display()),
+    }
+}
+
+fn initial_recording_state(status: ConfigLoadStatus) -> (bool, bool) {
+    if status.requires_fail_safe() {
+        (false, true)
+    } else {
+        (true, false)
+    }
 }
 
 struct WindowsSystemDialogRule {
@@ -3320,17 +3352,43 @@ async fn main() {
 
     // 加载配置
     let config_path = data_dir.join("config.json");
+    let load_result = AppConfig::load_with_recovery(&config_path);
+    let config_load_status = load_result.status;
+    let backup_path = config_backup_path(&config_path);
+    match config_load_status {
+        ConfigLoadStatus::Loaded => {}
+        ConfigLoadStatus::Missing => {
+            log::info!(
+                "主配置与备份均不存在，按首次启动使用默认配置。主配置: {}; 备份配置: {}",
+                config_path.display(),
+                backup_path.display()
+            );
+        }
+        ConfigLoadStatus::RecoveredFromBackup => {
+            log::warn!(
+                "主配置不可用，已从备份 {} 恢复到内存；为保留现场，不会自动覆盖主配置。主配置: {}",
+                backup_path.display(),
+                describe_config_file_issue(&config_path, load_result.primary_error.as_deref())
+            );
+        }
+        ConfigLoadStatus::Corrupted => {
+            log::error!(
+                "主配置与备份均不可用，已使用关闭采集、截图和网络服务的故障安全配置。主配置: {}; 备份配置: {}",
+                describe_config_file_issue(&config_path, load_result.primary_error.as_deref()),
+                describe_config_file_issue(&backup_path, load_result.backup_error.as_deref())
+            );
+        }
+    }
     #[allow(unused_mut)]
-    let mut config = AppConfig::load(&config_path).unwrap_or_else(|e| {
-        log::warn!("加载配置失败，使用默认配置: {e}");
-        AppConfig::default()
-    });
+    let mut config = load_result.config;
 
     // 迁移旧版 excluded_apps → app_rules
     if config.privacy.migrate_legacy_excluded_apps() {
         log::info!("已迁移旧版 excluded_apps 到 app_rules");
-        if let Err(e) = config.save(&config_path) {
-            log::warn!("保存迁移后的配置失败: {e}");
+        if config_load_status.allows_automatic_save() {
+            if let Err(e) = config.save(&config_path) {
+                log::warn!("保存迁移后的配置失败: {e}");
+            }
         }
     }
 
@@ -3363,53 +3421,61 @@ async fn main() {
             config.macos_screen_capture_permission_prompted = false;
         }
         config.last_app_version = Some(current_version);
-        if let Err(e) = config.save(&config_path) {
-            log::warn!("保存版本信息失败: {e}");
+        if config_load_status.allows_automatic_save() {
+            if let Err(e) = config.save(&config_path) {
+                log::warn!("保存版本信息失败: {e}");
+            }
         }
     }
 
     // macOS: 启动时检查并请求必要的系统权限
     #[cfg(target_os = "macos")]
     {
-        // 1. 屏幕录制权限（截图功能必需）
-        let has_screen_capture_permission = screenshot::has_screen_capture_permission();
-        let already_prompted = config.macos_screen_capture_permission_prompted;
-        if should_request_screen_capture_permission(has_screen_capture_permission, already_prompted)
-        {
-            log::warn!("⚠️  屏幕录制权限未授权，正在请求...");
-            log::warn!(
-                "   请在「系统设置 → 隐私与安全性 → 屏幕录制」中授权 Work Review，然后重启应用"
-            );
-            screenshot::request_screen_capture_permission();
-        } else if !has_screen_capture_permission {
-            log::warn!("⚠️  屏幕录制权限仍未授权，跳过重复请求，请在系统设置中确认后重启应用");
-        } else {
-            log::info!("✅ 屏幕录制权限已授权");
-        }
-        config.macos_screen_capture_permission_prompted = !has_screen_capture_permission;
-        if config.macos_screen_capture_permission_prompted != already_prompted {
-            if let Err(e) = config.save(&config_path) {
-                log::warn!("保存 macOS 录屏权限提示状态失败: {e}");
+        if should_initialize_startup_permissions(config_load_status) {
+            // 1. 屏幕录制权限（截图功能必需）
+            let has_screen_capture_permission = screenshot::has_screen_capture_permission();
+            let already_prompted = config.macos_screen_capture_permission_prompted;
+            if should_request_screen_capture_permission(
+                has_screen_capture_permission,
+                already_prompted,
+            ) {
+                log::warn!("⚠️  屏幕录制权限未授权，正在请求...");
+                log::warn!(
+                    "   请在「系统设置 → 隐私与安全性 → 屏幕录制」中授权 Work Review，然后重启应用"
+                );
+                screenshot::request_screen_capture_permission();
+            } else if !has_screen_capture_permission {
+                log::warn!("⚠️  屏幕录制权限仍未授权，跳过重复请求，请在系统设置中确认后重启应用");
+            } else {
+                log::info!("✅ 屏幕录制权限已授权");
             }
-        }
+            config.macos_screen_capture_permission_prompted = !has_screen_capture_permission;
+            if config.macos_screen_capture_permission_prompted != already_prompted
+                && config_load_status.allows_automatic_save()
+            {
+                if let Err(e) = config.save(&config_path) {
+                    log::warn!("保存 macOS 录屏权限提示状态失败: {e}");
+                }
+            }
 
-        // 2. 辅助功能权限（读取窗口标题、浏览器 URL 必需）
-        if !screenshot::has_accessibility_permission(false) {
-            log::warn!("⚠️  辅助功能权限未授权，正在请求...");
-            log::warn!("   请在「系统设置 → 隐私与安全性 → 辅助功能」中授权 Work Review");
-            // prompt=true 会弹出系统引导对话框
-            screenshot::has_accessibility_permission(true);
-        } else {
-            log::info!("✅ 辅助功能权限已授权");
-        }
+            // 2. 辅助功能权限（读取窗口标题、浏览器 URL 必需）
+            if !screenshot::has_accessibility_permission(false) {
+                log::warn!("⚠️  辅助功能权限未授权，正在请求...");
+                log::warn!("   请在「系统设置 → 隐私与安全性 → 辅助功能」中授权 Work Review");
+                // prompt=true 会弹出系统引导对话框
+                screenshot::has_accessibility_permission(true);
+            } else {
+                log::info!("✅ 辅助功能权限已授权");
+            }
 
-        // 3. 输入监控权限（桌宠键鼠联动必需）
-        if config.avatar_enabled && !screenshot::has_input_monitoring_permission() {
-            log::warn!("⚠️  输入监控权限未授权，正在请求...");
-            log::warn!("   请在「系统设置 → 隐私与安全性 → 输入监控」中授权 Work Review");
-            screenshot::request_input_monitoring_permission();
-        } else if config.avatar_enabled {
-            log::info!("✅ 输入监控权限已授权");
+            // 3. 输入监控权限（桌宠键鼠联动必需）
+            if config.avatar_enabled && !screenshot::has_input_monitoring_permission() {
+                log::warn!("⚠️  输入监控权限未授权，正在请求...");
+                log::warn!("   请在「系统设置 → 隐私与安全性 → 输入监控」中授权 Work Review");
+                screenshot::request_input_monitoring_permission();
+            } else if config.avatar_enabled {
+                log::info!("✅ 输入监控权限已授权");
+            }
         }
     }
 
@@ -3419,22 +3485,29 @@ async fn main() {
     let initial_avatar_preset = config.avatar_preset.clone();
     let initial_avatar_persona = config.avatar_persona.clone();
 
-    // 启动时执行一次清理
-    if let Err(e) = storage_manager.cleanup() {
-        log::warn!("启动时清理存储失败: {e}");
+    // 配置损坏时使用默认存储策略会误删历史数据，因此故障安全启动必须跳过清理。
+    if should_run_startup_cleanup(config_load_status) {
+        if let Err(e) = storage_manager.cleanup() {
+            log::warn!("启动时清理存储失败: {e}");
+        }
+    } else {
+        log::warn!("配置损坏，已跳过启动存储清理以保护历史数据");
     }
+
+    let (is_recording, is_paused) = initial_recording_state(config_load_status);
 
     // 创建应用状态，使用 Arc 包装以便在多个地方共享
     let app_state = Arc::new(Mutex::new(AppState {
         config,
+        config_load_status,
         database,
         privacy_filter,
         screenshot_service,
         storage_manager,
         data_dir,
         config_path,
-        is_recording: true,
-        is_paused: false,
+        is_recording,
+        is_paused,
         avatar_state: avatar_engine::apply_avatar_visual_settings(
             avatar_engine::default_avatar_state(),
             initial_avatar_opacity,
@@ -3553,13 +3626,20 @@ async fn main() {
             let app_handle = app.handle().clone();
             let screenshot_app_handle = app.handle().clone();
 
-            let (avatar_enabled, avatar_scale, avatar_position, avatar_state) = {
+            let (
+                avatar_enabled,
+                avatar_scale,
+                avatar_position,
+                avatar_state,
+                config_load_status,
+            ) = {
                 let state_guard = state.inner().lock().unwrap_or_else(|e| e.into_inner());
                 (
                     state_guard.config.avatar_enabled,
                     state_guard.config.avatar_scale,
                     state_guard.config.avatar_x.zip(state_guard.config.avatar_y),
                     state_guard.avatar_state.clone(),
+                    state_guard.config_load_status,
                 )
             };
 
@@ -3575,13 +3655,20 @@ async fn main() {
                 avatar_engine::emit_avatar_state(app.handle(), &avatar_state);
             }
 
-            // 初始化智能穿透运行时 flag（从启动 config，供 input bridge 轮询无锁读）
-            if let Ok(s) = state.inner().lock() {
-                avatar_input::set_avatar_enabled_flag(s.config.avatar_enabled);
-                avatar_input::set_avatar_click_through_flag(s.config.avatar_click_through);
+            // 初始化智能穿透运行时 flag（从启动 config，供 input bridge 轮询无锁读）。
+            // 配置损坏时不得注册全局键鼠监听，以免故障安全启动仍采集输入事件。
+            if should_initialize_avatar_input(config_load_status) {
+                if let Ok(s) = state.inner().lock() {
+                    avatar_input::set_avatar_enabled_flag(s.config.avatar_enabled);
+                    avatar_input::set_avatar_click_through_flag(s.config.avatar_click_through);
+                }
+                avatar_input::start_avatar_input_monitor(app.handle());
+                avatar_input::spawn_avatar_input_bridge(app.handle().clone());
+            } else {
+                avatar_input::set_avatar_enabled_flag(false);
+                avatar_input::set_avatar_click_through_flag(false);
+                log::warn!("配置损坏，已跳过全局键鼠监听初始化");
             }
-            avatar_input::start_avatar_input_monitor(app.handle());
-            avatar_input::spawn_avatar_input_bridge(app.handle().clone());
 
             if let Err(e) = localhost_api::sync_localhost_api_runtime(app.handle(), state.inner()) {
                 log::warn!("初始化本地 API 失败: {e}");
@@ -3746,24 +3833,28 @@ async fn main() {
                 hourly_summary_task(state_clone2).await;
             });
 
-            // 启动时清理当天的重复记录
+            // 启动时清理当天的重复记录。配置损坏时保留数据库和截图现场，不执行删除。
             {
                 let state_guard = state.inner().lock().unwrap_or_else(|e| e.into_inner());
-                let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-                match state_guard.database.cleanup_duplicate_activities(&today) {
-                    Ok((deleted, paths)) => {
-                        if deleted > 0 {
-                            log::warn!("🧹 启动清理: 删除 {deleted} 条重复记录");
-                            // 删除对应的截图文件
-                            for p in paths {
-                                let path = state_guard.data_dir.join(&p);
-                                if path.exists() {
-                                    let _ = std::fs::remove_file(&path);
+                if should_run_duplicate_cleanup(state_guard.config_load_status) {
+                    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+                    match state_guard.database.cleanup_duplicate_activities(&today) {
+                        Ok((deleted, paths)) => {
+                            if deleted > 0 {
+                                log::warn!("🧹 启动清理: 删除 {deleted} 条重复记录");
+                                // 删除对应的截图文件
+                                for p in paths {
+                                    let path = state_guard.data_dir.join(&p);
+                                    if path.exists() {
+                                        let _ = std::fs::remove_file(&path);
+                                    }
                                 }
                             }
                         }
+                        Err(e) => log::error!("清理重复记录失败: {e}"),
                     }
-                    Err(e) => log::error!("清理重复记录失败: {e}"),
+                } else {
+                    log::warn!("配置损坏，已跳过重复活动与截图清理以保护历史数据");
                 }
 
                 // decorations 配置由 tauri.conf.json 控制，用户可通过设置中的开关动态修改
@@ -3929,24 +4020,28 @@ mod tests {
         advance_break_reminder, avatar_activity_decision, avatar_monitor_poll_interval_ms,
         avatar_monitor_poll_interval_ms_for_platform, avatar_proactive_ai_should_run,
         avatar_transition_decision, browser_change_capture_min_interval_ms,
-        duplicate_instance_should_stay_silent, effective_dock_visibility,
-        launch_args_contain_autostart, main_window_close_behavior, monitoring_poll_interval_ms,
+        describe_config_file_issue, duplicate_instance_should_stay_silent,
+        effective_dock_visibility, initial_recording_state, launch_args_contain_autostart,
+        main_window_close_behavior, monitoring_poll_interval_ms,
         monitoring_poll_interval_ms_for_platform, persist_previous_activity_backfill,
         previous_app_backfill_duration, record_avatar_window_switch, recording_loop_decision,
         resolve_activity_classification, reusable_cached_active_window,
         screen_lock_check_interval_ms_for_platform, should_confirm_idle,
         should_emit_avatar_backlog_nudge, should_hide_main_window_on_setup,
+        should_initialize_avatar_input, should_initialize_startup_permissions,
         should_persist_merge_update, should_prevent_exit,
         should_probe_browser_url_before_change_detection, should_request_screen_capture_permission,
-        should_skip_system_window, tray_recording_toggle_action, tray_recording_toggle_label,
-        AvatarNudgeRuntime, BreakReminderRuntime, BreakReminderSignal, MainWindowCloseBehavior,
-        RecordingToggleAction,
+        should_run_duplicate_cleanup, should_run_startup_cleanup, should_skip_system_window,
+        tray_recording_toggle_action,
+        tray_recording_toggle_label, AvatarNudgeRuntime, BreakReminderRuntime, BreakReminderSignal,
+        MainWindowCloseBehavior, RecordingToggleAction,
     };
     use crate::avatar_engine::{
         apply_avatar_visual_settings, default_avatar_state, derive_avatar_state,
     };
     use crate::config::{
-        AiProvider, AppConfig, AvatarFollowupItem, ModelConfig, WebsiteSemanticRule,
+        AiProvider, AppConfig, AvatarFollowupItem, ConfigLoadStatus, ModelConfig,
+        WebsiteSemanticRule,
     };
     use crate::database::Database;
     use crate::monitor::ActiveWindow;
@@ -3960,6 +4055,32 @@ mod tests {
             .unwrap_or_default()
             .as_nanos();
         std::env::temp_dir().join(format!("work-review-tauri-{name}-{unique}.db"))
+    }
+
+    #[test]
+    fn 配置损坏时初始录制必须关闭并暂停() {
+        assert_eq!(
+            initial_recording_state(ConfigLoadStatus::Corrupted),
+            (false, true)
+        );
+    }
+
+    #[test]
+    fn 正常首次启动和备份恢复的录制状态应按恢复策略区分() {
+        assert_eq!(
+            initial_recording_state(ConfigLoadStatus::Loaded),
+            (true, false)
+        );
+        assert_eq!(
+            initial_recording_state(ConfigLoadStatus::Missing),
+            (true, false)
+        );
+        assert_eq!(
+            initial_recording_state(ConfigLoadStatus::RecoveredFromBackup),
+            (true, false)
+        );
+        assert!(!ConfigLoadStatus::RecoveredFromBackup.allows_automatic_save());
+        assert!(!ConfigLoadStatus::Corrupted.allows_automatic_save());
     }
 
     #[test]
@@ -4605,6 +4726,63 @@ mod tests {
         assert!(should_request_screen_capture_permission(false, false));
         assert!(!should_request_screen_capture_permission(false, true));
         assert!(!should_request_screen_capture_permission(true, false));
+    }
+
+    #[test]
+    fn 配置损坏时应跳过启动权限初始化() {
+        assert!(!should_initialize_startup_permissions(
+            ConfigLoadStatus::Corrupted
+        ));
+        assert!(should_initialize_startup_permissions(
+            ConfigLoadStatus::Loaded
+        ));
+        assert!(should_initialize_startup_permissions(
+            ConfigLoadStatus::Missing
+        ));
+        assert!(should_initialize_startup_permissions(
+            ConfigLoadStatus::RecoveredFromBackup
+        ));
+    }
+
+    #[test]
+    fn 配置损坏时应跳过启动存储清理() {
+        assert!(!should_run_startup_cleanup(ConfigLoadStatus::Corrupted));
+        assert!(should_run_startup_cleanup(ConfigLoadStatus::Loaded));
+        assert!(should_run_startup_cleanup(ConfigLoadStatus::Missing));
+        assert!(should_run_startup_cleanup(
+            ConfigLoadStatus::RecoveredFromBackup
+        ));
+    }
+
+    #[test]
+    fn 配置损坏时应跳过键鼠采集和重复数据清理() {
+        assert!(!should_initialize_avatar_input(
+            ConfigLoadStatus::Corrupted
+        ));
+        assert!(!should_run_duplicate_cleanup(ConfigLoadStatus::Corrupted));
+
+        for status in [
+            ConfigLoadStatus::Loaded,
+            ConfigLoadStatus::Missing,
+            ConfigLoadStatus::RecoveredFromBackup,
+        ] {
+            assert!(should_initialize_avatar_input(status));
+            assert!(should_run_duplicate_cleanup(status));
+        }
+    }
+
+    #[test]
+    fn 配置文件问题描述应区分不存在与读取解析失败() {
+        let path = std::path::Path::new("/tmp/work-review-config.json");
+
+        assert_eq!(
+            describe_config_file_issue(path, None),
+            "/tmp/work-review-config.json 不存在"
+        );
+        assert_eq!(
+            describe_config_file_issue(path, Some("JSON 语法错误")),
+            "/tmp/work-review-config.json 读取或解析失败: JSON 语法错误"
+        );
     }
 
     #[test]

@@ -1,6 +1,9 @@
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::ffi::OsString;
+use std::fs::{File, OpenOptions};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 
 fn default_true() -> bool {
     true
@@ -52,7 +55,9 @@ impl AiProvider {
     ///
     /// 运行时显示由前端 `providerDisplayNames`（Ask.svelte）按 locale 提供，
     /// 这里只有中文一种，已不再作为运行时显示来源。
-    #[deprecated(note = "运行时显示请用前端 providerDisplayNames；此处仅保留用于 default_profile_name 的初始命名")]
+    #[deprecated(
+        note = "运行时显示请用前端 providerDisplayNames；此处仅保留用于 default_profile_name 的初始命名"
+    )]
     pub fn display_name(&self) -> &'static str {
         match self {
             AiProvider::Ollama => "Ollama (本地)",
@@ -609,6 +614,205 @@ fn normalize_localhost_api_port(port: u16) -> u16 {
     }
 }
 
+/// 配置加载状态，用于区分首次启动、正常加载和故障恢复。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigLoadStatus {
+    Loaded,
+    Missing,
+    RecoveredFromBackup,
+    Corrupted,
+}
+
+impl ConfigLoadStatus {
+    /// 当前加载状态是否允许启动流程自动写回配置。
+    pub fn allows_automatic_save(self) -> bool {
+        matches!(self, Self::Loaded | Self::Missing)
+    }
+
+    /// 当前加载状态是否必须以故障安全模式启动。
+    pub fn requires_fail_safe(self) -> bool {
+        matches!(self, Self::Corrupted)
+    }
+}
+
+/// 返回在完整配置文件名后追加 `.bak` 的备份路径。
+pub fn config_backup_path(path: &Path) -> PathBuf {
+    let mut backup_name = path.as_os_str().to_os_string();
+    backup_name.push(".bak");
+    PathBuf::from(backup_name)
+}
+
+fn config_parent(path: &Path) -> &Path {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+}
+
+fn unique_config_temp_path(target: &Path) -> io::Result<PathBuf> {
+    let file_name = target
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "配置路径必须包含文件名"))?;
+    let mut temp_name = OsString::from(".");
+    temp_name.push(file_name);
+    temp_name.push(".tmp-");
+    temp_name.push(uuid::Uuid::new_v4().simple().to_string());
+    Ok(config_parent(target).join(temp_name))
+}
+
+fn open_secure_temp_file(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
+struct PendingConfigFile {
+    path: PathBuf,
+    pending: bool,
+}
+
+impl PendingConfigFile {
+    fn create(target: &Path) -> io::Result<(Self, File)> {
+        let path = unique_config_temp_path(target)?;
+        let file = open_secure_temp_file(&path)?;
+        Ok((
+            Self {
+                path,
+                pending: true,
+            },
+            file,
+        ))
+    }
+
+    fn replace(&mut self, target: &Path) -> io::Result<()> {
+        atomic_replace(&self.path, target)?;
+        self.pending = false;
+        Ok(())
+    }
+}
+
+impl Drop for PendingConfigFile {
+    fn drop(&mut self) {
+        if self.pending {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+fn update_config_backup_with_sync<F>(primary_path: &Path, sync_parent: F) -> io::Result<()>
+where
+    F: FnOnce(&Path) -> io::Result<()>,
+{
+    let mut primary_file = match File::open(primary_path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let backup_path = config_backup_path(primary_path);
+    let (mut pending_backup, mut backup_file) = PendingConfigFile::create(&backup_path)?;
+    io::copy(&mut primary_file, &mut backup_file)?;
+    backup_file.flush()?;
+    backup_file.sync_all()?;
+    drop(backup_file);
+    commit_pending_config(
+        &mut pending_backup,
+        &backup_path,
+        config_parent(primary_path),
+        sync_parent,
+    )
+}
+
+fn update_config_backup(primary_path: &Path) -> io::Result<()> {
+    update_config_backup_with_sync(primary_path, sync_parent_directory)
+}
+
+#[cfg(unix)]
+fn atomic_replace(source: &Path, target: &Path) -> io::Result<()> {
+    std::fs::rename(source, target)
+}
+
+#[cfg(windows)]
+fn atomic_replace(source: &Path, target: &Path) -> io::Result<()> {
+    use std::iter;
+    use std::os::windows::ffi::OsStrExt;
+
+    const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+
+    #[link(name = "Kernel32")]
+    extern "system" {
+        fn MoveFileExW(
+            existing_file_name: *const u16,
+            new_file_name: *const u16,
+            flags: u32,
+        ) -> i32;
+    }
+
+    let source_wide = source
+        .as_os_str()
+        .encode_wide()
+        .chain(iter::once(0))
+        .collect::<Vec<_>>();
+    let target_wide = target
+        .as_os_str()
+        .encode_wide()
+        .chain(iter::once(0))
+        .collect::<Vec<_>>();
+    let replaced = unsafe {
+        MoveFileExW(
+            source_wide.as_ptr(),
+            target_wide.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if replaced == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn atomic_replace(source: &Path, target: &Path) -> io::Result<()> {
+    std::fs::rename(source, target)
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(parent: &Path) -> io::Result<()> {
+    File::open(parent)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_parent_directory(_parent: &Path) -> io::Result<()> {
+    // Windows 原子替换已请求 MOVEFILE_WRITE_THROUGH；其他平台无通用目录句柄同步接口。
+    Ok(())
+}
+
+fn commit_pending_config<F>(
+    pending_config: &mut PendingConfigFile,
+    path: &Path,
+    parent: &Path,
+    sync_parent: F,
+) -> io::Result<()>
+where
+    F: FnOnce(&Path) -> io::Result<()>,
+{
+    pending_config.replace(path)?;
+    if let Err(error) = sync_parent(parent) {
+        // 原子替换是提交点；此后只能报告持久化告警，不能伪装成“保存未发生”。
+        log::warn!(
+            "配置已提交，但同步父目录 {} 失败: {error}",
+            parent.display()
+        );
+    }
+    Ok(())
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct NodeGatewayConfig {
     #[serde(default)]
@@ -906,6 +1110,21 @@ pub struct AppConfig {
     pub background_blur: u8,
 }
 
+/// 配置加载结果，保留恢复状态和主备文件错误信息。
+#[derive(Debug)]
+pub struct ConfigLoadResult {
+    pub config: AppConfig,
+    pub status: ConfigLoadStatus,
+    pub primary_error: Option<String>,
+    pub backup_error: Option<String>,
+}
+
+enum ConfigFileLoad {
+    Loaded(AppConfig),
+    Missing,
+    Invalid(String),
+}
+
 fn default_work_start() -> u8 {
     9
 }
@@ -1109,30 +1328,131 @@ impl AppConfig {
     /// 从文件加载配置
     pub fn load(path: &Path) -> Result<Self> {
         if path.exists() {
-            let content = std::fs::read_to_string(path)?;
-            let mut config: AppConfig = serde_json::from_str(&content)?;
-
-            config.normalize();
-
-            Ok(config)
+            Self::load_existing(path)
         } else {
             Ok(Self::default())
         }
     }
 
+    /// 加载配置并返回可供启动流程判定的状态。
+    pub fn load_with_recovery(path: &Path) -> ConfigLoadResult {
+        let backup_path = config_backup_path(path);
+        match Self::load_file(path) {
+            ConfigFileLoad::Loaded(config) => {
+                let backup_error = match Self::load_file(&backup_path) {
+                    ConfigFileLoad::Invalid(error) => Some(error),
+                    ConfigFileLoad::Loaded(_) | ConfigFileLoad::Missing => None,
+                };
+                ConfigLoadResult {
+                    config,
+                    status: ConfigLoadStatus::Loaded,
+                    primary_error: None,
+                    backup_error,
+                }
+            }
+            ConfigFileLoad::Missing => match Self::load_file(&backup_path) {
+                ConfigFileLoad::Loaded(config) => ConfigLoadResult {
+                    config,
+                    status: ConfigLoadStatus::RecoveredFromBackup,
+                    primary_error: None,
+                    backup_error: None,
+                },
+                ConfigFileLoad::Missing => ConfigLoadResult {
+                    config: Self::default(),
+                    status: ConfigLoadStatus::Missing,
+                    primary_error: None,
+                    backup_error: None,
+                },
+                ConfigFileLoad::Invalid(backup_error) => ConfigLoadResult {
+                    config: Self::fail_safe(),
+                    status: ConfigLoadStatus::Corrupted,
+                    primary_error: None,
+                    backup_error: Some(backup_error),
+                },
+            },
+            ConfigFileLoad::Invalid(primary_error) => match Self::load_file(&backup_path) {
+                ConfigFileLoad::Loaded(config) => ConfigLoadResult {
+                    config,
+                    status: ConfigLoadStatus::RecoveredFromBackup,
+                    primary_error: Some(primary_error),
+                    backup_error: None,
+                },
+                ConfigFileLoad::Missing => ConfigLoadResult {
+                    config: Self::fail_safe(),
+                    status: ConfigLoadStatus::Corrupted,
+                    primary_error: Some(primary_error),
+                    backup_error: None,
+                },
+                ConfigFileLoad::Invalid(backup_error) => ConfigLoadResult {
+                    config: Self::fail_safe(),
+                    status: ConfigLoadStatus::Corrupted,
+                    primary_error: Some(primary_error),
+                    backup_error: Some(backup_error),
+                },
+            },
+        }
+    }
+
+    fn load_file(path: &Path) -> ConfigFileLoad {
+        let content = match std::fs::read_to_string(path) {
+            Ok(content) => content,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return ConfigFileLoad::Missing;
+            }
+            Err(error) => {
+                return ConfigFileLoad::Invalid(format!(
+                    "读取配置文件 {} 失败: {error}",
+                    path.display()
+                ));
+            }
+        };
+
+        match serde_json::from_str::<AppConfig>(&content) {
+            Ok(mut config) => {
+                config.normalize();
+                ConfigFileLoad::Loaded(config)
+            }
+            Err(error) => {
+                ConfigFileLoad::Invalid(format!("解析配置文件 {} 失败: {error}", path.display()))
+            }
+        }
+    }
+
+    fn load_existing(path: &Path) -> Result<Self> {
+        let content = std::fs::read_to_string(path)?;
+        let mut config: AppConfig = serde_json::from_str(&content)?;
+        config.normalize();
+        Ok(config)
+    }
+
+    fn fail_safe() -> Self {
+        let mut config = Self::default();
+        config.storage.screenshots_enabled = false;
+        config.localhost_api_enabled = false;
+        config.telegram_bot_enabled = false;
+        config.feishu_bot_enabled = false;
+        config.wecom_bot_enabled = false;
+        config.dingtalk_bot_enabled = false;
+        config.mcp_server_enabled = false;
+        config.remote_storage.provider = RemoteStorageProvider::None;
+        config
+    }
+
     /// 保存配置到文件
     pub fn save(&self, path: &Path) -> Result<()> {
-        let content = serde_json::to_string_pretty(self)?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(path, &content)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let perms = std::fs::Permissions::from_mode(0o600);
-            std::fs::set_permissions(path, perms)?;
-        }
+        let content = serde_json::to_vec_pretty(self)?;
+        let parent = config_parent(path);
+        std::fs::create_dir_all(parent)?;
+
+        let (mut pending_config, mut config_file) = PendingConfigFile::create(path)?;
+        config_file.write_all(&content)?;
+        config_file.flush()?;
+        config_file.sync_all()?;
+        drop(config_file);
+
+        update_config_backup(path)?;
+
+        commit_pending_config(&mut pending_config, path, parent, sync_parent_directory)?;
         Ok(())
     }
 
@@ -1618,13 +1938,431 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_avatar_opacity, default_avatar_persona, default_avatar_preset,
-        default_avatar_scale, default_ui_visual_style, normalize_app_category_rules,
-        normalize_avatar_followups, normalize_avatar_opacity, normalize_avatar_persona,
-        normalize_avatar_preset, normalize_avatar_scale, normalize_ui_visual_style, AiProvider,
-        AppCategoryRule, AppConfig, AvatarFollowupItem, ScreenshotDisplayMode, WebsiteSemanticRule,
-        DEFAULT_LOCALHOST_API_PORT,
+        commit_pending_config, config_backup_path, default_avatar_opacity, default_avatar_persona,
+        default_avatar_preset, default_avatar_scale, default_ui_visual_style,
+        normalize_app_category_rules, normalize_avatar_followups, normalize_avatar_opacity,
+        normalize_avatar_persona, normalize_avatar_preset, normalize_avatar_scale,
+        normalize_ui_visual_style, update_config_backup_with_sync, AiProvider, AppCategoryRule,
+        AppConfig, AvatarFollowupItem, ConfigLoadStatus, PendingConfigFile, RemoteStorageProvider,
+        ScreenshotDisplayMode, WebsiteSemanticRule, DEFAULT_LOCALHOST_API_PORT,
     };
+    use std::io::{self, Write};
+    use std::path::PathBuf;
+
+    fn unique_temp_dir(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "work-review-config-{name}-{}",
+            uuid::Uuid::new_v4()
+        ))
+    }
+
+    #[test]
+    fn 配置文件不存在时应返回首次启动状态() {
+        let dir = unique_temp_dir("config-missing");
+
+        let result = AppConfig::load_with_recovery(&dir.join("config.json"));
+
+        assert_eq!(result.status, ConfigLoadStatus::Missing);
+        assert!(!result.status.requires_fail_safe());
+        assert!(result.status.allows_automatic_save());
+    }
+
+    #[test]
+    fn 合法主配置应返回正常加载状态() {
+        let dir = unique_temp_dir("config-loaded");
+        std::fs::create_dir_all(&dir).expect("应创建临时目录");
+        let path = dir.join("config.json");
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&AppConfig::default()).expect("配置应可序列化"),
+        )
+        .expect("应写入合法主配置");
+
+        let result = AppConfig::load_with_recovery(&path);
+
+        assert_eq!(result.status, ConfigLoadStatus::Loaded);
+        assert!(result.primary_error.is_none());
+        assert!(result.backup_error.is_none());
+        std::fs::remove_dir_all(dir).expect("应清理临时目录");
+    }
+
+    #[test]
+    fn 主配置有效但备份损坏时应保留正常加载状态并报告备份错误() {
+        let dir = unique_temp_dir("config-valid-primary-broken-backup");
+        std::fs::create_dir_all(&dir).expect("应创建临时目录");
+        let path = dir.join("config.json");
+        let backup_path = config_backup_path(&path);
+        let mut primary = AppConfig::default();
+        primary.locale = "en".to_string();
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&primary).expect("主配置应可序列化"),
+        )
+        .expect("应写入合法主配置");
+        std::fs::write(&backup_path, b"broken-backup").expect("应写入损坏备份");
+
+        let result = AppConfig::load_with_recovery(&path);
+
+        assert_eq!(result.status, ConfigLoadStatus::Loaded);
+        assert_eq!(result.config.locale, "en");
+        assert!(result.primary_error.is_none());
+        assert!(result.backup_error.is_some());
+        std::fs::remove_dir_all(dir).expect("应清理临时目录");
+    }
+
+    #[test]
+    fn 主配置缺失但备份有效时应从备份恢复() {
+        let dir = unique_temp_dir("config-missing-primary-valid-backup");
+        std::fs::create_dir_all(&dir).expect("应创建临时目录");
+        let path = dir.join("config.json");
+        let backup_path = config_backup_path(&path);
+        let mut backup = AppConfig::default();
+        backup.locale = "en".to_string();
+        std::fs::write(
+            &backup_path,
+            serde_json::to_vec(&backup).expect("备份配置应可序列化"),
+        )
+        .expect("应写入合法备份");
+
+        let result = AppConfig::load_with_recovery(&path);
+
+        assert_eq!(result.status, ConfigLoadStatus::RecoveredFromBackup);
+        assert_eq!(result.config.locale, "en");
+        assert!(result.primary_error.is_none());
+        assert!(result.backup_error.is_none());
+        assert!(!result.status.allows_automatic_save());
+        assert!(!path.exists());
+        std::fs::remove_dir_all(dir).expect("应清理临时目录");
+    }
+
+    #[test]
+    fn 主配置缺失且备份损坏时应进入故障安全状态() {
+        let dir = unique_temp_dir("config-missing-primary-broken-backup");
+        std::fs::create_dir_all(&dir).expect("应创建临时目录");
+        let path = dir.join("config.json");
+        let backup_path = config_backup_path(&path);
+        std::fs::write(&backup_path, b"broken-backup").expect("应写入损坏备份");
+
+        let result = AppConfig::load_with_recovery(&path);
+
+        assert_eq!(result.status, ConfigLoadStatus::Corrupted);
+        assert!(result.status.requires_fail_safe());
+        assert!(result.primary_error.is_none());
+        assert!(result.backup_error.is_some());
+        assert!(!result.config.storage.screenshots_enabled);
+        assert!(!path.exists());
+        assert_eq!(
+            std::fs::read_to_string(&backup_path).expect("应保留损坏备份"),
+            "broken-backup"
+        );
+        std::fs::remove_dir_all(dir).expect("应清理临时目录");
+    }
+
+    #[test]
+    fn 主配置损坏且备份缺失时应进入故障安全状态() {
+        let dir = unique_temp_dir("config-broken-primary-missing-backup");
+        std::fs::create_dir_all(&dir).expect("应创建临时目录");
+        let path = dir.join("config.json");
+        let backup_path = config_backup_path(&path);
+        std::fs::write(&path, b"broken-primary").expect("应写入损坏主配置");
+
+        let result = AppConfig::load_with_recovery(&path);
+
+        assert_eq!(result.status, ConfigLoadStatus::Corrupted);
+        assert!(result.status.requires_fail_safe());
+        assert!(result.primary_error.is_some());
+        assert!(result.backup_error.is_none());
+        assert!(!result.config.storage.screenshots_enabled);
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("应保留损坏主配置"),
+            "broken-primary"
+        );
+        assert!(!backup_path.exists());
+        std::fs::remove_dir_all(dir).expect("应清理临时目录");
+    }
+
+    #[test]
+    fn 备份路径应在完整文件名后追加bak() {
+        let path = PathBuf::from("/tmp/work-review/config.json");
+
+        assert_eq!(
+            config_backup_path(&path),
+            PathBuf::from("/tmp/work-review/config.json.bak")
+        );
+    }
+
+    #[test]
+    fn 主配置损坏时应从备份恢复且不覆盖主文件() {
+        let dir = unique_temp_dir("config-backup-recovery");
+        std::fs::create_dir_all(&dir).expect("应创建临时目录");
+        let path = dir.join("config.json");
+        let backup_path = config_backup_path(&path);
+        std::fs::write(&path, b"{ broken json").expect("应写入损坏主配置");
+        let mut backup = AppConfig::default();
+        backup.locale = "en".to_string();
+        std::fs::write(
+            &backup_path,
+            serde_json::to_vec(&backup).expect("备份配置应可序列化"),
+        )
+        .expect("应写入合法备份");
+
+        let result = AppConfig::load_with_recovery(&path);
+
+        assert_eq!(result.status, ConfigLoadStatus::RecoveredFromBackup);
+        assert_eq!(result.config.locale, "en");
+        assert!(result.primary_error.is_some());
+        assert!(result.backup_error.is_none());
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("应读取原主配置"),
+            "{ broken json"
+        );
+        assert!(!result.status.allows_automatic_save());
+        std::fs::remove_dir_all(dir).expect("应清理临时目录");
+    }
+
+    #[test]
+    fn 主配置与备份都损坏时应返回关闭采集和网络服务的安全配置() {
+        let dir = unique_temp_dir("config-fail-safe");
+        std::fs::create_dir_all(&dir).expect("应创建临时目录");
+        let path = dir.join("config.json");
+        let backup_path = config_backup_path(&path);
+        std::fs::write(&path, b"broken-primary").expect("应写入损坏主配置");
+        std::fs::write(&backup_path, b"broken-backup").expect("应写入损坏备份");
+
+        let result = AppConfig::load_with_recovery(&path);
+
+        assert_eq!(result.status, ConfigLoadStatus::Corrupted);
+        assert!(result.status.requires_fail_safe());
+        assert!(!result.status.allows_automatic_save());
+        assert!(result.primary_error.is_some());
+        assert!(result.backup_error.is_some());
+        assert!(!result.config.storage.screenshots_enabled);
+        assert!(!result.config.localhost_api_enabled);
+        assert!(!result.config.telegram_bot_enabled);
+        assert!(!result.config.feishu_bot_enabled);
+        assert!(!result.config.wecom_bot_enabled);
+        assert!(!result.config.dingtalk_bot_enabled);
+        assert!(!result.config.mcp_server_enabled);
+        assert_eq!(
+            result.config.remote_storage.provider,
+            RemoteStorageProvider::None
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("应读取原主配置"),
+            "broken-primary"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&backup_path).expect("应读取原备份"),
+            "broken-backup"
+        );
+        std::fs::remove_dir_all(dir).expect("应清理临时目录");
+    }
+
+    #[test]
+    fn 覆盖保存应生成可解析备份并写入新配置() {
+        let dir = unique_temp_dir("config-atomic-save");
+        let path = dir.join("config.json");
+        let mut old = AppConfig::default();
+        old.locale = "en".to_string();
+        old.save(&path).expect("首次保存应成功");
+        let mut new = old.clone();
+        new.locale = "zh-CN".to_string();
+
+        new.save(&path).expect("覆盖保存应成功");
+
+        assert_eq!(
+            AppConfig::load(&path).expect("主配置应可加载").locale,
+            "zh-CN"
+        );
+        assert_eq!(
+            AppConfig::load(&config_backup_path(&path))
+                .expect("备份应可加载")
+                .locale,
+            "en"
+        );
+        std::fs::remove_dir_all(dir).expect("应清理临时目录");
+    }
+
+    #[test]
+    fn 主文件提交后父目录同步失败不应返回保存失败() {
+        let dir = unique_temp_dir("config-directory-sync-failure");
+        std::fs::create_dir_all(&dir).expect("应创建临时目录");
+        let path = dir.join("config.json");
+        let (mut pending_config, mut config_file) =
+            PendingConfigFile::create(&path).expect("应创建配置临时文件");
+        config_file
+            .write_all(b"new-config")
+            .expect("应写入临时文件");
+        config_file.flush().expect("应刷新临时文件");
+        config_file.sync_all().expect("应同步临时文件");
+        drop(config_file);
+
+        let result = commit_pending_config(&mut pending_config, &path, &dir, |_| {
+            Err(io::Error::new(io::ErrorKind::Other, "模拟父目录同步失败"))
+        });
+
+        assert!(result.is_ok());
+        assert_eq!(
+            std::fs::read(&path).expect("提交后应读取主文件"),
+            b"new-config"
+        );
+        std::fs::remove_dir_all(dir).expect("应清理临时目录");
+    }
+
+    #[test]
+    fn 备份提交后父目录同步失败不应返回保存失败() {
+        let dir = unique_temp_dir("config-backup-directory-sync-failure");
+        std::fs::create_dir_all(&dir).expect("应创建临时目录");
+        let path = dir.join("config.json");
+        let backup_path = config_backup_path(&path);
+        let original_bytes = b"old-config";
+        std::fs::write(&path, original_bytes).expect("应写入原主配置");
+
+        let result = update_config_backup_with_sync(&path, |_| {
+            Err(io::Error::new(io::ErrorKind::Other, "模拟父目录同步失败"))
+        });
+
+        assert!(result.is_ok());
+        assert_eq!(
+            std::fs::read(&backup_path).expect("提交后应读取备份"),
+            original_bytes
+        );
+        assert_eq!(
+            std::fs::read(&path).expect("备份更新不应修改主配置"),
+            original_bytes
+        );
+        let names = std::fs::read_dir(&dir)
+            .expect("应列出临时目录")
+            .map(|entry| {
+                entry
+                    .expect("目录项应有效")
+                    .file_name()
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .collect::<Vec<_>>();
+        assert!(!names.iter().any(|name| name.contains(".tmp-")));
+        std::fs::remove_dir_all(dir).expect("应清理临时目录");
+    }
+
+    #[test]
+    fn 主配置不存在时首次保存应成功且不生成备份() {
+        let dir = unique_temp_dir("config-first-save-without-backup");
+        let path = dir.join("config.json");
+        let backup_path = config_backup_path(&path);
+        let config = AppConfig::default();
+
+        config.save(&path).expect("首次保存应成功");
+
+        assert!(path.is_file());
+        assert!(!backup_path.exists());
+        let names = std::fs::read_dir(&dir)
+            .expect("应列出临时目录")
+            .map(|entry| {
+                entry
+                    .expect("目录项应有效")
+                    .file_name()
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .collect::<Vec<_>>();
+        assert!(!names.iter().any(|name| name.contains(".tmp-")));
+        std::fs::remove_dir_all(dir).expect("应清理临时目录");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn 主配置无法打开时应禁止覆盖并清理临时文件() {
+        use std::os::unix::fs::symlink;
+
+        let dir = unique_temp_dir("config-primary-open-failure");
+        std::fs::create_dir_all(&dir).expect("应创建临时目录");
+        let path = dir.join("config.json");
+        let backup_path = config_backup_path(&path);
+        symlink(&path, &path).expect("应创建自引用符号链接");
+
+        let result = AppConfig::default().save(&path);
+
+        assert!(result.is_err());
+        assert!(std::fs::symlink_metadata(&path)
+            .expect("原符号链接应保留")
+            .file_type()
+            .is_symlink());
+        assert_eq!(std::fs::read_link(&path).expect("应读取原符号链接"), path);
+        assert!(!backup_path.exists());
+        let names = std::fs::read_dir(&dir)
+            .expect("应列出临时目录")
+            .map(|entry| {
+                entry
+                    .expect("目录项应有效")
+                    .file_name()
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .collect::<Vec<_>>();
+        assert!(!names.iter().any(|name| name.contains(".tmp-")));
+        std::fs::remove_dir_all(dir).expect("应清理临时目录");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn 配置与备份权限应为0600() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = unique_temp_dir("config-permissions");
+        let path = dir.join("config.json");
+        let config = AppConfig::default();
+        config.save(&path).expect("首次保存应成功");
+        config.save(&path).expect("覆盖保存应成功");
+
+        let primary_mode = std::fs::metadata(&path)
+            .expect("应读取主配置元数据")
+            .permissions()
+            .mode()
+            & 0o777;
+        let backup_mode = std::fs::metadata(config_backup_path(&path))
+            .expect("应读取备份元数据")
+            .permissions()
+            .mode()
+            & 0o777;
+
+        assert_eq!(primary_mode, 0o600);
+        assert_eq!(backup_mode, 0o600);
+        std::fs::remove_dir_all(dir).expect("应清理临时目录");
+    }
+
+    #[test]
+    fn 备份更新失败时应保留原配置并清理临时文件() {
+        let dir = unique_temp_dir("config-save-failure");
+        let path = dir.join("config.json");
+        let original = AppConfig::default();
+        original.save(&path).expect("首次保存应成功");
+        let backup_path = config_backup_path(&path);
+        std::fs::create_dir_all(&backup_path).expect("应创建阻塞备份目录");
+        std::fs::write(backup_path.join("blocker"), b"x").expect("应写入阻塞文件");
+        let original_bytes = std::fs::read(&path).expect("应读取原配置");
+
+        let mut changed = original.clone();
+        changed.locale = "en".to_string();
+        assert!(changed.save(&path).is_err());
+
+        assert_eq!(
+            std::fs::read(&path).expect("失败后应读取原配置"),
+            original_bytes
+        );
+        let names = std::fs::read_dir(&dir)
+            .expect("应列出临时目录")
+            .map(|entry| {
+                entry
+                    .expect("目录项应有效")
+                    .file_name()
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .collect::<Vec<_>>();
+        assert!(!names.iter().any(|name| name.contains(".tmp-")));
+        std::fs::remove_dir_all(dir).expect("应清理临时目录");
+    }
 
     #[test]
     fn 桌宠缩放默认值应为百分之九十() {
