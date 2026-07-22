@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **设置页 memoryHint 文案过时**：移除洞察卡片后文案仍提及"自动生成洞察"，改为描述 memory 实际功能。
 - **助手流式事件从未到达前端的两处线格式错误**：`StreamEvent::Error(String)` 为内部标签 + newtype 组合，serde 序列化直接失败且被静默吞掉，前端从未收到错误事件（改 struct 变体 `{ error }`）；`Done` 事件的 `tool_labels` 字段以蛇形上线而前端读 `event.toolLabels`（枚举顶层 rename_all 不作用于字段），一直靠命令返回值双通道掩盖（补字段级 camelCase）。新增线格式契约测试锁定。
 - **停止记录后两处指示器仍显示绿色脉冲**（#131）：概览右上角"实时"圆点只判断是否"今天"模式，时间轴"活动记录"圆点更是硬编码绿色脉冲——两处都没响应录制状态。新增 `recordingStore`（参照 `assistantStore` 模式），App.svelte 在 `get_recording_state` 初始化和 `recording-state-changed` 事件中写入 store，概览/时间轴读取 store 判断圆点颜色：录制中（绿+脉冲）/ 已停止（灰）。新增 7 个单测。
+- **火山引擎（豆包）连接测试 URL 拼接错误**：连接测试的 `/v1` 回退逻辑假设所有 OpenAI 兼容 API 的端点都以 `/v1` 结尾，但火山引擎用 `/api/v3`、智谱用 `/api/paas/v4`——这些已含版本段，不应再追加 `/v1`（会拼出 `/api/v3/v1/chat/completions` 这种不存在的端点，用户报错 `os error 10061` 根因）。修复 `openai_compatible_chat_completion_urls` 和 `fetch_openai_compatible_models`：识别任何版本号段（`/v1`～`/v9`）后不再回退。新增 3 个测试覆盖火山引擎 v3 / 智谱 v4 / DeepSeek 无版本号三种场景。
 
 ### 优化
 - **日报页面视觉重设计**：去玻璃拟态 + 斜纹纹理，改极简现代风（统一 token、轻阴影、大留白、统计卡重做、表格去重阴影 + zebra、活动时间线折叠样式现代化）。

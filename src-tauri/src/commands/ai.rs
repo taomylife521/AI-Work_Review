@@ -198,6 +198,19 @@ fn openai_connection_test_max_tokens() -> u32 {
     16
 }
 
+/// 判断端点路径是否已含 OpenAI 风格版本号段（/v1、/v2、/v3 … /v9）。
+///
+/// 火山引擎用 `/api/v3`、智谱用 `/api/paas/v4`——这些已经是完整版本路径，
+/// 不应再追加 `/v1`（否则拼出 `/api/v3/v1/chat/completions` 这种不存在的端点）。
+fn endpoint_has_version_segment(base: &str) -> bool {
+    base.rsplit('/').next().is_some_and(|last| {
+        last.len() >= 2
+            && last.starts_with('v')
+            && last[1..].chars().all(|c| c.is_ascii_digit())
+            && !last[1..].is_empty()
+    })
+}
+
 fn openai_compatible_chat_completion_urls(endpoint: &str) -> Vec<String> {
     let base = endpoint.trim().trim_end_matches('/');
     if base.is_empty() {
@@ -208,8 +221,11 @@ fn openai_compatible_chat_completion_urls(endpoint: &str) -> Vec<String> {
         return vec![base.to_string()];
     }
 
+    // base 已含版本号段（/v1、/v3、/v4 等）：直接拼 /chat/completions，不再回退 /v1。
+    // 例：火山引擎 api/v3 → v3/chat/completions（正确），不应再试 v3/v1/chat/completions。
     let mut urls = vec![format!("{base}/chat/completions")];
-    if !base.ends_with("/v1") {
+    if !endpoint_has_version_segment(&base) {
+        // base 不含版本号（如 DeepSeek api.deepseek.com）：补一个 /v1 回退候选。
         urls.push(format!("{base}/v1/chat/completions"));
     }
     urls.dedup();
@@ -532,7 +548,8 @@ async fn fetch_openai_compatible_models(
     endpoint: &str,
     api_key: &str,
 ) -> Result<Vec<String>, AppError> {
-    let url = format!("{endpoint}/models");
+    let base = endpoint.trim().trim_end_matches('/');
+    let url = format!("{base}/models");
     let response = client
         .get(&url)
         .header("Authorization", format!("Bearer {api_key}"))
@@ -542,8 +559,15 @@ async fn fetch_openai_compatible_models(
     let response = match response {
         Ok(r) if r.status().is_success() => r,
         Ok(_) => {
-            // 端点可能不含 /v1 前缀，重试 {endpoint}/v1/models
-            let retry_url = format!("{endpoint}/v1/models");
+            // 端点可能不含版本号前缀，重试 {endpoint}/v1/models。
+            // 但如果已含版本段（火山引擎 /api/v3、智谱 /api/paas/v4），
+            // 不再追加 /v1（会拼出 /api/v3/v1/models 这种不存在的路径）。
+            if endpoint_has_version_segment(base) {
+                return Err(AppError::Analysis(format!(
+                    "无法获取模型列表，请确认端点地址正确：{base}/models 返回错误"
+                )));
+            }
+            let retry_url = format!("{base}/v1/models");
             let retry = client
                 .get(&retry_url)
                 .header("Authorization", format!("Bearer {api_key}"))
@@ -845,6 +869,7 @@ mod tests {
 
     #[test]
     fn openai兼容端点应自动补齐_chat_completions_并支持_v1_回退() {
+        // 无版本号的端点（DeepSeek）：尝试两个候选
         assert_eq!(
             openai_compatible_chat_completion_urls("https://api.deepseek.com"),
             vec![
@@ -852,9 +877,42 @@ mod tests {
                 "https://api.deepseek.com/v1/chat/completions".to_string()
             ]
         );
+        // 已含 /v1：直接拼，不再回退
         assert_eq!(
             openai_compatible_chat_completion_urls("https://api.openai.com/v1"),
             vec!["https://api.openai.com/v1/chat/completions".to_string()]
+        );
+    }
+
+    #[test]
+    fn 火山引擎端点不应回退_v1_路径() {
+        // 火山引擎 api/v3 已是完整版本路径，不应再追加 /v1（会拼出
+        // /api/v3/v1/chat/completions 这种不存在的端点——issue 用户报错根因）。
+        assert_eq!(
+            openai_compatible_chat_completion_urls("https://ark.cn-beijing.volces.com/api/v3"),
+            vec![
+                "https://ark.cn-beijing.volces.com/api/v3/chat/completions".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn 智谱端点不应回退_v1_路径() {
+        // 智谱 /api/paas/v4 同理，已含版本段
+        assert_eq!(
+            openai_compatible_chat_completion_urls("https://open.bigmodel.cn/api/paas/v4"),
+            vec![
+                "https://open.bigmodel.cn/api/paas/v4/chat/completions".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn 已含_chat_completions的端点不再拼接() {
+        // 用户直接填了完整端点：原样使用
+        assert_eq!(
+            openai_compatible_chat_completion_urls("https://example.com/v1/chat/completions"),
+            vec!["https://example.com/v1/chat/completions".to_string()]
         );
     }
 
