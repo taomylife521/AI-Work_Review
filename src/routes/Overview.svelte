@@ -7,6 +7,7 @@
   import ActivityHourlyChart from '../lib/components/ActivityHourlyChart.svelte';
   import LocalizedDatePicker from '../lib/components/LocalizedDatePicker.svelte';
   import { cache } from '../lib/stores/cache.js';
+  import { recordingStore, isActiveRecording } from '../lib/stores/recording.js';
   import { confirm } from '../lib/stores/confirm.js';
   import { showToast } from '../lib/stores/toast.js';
   import { appIconStore, getIconCacheKey, preloadAppIcons } from '../lib/stores/iconCache.js';
@@ -289,6 +290,9 @@
       : formatLocalizedDate(new Date(), { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
   $: overviewStatusLabel = overviewMode === 'today' ? t('overview.live') : t(`overview.${overviewMode === 'date' ? 'modeDate' : 'modeWeek'}`);
   $: overviewIsLive = overviewMode !== 'date';
+  // 圆点绿+脉冲还需要"正在录制"：停止记录后即便在"今天"模式，圆点也应灰掉（issue #131）
+  $: recordingState = $recordingStore;
+  $: overviewDotActive = overviewIsLive && isActiveRecording(recordingState);
   $: overviewTotalActivityTitle = overviewMode === 'week'
     ? t('overview.totalActivityWeek')
     : overviewMode === 'date'
@@ -721,7 +725,7 @@
       </div>
     </div>
     <div class="page-status-chip {overviewIsLive ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-[#7d8590]'}">
-      <span class="w-1.5 h-1.5 rounded-full {overviewIsLive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}"></span>
+      <span class="w-1.5 h-1.5 rounded-full {overviewDotActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400 dark:bg-[#484f58]'}"></span>
       {overviewStatusLabel}
     </div>
   </div>

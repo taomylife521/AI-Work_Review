@@ -5,6 +5,7 @@
   import { open } from '@tauri-apps/plugin-shell';
   import { ask, save as saveDialog } from '@tauri-apps/plugin-dialog';
   import { cache } from '../../lib/stores/cache.js';
+  import { recordingStore, isActiveRecording } from '../../lib/stores/recording.js';
   import { showToast } from '../../lib/stores/toast.js';
   import { appIconStore, getIconCacheKey, preloadAppIcons } from '../../lib/stores/iconCache.js';
   import { categoryStore, hexToRGBA } from '../../lib/stores/categories.js';
@@ -978,6 +979,9 @@
 
   // 检查是否是今天
   $: isToday = selectedDate === getLocalDateString();
+  // 圆点绿+脉冲还需要"正在录制"：停止记录后圆点应变灰（issue #131）
+  $: recordingState = $recordingStore;
+  $: timelineDotActive = isToday && isActiveRecording(recordingState);
 
   onMount(async () => {
     const requestedDate = readRequestedTimelineDate();
@@ -1055,7 +1059,7 @@
         {t('timeline.subtitle')}
         {#if isToday}
           <span class="ms-1.5 inline-flex items-center gap-1.5">
-            <span class="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+            <span class="w-1.5 h-1.5 rounded-full {timelineDotActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400 dark:bg-[#484f58]'}"></span>
             <span class="font-mono text-xs text-emerald-600 dark:text-emerald-400">{formatLocalizedTime(currentTime, { hour: '2-digit', minute: '2-digit' })}</span>
           </span>
         {/if}

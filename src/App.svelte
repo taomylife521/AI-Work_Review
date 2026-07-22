@@ -9,6 +9,7 @@
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { cache, getLocalDate } from './lib/stores/cache.js';
+  import { recordingStore } from './lib/stores/recording.js';
   import { applyLocaleToDocument, initializeLocale, locale, t } from '$lib/i18n/index.js';
   import { preloadAppIcons } from './lib/stores/iconCache.js';
   import { runUpdateFlow } from './lib/utils/updater.js';
@@ -362,6 +363,7 @@
         const [recording, paused] = await invoke('get_recording_state');
         isRecording = recording;
         isPaused = paused;
+        recordingStore.setState(recording, paused);
       } catch (e) {
         console.error('获取录制状态失败:', e);
       }
@@ -391,6 +393,7 @@
       const unlistenRecordingState = await safeListen('recording-state-changed', (event) => {
         isRecording = event.payload.isRecording;
         isPaused = event.payload.isPaused;
+        recordingStore.setState(event.payload.isRecording, event.payload.isPaused);
       });
       if (disposed) return;
       pendingCleanup.push(unlistenRecordingState);
