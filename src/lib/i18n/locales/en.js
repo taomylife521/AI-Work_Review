@@ -648,6 +648,7 @@ export default {
       ],
       references: 'View references ({count})',
       hits: 'items',
+      stepFailed: 'Tool failed',
       requestFailed: 'Request failed',
       timeoutError: 'Request timed out, please try again later',
       placeholder: 'Ask something, for example: What did I mainly work on this week?',

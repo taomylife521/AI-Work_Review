@@ -1441,8 +1441,8 @@ mod tests {
         let registry = ToolRegistry::new();
         let tools = registry.to_openai_tools();
 
-        // 应该有 5 个工具
-        assert_eq!(tools.len(), 5);
+        // 应该有 6 个内置工具
+        assert_eq!(tools.len(), 6);
 
         for tool in &tools {
             assert_eq!(tool["type"], "function");

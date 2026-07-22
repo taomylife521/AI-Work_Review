@@ -648,6 +648,7 @@ export default {
       ],
       references: '查看依據（{count}）',
       hits: '條',
+      stepFailed: '工具執行失敗',
       requestFailed: '請求失敗',
       timeoutError: '請求逾時，請稍後重試',
       placeholder: '問點什麼，例如：我這週主要做了什麼？',

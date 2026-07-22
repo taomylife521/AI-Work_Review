@@ -9,7 +9,7 @@ pub mod model;
 pub mod orchestrator;
 pub mod tools;
 
-pub use events::StreamEvent;
+pub use events::{StreamEvent, StreamEventSender};
 pub use model::Message;
 pub use orchestrator::Orchestrator;
 pub use tools::WebToolsConfig;

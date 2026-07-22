@@ -92,8 +92,13 @@ fn assistant_empty_question_message(locale: AppLocale) -> &'static str {
     }
 }
 
-fn build_assistant_system_prompt(locale: AppLocale) -> &'static str {
-    match locale {
+fn empty_question_tool_labels() -> Vec<String> {
+    Vec::new()
+}
+
+fn build_assistant_system_prompt(locale: AppLocale) -> String {
+    // 基础 prompt：locale 感知的工作助手定位。
+    let base = match locale {
         AppLocale::ZhCn => {
             "你是 Work Review 的工作助手。你可以回答任何问题。对于工作相关问题，你拥有工具可以查询用户的真实工作记录（活动时间线、统计、工作会话等），请优先使用工具获取准确数据后回答。对于非工作问题，直接用你的知识回答即可。请用与用户提问相同的语言回答，无论工作记录是什么语言（英文提问用英文，中文提问用中文）。先给结论再给依据，不要编造不存在的事实。"
         }
@@ -106,7 +111,30 @@ fn build_assistant_system_prompt(locale: AppLocale) -> &'static str {
         AppLocale::Ar => {
             "أنت مساعد Work Review. يمكنك الإجابة على أي سؤال. للأسئلة المتعلقة بالعمل، لديك أدوات للاستعلام عن سجلات عمل المستخدم الفعلية (الجدول الزمني للنشاط، الإحصائيات، جلسات العمل، وما إلى ذلك) — استخدمها لضمان الدقة. بالنسبة للأسئلة غير المتعلقة بالعمل، أجب مباشرة من معرفتك. قم بالرد بنفس لغة سؤال المستخدم، بغض النظر عن لغة سجلات العمل (سؤال عربي -> إجابة عربية). ابدأ بالخلاصة، ثم ادعمها بالأدلة. لا تختلق الحقائق."
         }
-    }
+    };
+
+    // 工具历史摘要声明（locale 感知）。
+    // 多轮对话的 assistant 消息 content 尾部会带 `[工具：...]` 形式的机器摘要，
+    // 告诉模型这是什么、不要复述给用户、`✓/↯/?/→N条` 的含义。
+    // 注意：这段必须加在 build_assistant_system_prompt 里而不是 executor.rs 的
+    // DEFAULT_SYSTEM_PROMPT，因为生产路径 chat_work_assistant 始终传 Some(prompt)，
+    // unwrap_or(DEFAULT_...) 永远走不到（codex 二轮 review 发现的死代码 bug）。
+    let tool_trace_hint = match locale {
+        AppLocale::ZhCn => {
+            "\n\n历史对话里出现的 `[工具：xxx→N条 | yyy✓ | zzz↯ | aaa?]` 形式的方括号片段是上一轮工具调用的机器摘要，不是用户的话：`→N条` 表示命中记忆条数，`✓` 表示工具成功执行，`↯` 表示工具失败（避免重复调用），`?` 表示旧数据状态未知，不能视为成功或失败。回答时不要向用户复述这个摘要，也不要把它当作已确认的事实——它只是工具历史轨迹提示。"
+        }
+        AppLocale::ZhTw => {
+            "\n\n歷史對話裡出現的 `[工具：xxx→N条 | yyy✓ | zzz↯ | aaa?]` 形式的方括號片段是上一輪工具呼叫的機器摘要，不是使用者的話：`→N条` 表示命中記憶條數，`✓` 表示工具成功執行，`↯` 表示工具失敗（避免重複呼叫），`?` 表示舊資料狀態未知，不能視為成功或失敗。回答時不要向使用者複述這個摘要，也不要把它當作已確認的事實——它只是工具歷史軌跡提示。"
+        }
+        AppLocale::En => {
+            "\n\nBracketed snippets like `[工具：xxx→N条 | yyy✓ | zzz↯ | aaa?]` that appear in conversation history are machine-generated summaries of the previous turn's tool calls, not the user's words: `→N条` means N memory records matched, `✓` means the tool executed successfully, `↯` means it failed (avoid retrying it), and `?` means legacy data has an unknown status and must not be treated as success or failure. Do not repeat this summary back to the user, and do not treat it as a confirmed fact — it is only a tool-history hint."
+        }
+        AppLocale::Ar => {
+            "\n\nالمقتطفات بين الأقواس مثل `[工具：xxx→N条 | yyy✓ | zzz↯ | aaa?]` التي تظهر في سجل المحادثة هي ملخصات آلية لاستدعاءات الأدوات في الدور السابق، وليست كلام المستخدم: `→N条` تعني N سجلات ذاكرة مطابقة، و`✓` تعني أن الأداة نُفِّذت بنجاح، و`↯` تعني أنها فشلت (تجنّب إعادة المحاولة)، وتعني `?` أن حالة البيانات القديمة غير معروفة، ولا يجوز اعتبارها نجاحًا أو فشلًا. لا تكرر هذا الملخص للمستخدم، ولا تعتبره حقيقة مؤكدة — إنه مجرد تلميح عن سجل الأدوات."
+        }
+    };
+
+    format!("{base}{tool_trace_hint}")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -661,6 +689,46 @@ pub(crate) async fn generate_text_answer_with_model(
     }
 }
 
+fn agent_event_delivery_error(message: impl Into<String>) -> AppError {
+    AppError::Analysis(format!(
+        "助手事件投递失败，已停止后续处理: {}",
+        message.into()
+    ))
+}
+
+fn send_channel_event(
+    channel: &tauri::ipc::Channel<crate::agent::StreamEvent>,
+    event: crate::agent::StreamEvent,
+) -> Result<(), AppError> {
+    channel
+        .send(event)
+        .map_err(|error| agent_event_delivery_error(error.to_string()))
+}
+
+/// 把 Agent 内部事件转发到实际输出通道，并向控制事件回传真实投递结果。
+async fn bridge_agent_events<F>(
+    mut rx: tokio::sync::mpsc::Receiver<crate::agent::events::StreamEventEnvelope>,
+    mut send: F,
+) -> Result<(), String>
+where
+    F: FnMut(crate::agent::StreamEvent) -> Result<(), String>,
+{
+    while let Some(envelope) = rx.recv().await {
+        let send_result = send(envelope.event);
+        let should_stop = send_result.is_err();
+
+        if let Some(delivery_ack) = envelope.delivery_ack {
+            let _ = delivery_ack.send(send_result.clone());
+        }
+
+        if should_stop {
+            return send_result;
+        }
+    }
+
+    Ok(())
+}
+
 /// 统一工作助手（Stage 6: 已接入 Agent Orchestrator）
 ///
 /// 接口签名保持不变，内部实现替换为 Agentic 架构：
@@ -685,13 +753,16 @@ pub async fn chat_work_assistant(
 
     if trimmed_question.is_empty() {
         let answer = assistant_empty_question_message(assistant_locale).to_string();
-        let tool_labels = vec!["记忆检索".to_string()];
+        let tool_labels = empty_question_tool_labels();
         // 空问题也推一个 Done，保持事件流完整（前端可统一收尾）。
-        let _ = on_event.send(crate::agent::StreamEvent::Done {
-            answer: answer.clone(),
-            references: vec![],
-            tool_labels: tool_labels.clone(),
-        });
+        send_channel_event(
+            &on_event,
+            crate::agent::StreamEvent::Done {
+                answer: answer.clone(),
+                references: vec![],
+                tool_labels: tool_labels.clone(),
+            },
+        )?;
         return Ok(AssistantAnswer {
             answer,
             references: Vec::new(),
@@ -727,19 +798,24 @@ pub async fn chat_work_assistant(
         } else {
             None
         };
-        (s.database.clone(), ignored_apps, excluded_domains, web_tools)
+        (
+            s.database.clone(),
+            ignored_apps,
+            excluded_domains,
+            web_tools,
+        )
     };
 
-    // 流式桥接：agent 用 mpsc 推事件，这里转发到 Tauri ipc::Channel（前端 onmessage 收）。
-    // Channel::send 失败即前端已销毁，停止转发。
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::agent::StreamEvent>(64);
+    // 流式桥接：Token 可丢；控制事件必须等 Tauri Channel 实际发送成功后再确认。
+    let (tx, rx) = crate::agent::StreamEventSender::channel(64);
     let on_event_clone = on_event.clone();
     let bridge = tauri::async_runtime::spawn(async move {
-        while let Some(ev) = rx.recv().await {
-            if on_event_clone.send(ev).is_err() {
-                break;
-            }
-        }
+        bridge_agent_events(rx, move |event| {
+            on_event_clone
+                .send(event)
+                .map_err(|error| error.to_string())
+        })
+        .await
     });
 
     // Stage 6: 完整 Orchestrator 集成
@@ -750,7 +826,7 @@ pub async fn chat_work_assistant(
         model_config.as_ref(),
         &database,
         &agent_history,
-        Some(system_prompt),
+        Some(&system_prompt),
         &ignored_apps,
         &excluded_domains,
         web_tools,
@@ -759,13 +835,18 @@ pub async fn chat_work_assistant(
     .await;
 
     // 等桥接任务把剩余事件发完（tx 在 handle 内 drop 后 rx.recv() 返回 None）。
-    let _ = bridge.await;
+    let bridge_result = bridge
+        .await
+        .map_err(|error| AppError::Unknown(format!("助手事件桥接任务异常: {error}")))?;
+    if let Err(message) = bridge_result {
+        return Err(agent_event_delivery_error(message));
+    }
 
     let result = match result {
         Ok(r) => r,
         Err(e) => {
             let msg = e.to_string();
-            let _ = on_event.send(crate::agent::StreamEvent::Error { error: msg });
+            send_channel_event(&on_event, crate::agent::StreamEvent::Error { error: msg })?;
             return Err(e);
         }
     };
@@ -790,8 +871,6 @@ pub async fn generate_text_with_model(
     generate_text_answer_with_model(&model_config, &system_prompt, &prompt).await
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -809,6 +888,104 @@ mod tests {
                 "https://example.com/search?q=a%26b&name=%E5%BC%A0%E4%B8%89"
             ),
             "https://example.com/search?q=a%26b&name=张三"
+        );
+    }
+
+    /// system prompt 必须包含真实固定的工具历史摘要格式（每个 locale 都要有）。
+    /// 防回归：之前这声明曾误加在 executor.rs 的 DEFAULT_SYSTEM_PROMPT，但生产路径
+    /// chat_work_assistant 始终传 Some(build_assistant_system_prompt(...))，unwrap_or
+    /// 永远走不到，导致声明在生产里是死代码（codex 二轮 review 发现）。
+    #[test]
+    fn 各_locale的助手系统提示词必须引用真实固定机器格式并说明未知状态() {
+        let cases = [
+            (
+                AppLocale::ZhCn,
+                "`?` 表示旧数据状态未知，不能视为成功或失败",
+            ),
+            (
+                AppLocale::ZhTw,
+                "`?` 表示舊資料狀態未知，不能視為成功或失敗",
+            ),
+            (
+                AppLocale::En,
+                "`?` means legacy data has an unknown status and must not be treated as success or failure",
+            ),
+            (
+                AppLocale::Ar,
+                "تعني `?` أن حالة البيانات القديمة غير معروفة، ولا يجوز اعتبارها نجاحًا أو فشلًا",
+            ),
+        ];
+
+        for (locale, unknown_hint) in cases {
+            let prompt = build_assistant_system_prompt(locale);
+            assert!(
+                prompt.contains("[工具：xxx→N条 | yyy✓ | zzz↯ | aaa?]"),
+                "locale {:?} 的 system prompt 未引用真实固定机器格式，got: {}",
+                locale,
+                prompt
+            );
+            assert!(
+                prompt.contains(unknown_hint),
+                "locale {:?} 的 system prompt 未正确说明旧数据未知状态，got: {}",
+                locale,
+                prompt
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn 控制事件应等待桥接真实投递成功() {
+        let (tx, rx) = crate::agent::StreamEventSender::channel(1);
+        let send_task = async move {
+            tx.send_control(crate::agent::StreamEvent::Done {
+                answer: "完成".to_string(),
+                references: vec![],
+                tool_labels: vec![],
+            })
+            .await
+        };
+        let bridge = bridge_agent_events(rx, |event| {
+            assert!(matches!(
+                event,
+                crate::agent::StreamEvent::Done { answer, .. } if answer == "完成"
+            ));
+            Ok(())
+        });
+
+        let (send_result, bridge_result) = tokio::join!(send_task, bridge);
+        send_result.expect("实际投递成功后控制事件应返回成功");
+        bridge_result.expect("桥接应正常结束");
+    }
+
+    #[tokio::test]
+    async fn 桥接投递失败应反馈给控制事件发送方() {
+        let (tx, rx) = crate::agent::StreamEventSender::channel(1);
+        let send_task = async move {
+            tx.send_control(crate::agent::StreamEvent::Done {
+                answer: "无法送达".to_string(),
+                references: vec![],
+                tool_labels: vec![],
+            })
+            .await
+        };
+        let bridge = bridge_agent_events(rx, |_event| Err("Webview 已关闭".to_string()));
+
+        let (send_result, bridge_result) = tokio::join!(send_task, bridge);
+        assert_eq!(
+            send_result.expect_err("外部投递失败必须反馈给控制事件发送方"),
+            "Webview 已关闭"
+        );
+        assert_eq!(
+            bridge_result.expect_err("桥接必须保留真实投递失败原因"),
+            "Webview 已关闭"
+        );
+    }
+
+    #[test]
+    fn 空问题不应返回任何工具标签() {
+        assert!(
+            empty_question_tool_labels().is_empty(),
+            "空问题没有执行工具，不应声明工具标签"
         );
     }
 
@@ -912,5 +1089,4 @@ mod tests {
             AssistantQuestionKind::ProcessRecap
         );
     }
-
 }

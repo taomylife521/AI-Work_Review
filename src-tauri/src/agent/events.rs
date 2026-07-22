@@ -1,9 +1,10 @@
 //! 工作助手流式事件。
 //!
 //! agent 模块用 `tokio::sync::mpsc` 传递这些事件，commands 层再桥接到
-//! Tauri `ipc::Channel`。本文件纯 serde，不依赖 tauri，保持 agent 可单测。
+//! Tauri `ipc::Channel`。本文件不依赖 tauri，保持 agent 可单测。
 
 use serde::{Deserialize, Serialize};
+use tokio::sync::{mpsc, oneshot};
 use work_review_core::database::MemorySearchItem;
 
 /// 工作助手流式事件（经 Tauri `ipc::Channel` 推送给前端）。
@@ -18,9 +19,15 @@ use work_review_core::database::MemorySearchItem;
 pub enum StreamEvent {
     /// 工具步骤开始（每个 tool_call 执行前推送）。
     StepStart { tool: String, label: String },
-    /// 工具步骤完成，携带本次新增的引用记录。
+    /// 工具步骤完成，携带本次新增的引用记录与执行成败。
+    ///
+    /// `ok` 区分工具是真正成功还是返回错误（err 时 result 文本以"工具执行失败:"开头）。
+    /// 这对前端"上一轮工具历史摘要"很关键：成功的工具即便 hits=0（如
+    /// query_activities/web_search，它们不往 collected_references 写数据）
+    /// 也不应被标记为"0 条 = 失败"，否则下一轮模型会误以为工具失效而避开它。
     StepResult {
         tool: String,
+        ok: bool,
         hits: usize,
         references: Vec<MemorySearchItem>,
     },
@@ -39,6 +46,62 @@ pub enum StreamEvent {
     Error { error: String },
 }
 
+/// Agent 内部事件信封。
+///
+/// Token 不携带确认器，允许在背压时丢弃；控制事件携带一次性确认器，只有 commands
+/// 层真正调用 Tauri Channel 成功后，发送方才会继续执行后续模型或工具步骤。
+pub(crate) struct StreamEventEnvelope {
+    pub(crate) event: StreamEvent,
+    pub(crate) delivery_ack: Option<oneshot::Sender<Result<(), String>>>,
+}
+
+/// Agent 事件发送器：封装内部 mpsc，并区分可丢 Token 与需确认的控制事件。
+#[derive(Clone)]
+pub struct StreamEventSender {
+    tx: mpsc::Sender<StreamEventEnvelope>,
+}
+
+impl StreamEventSender {
+    /// 创建 Agent 内部事件通道。接收端仅供 commands 桥接层消费。
+    pub(crate) fn channel(capacity: usize) -> (Self, mpsc::Receiver<StreamEventEnvelope>) {
+        let (tx, rx) = mpsc::channel(capacity);
+        (Self { tx }, rx)
+    }
+
+    /// Token 仅影响流式观感；通道满或关闭时允许丢弃，完整回答由 Done 兜底。
+    pub(crate) fn try_send_token(&self, event: StreamEvent) {
+        let _ = self.tx.try_send(StreamEventEnvelope {
+            event,
+            delivery_ack: None,
+        });
+    }
+
+    /// 控制事件必须等待 commands 桥接层确认实际 Tauri Channel 投递结果。
+    pub(crate) async fn send_control(&self, event: StreamEvent) -> Result<(), String> {
+        let (delivery_ack, delivery_result) = oneshot::channel();
+        self.tx
+            .send(StreamEventEnvelope {
+                event,
+                delivery_ack: Some(delivery_ack),
+            })
+            .await
+            .map_err(|_| "Agent 事件桥接已关闭".to_string())?;
+
+        delivery_result
+            .await
+            .map_err(|_| "Agent 事件投递确认通道已关闭".to_string())?
+    }
+
+    pub(crate) fn is_closed(&self) -> bool {
+        self.tx.is_closed()
+    }
+
+    /// 等待桥接接收端关闭，用于取消正在等待的模型或工具 Future。
+    pub(crate) async fn closed(&self) {
+        self.tx.closed().await;
+    }
+}
+
 /// 工具名 → 默认中文标签（前端可按 tool 名覆盖为 i18n 文案）。
 ///
 /// 放在这里而不是前端，是因为 executor 推送 `StepStart` 时需要立即给一个 label，
@@ -50,6 +113,7 @@ pub fn default_tool_label(tool: &str) -> &'static str {
         "aggregate_stats" => "统计聚合",
         "category_search" => "分类检索",
         "trend_comparison" => "趋势对比",
+        "query_activities" => "活动查询",
         _ => "处理中",
     }
 }
@@ -84,6 +148,20 @@ mod tests {
         assert_eq!(step["type"], "stepStart");
         assert_eq!(step["tool"], "search_memory");
 
+        // StepResult 必须带 ok 字段（前端历史摘要靠它区分"成功但 0 引用"
+        // 和"真正失败"，避免把 query_activities 等成功工具误标为 0 条）。
+        let step_ok = serde_json::to_value(StreamEvent::StepResult {
+            tool: "query_activities".to_string(),
+            ok: true,
+            hits: 0,
+            references: vec![],
+        })
+        .expect("StepResult 事件必须可序列化");
+        assert_eq!(step_ok["type"], "stepResult");
+        assert_eq!(step_ok["tool"], "query_activities");
+        assert_eq!(step_ok["ok"], true);
+        assert_eq!(step_ok["hits"], 0);
+
         let done = serde_json::to_value(StreamEvent::Done {
             answer: "答案".to_string(),
             references: vec![],
@@ -93,5 +171,10 @@ mod tests {
         assert_eq!(done["type"], "done");
         assert_eq!(done["answer"], "答案");
         assert_eq!(done["toolLabels"][0], "search_memory");
+    }
+
+    #[test]
+    fn query_activities应有默认中文标签() {
+        assert_eq!(default_tool_label("query_activities"), "活动查询");
     }
 }

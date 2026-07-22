@@ -4,6 +4,9 @@
   import { invoke, Channel } from '@tauri-apps/api/core';
   import { marked } from 'marked';
   import { assistantStore, BASIC_ASSISTANT_MODEL_ID } from '../../lib/stores/assistant.js';
+  import { buildHistoryPayload } from './historyPayload.js';
+  import { createRequestEventGate } from './requestEventGate.js';
+  import { reduceStreamEvent } from './streamEvent.js';
   import { formatDurationLocalized, locale, t, tm, translateCategoryLabel } from '$lib/i18n/index.js';
 
   marked.use({
@@ -19,6 +22,7 @@
   let assistantState = {};
   let unsubscribeAssistant = () => {};
   let destroyed = false;
+  let activeSendingRequestId = null;
   let stickToBottom = true;
   $: sending = assistantState.sending ?? false;
   $: messages = assistantState.messages ?? [];
@@ -188,6 +192,10 @@
 
   onDestroy(() => {
     destroyed = true;
+    if (activeSendingRequestId) {
+      assistantStore.finishSending(activeSendingRequestId);
+      activeSendingRequestId = null;
+    }
     unsubscribeAssistant();
   });
 
@@ -363,16 +371,6 @@
     void scrollToBottom('auto', 1);
   }
 
-  function buildHistoryPayload() {
-    return messages
-      .filter((message) => message.role === 'user' || message.role === 'assistant')
-      .slice(-8)
-      .map((message) => ({
-        role: message.role,
-        content: message.content,
-      }));
-  }
-
   function getSelectedModelConfig() {
     if (selectedModelId === BASIC_ASSISTANT_MODEL_ID) {
       return null;
@@ -412,17 +410,25 @@
     // 用户主动发送 → 强制切回底部跟随模式
     stickToBottom = true;
     error = null;
-    assistantStore.setSending(true);
 
-    const history = buildHistoryPayload();
+    const history = buildHistoryPayload(messages);
 
     assistantStore.appendMessage({
       role: 'user',
       content: trimmed,
     });
 
+    // 为本次回答绑定稳定 ID；所有流式事件只允许更新这条消息。
+    const assistantMessageId =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `ask-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    activeSendingRequestId = assistantMessageId;
+    assistantStore.beginSending(assistantMessageId);
+
     // 发送即插入占位 assistant message，流式事件会逐步更新它（步骤/引用/答案）
     assistantStore.appendMessage({
+      id: assistantMessageId,
       role: 'assistant',
       content: '',
       streaming: true,
@@ -430,6 +436,7 @@
       references: [],
       toolLabels: [],
       usedAi: false,
+      failed: false,
     });
 
     input = '';
@@ -438,10 +445,15 @@
     await scrollToBottom('auto', 2);
 
     let streamSettled = false;
+    let requestGate = null;
     try {
       const channel = new Channel();
+      requestGate = createRequestEventGate({
+        isDestroyed: () => destroyed,
+        onEvent: (event) => handleStreamEvent(assistantMessageId, event),
+      });
       channel.onmessage = (event) => {
-        if (handleStreamEvent(event)) streamSettled = true;
+        if (requestGate.handle(event)) streamSettled = true;
       };
       const answer = await withTimeout(
         invoke('chat_work_assistant', {
@@ -454,35 +466,40 @@
         ASK_TIMEOUT_MS
       );
 
-      // 事件优先：已收到 done/error 则用事件结果；否则用 await 返回值兜底
-      if (!streamSettled) {
-        // 非流式兜底：invoke 返回值直接填充
-        const fallbackContent = answer?.answer?.trim() || t('ask.emptyResponse');
-        assistantStore.updateLastStreaming((m) => ({
-          ...m,
-          content: fallbackContent,
-          references: answer?.references || m.references,
-          toolLabels: answer?.toolLabels || m.toolLabels,
-          usedAi: answer?.usedAi,
-          modelName: answer?.modelName,
-          streaming: false,
-        }));
-      } else {
-        // 流式已收尾，补 modelName（事件未携带）
-        assistantStore.updateLastStreaming((m) => ({ ...m, modelName: answer.modelName }));
-      }
+      // 事件优先：已收到 done/error 则保留事件内容；否则用 await 返回值兜底。
+      assistantStore.updateMessageById(assistantMessageId, (m) => ({
+        ...m,
+        ...(streamSettled
+          ? {}
+          : {
+              content: answer?.answer?.trim() || t('ask.emptyResponse'),
+              references: answer?.references || m.references,
+              toolLabels: answer?.toolLabels || m.toolLabels,
+              streaming: false,
+              failed: false,
+            }),
+        // Done 事件不携带模型元数据，因此无论是否已收尾都按 ID 补写。
+        usedAi: answer?.usedAi ?? m.usedAi,
+        modelName: answer?.modelName ?? m.modelName,
+      }));
     } catch (e) {
+      requestGate?.close();
       if (!destroyed) {
         error = e.toString();
       }
-      // 把错误写入占位消息，避免用户看到空白
-      assistantStore.updateLastStreaming((m) => ({
+      // 只把错误写入本次占位消息，迟到的旧事件不会影响后续请求。
+      assistantStore.updateMessageById(assistantMessageId, (m) => ({
         ...m,
         content: m.content || `${t('ask.requestFailed')}: ${e}`,
         streaming: false,
+        failed: true,
       }));
     } finally {
-      assistantStore.setSending(false);
+      requestGate?.close();
+      assistantStore.finishSending(assistantMessageId);
+      if (activeSendingRequestId === assistantMessageId) {
+        activeSendingRequestId = null;
+      }
       if (destroyed) return;
       await tick();
       resizeComposer();
@@ -491,68 +508,21 @@
   }
 
   // 处理后端流式事件，返回 true 表示终态（done/error）。
-  function handleStreamEvent(event) {
-    if (!event || typeof event !== 'object') return false;
-    switch (event.type) {
-      case 'stepStart':
-        assistantStore.updateLastStreaming((m) => ({
-          ...m,
-          steps: [...m.steps, { tool: event.tool, label: event.label, status: 'running' }],
-        }));
-        autoScrollOnStream();
-        return false;
-      case 'stepResult':
-        assistantStore.updateLastStreaming((m) => ({
-          ...m,
-          steps: m.steps.map((s, i) =>
-            i === m.steps.length - 1 ? { ...s, status: 'done', hits: event.hits, references: event.references || [] } : s
-          ),
-          references: event.references?.length
-            ? mergeReferences(m.references, event.references)
-            : m.references,
-        }));
-        autoScrollOnStream();
-        return false;
-      case 'token':
-        assistantStore.updateLastStreaming((m) => ({ ...m, content: m.content + event.token }));
-        autoScrollOnStream();
-        return false;
-      case 'done':
-        assistantStore.updateLastStreaming((m) => ({
-          ...m,
-          content: event.answer ?? m.content,
-          references: event.references?.length ? event.references : m.references,
-          toolLabels: event.toolLabels?.length ? event.toolLabels : m.toolLabels,
-          streaming: false,
-        }));
-        // done：用户在底部时强制滚一次（确保完整内容可见）
-        if (!destroyed) void scrollToBottom('auto', 2);
-        return true;
-      case 'error':
-        assistantStore.updateLastStreaming((m) => ({
-          ...m,
-          content: event.error || m.content || t('ask.requestFailed'),
-          streaming: false,
-        }));
-        return true;
-      default:
-        return false;
-    }
-  }
+  function handleStreamEvent(messageId, event) {
+    let terminal = false;
+    assistantStore.updateMessageById(messageId, (message) => {
+      const result = reduceStreamEvent(message, event, t('ask.requestFailed'));
+      terminal = result.terminal;
+      return result.message;
+    });
 
-  function mergeReferences(existing, incoming) {
-    const seen = new Set(
-      (existing || []).map((r) => `${r.sourceId ?? ''}|${r.timestamp}|${r.title}`)
-    );
-    const merged = [...(existing || [])];
-    for (const r of incoming || []) {
-      const key = `${r.sourceId ?? ''}|${r.timestamp}|${r.title}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        merged.push(r);
-      }
+    if (event?.type === 'stepStart' || event?.type === 'stepResult' || event?.type === 'token') {
+      autoScrollOnStream();
+    } else if (event?.type === 'done' && !destroyed) {
+      // done：用户在底部时强制滚一次（确保完整内容可见）
+      void scrollToBottom('auto', 2);
     }
-    return merged;
+    return terminal;
   }
 
   function handleComposerKeydown(event) {
@@ -655,11 +625,19 @@
                           >
                             {#if step.status === 'running'}
                               <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-500 dark:border-indigo-900/60 dark:border-t-indigo-400"></span>
-                            {:else}
+                            {:else if step.ok === false}
+                              <span class="inline-block h-1.5 w-1.5 rounded-full bg-rose-500"></span>
+                            {:else if step.ok === true}
                               <span class="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
+                            {:else}
+                              <span class="inline-block h-1.5 w-1.5 rounded-full bg-slate-400"></span>
                             {/if}
                             <span class="font-medium">{step.label}</span>
-                            {#if step.status === 'done' && step.hits != null}<span class="text-slate-400 dark:text-[#636c76]">· {step.hits} {t('ask.hits')}</span>{/if}
+                            {#if step.status === 'done' && step.ok === false}
+                              <span class="text-rose-500 dark:text-rose-400">· {t('ask.stepFailed')}</span>
+                            {:else if step.status === 'done' && step.tool === 'search_memory' && step.ok === true && step.hits != null}
+                              <span class="text-slate-400 dark:text-[#636c76]">· {step.hits} {t('ask.hits')}</span>
+                            {/if}
                             {#if step.references?.length}
                               <svg class="w-3 h-3 ml-auto shrink-0 text-slate-400 transition-transform group-open/step:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                             {/if}

@@ -33,6 +33,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 优化
 - **日报页面视觉重设计**：去玻璃拟态 + 斜纹纹理，改极简现代风（统一 token、轻阴影、大留白、统计卡重做、表格去重阴影 + zebra、活动时间线折叠样式现代化）。
+- **助手多轮对话携带工具历史轨迹**：历史 payload 此前只发 `{role, content}`，丢掉了工具步骤信息，导致下一轮模型重走上一轮失败的工具（例如上轮 `search_memory` 0 条后下轮又先调 `search_memory`）。现在 assistant 消息若含已完成工具步骤，会以紧凑内联摘要追加到 content 尾部再发后端。摘要按工具类型区分，避免数字误导：
+  - 失败工具：`web_search↯`（最强"别再试"信号）
+  - `search_memory`：`search_memory→0条`（references 仅它贡献，hits 有真实语义）
+  - 其他成功工具：`query_activities✓` / `fetch_url✓`（不写数字，因为它们的 hits 恒为 0——`collect_references` 全项目仅 search_memory 调用一次）
+  - 示例：`[工具：search_memory→0条 | query_activities✓ | web_search↯]`
+  - system prompt 增加声明，告知模型这种方括号片段是机器摘要、不要复述给用户（4 个 locale 各自翻译，加在 `ask.rs` 的 `build_assistant_system_prompt` 末尾——该函数是生产路径 `chat_work_assistant` 唯一调用的 prompt 源；之前曾误加在 `executor.rs` 的 `DEFAULT_SYSTEM_PROMPT`，但生产路径 `unwrap_or` 永远走不到，是死代码，已修正）。
+  - 同时：后端 `StepResult` 事件增加 `ok: bool` 字段区分真正失败 vs 成功但 0 引用；前端跳过 streaming 或失败的半截轮次；补齐端到端“防重走失败路径”、旧事件三态兼容和各 locale system prompt 契约测试。
+- **助手流式请求隔离与可靠投递**：每次回答按 assistant 消息 ID 定点更新，并以 `sendingRequestId` 绑定发送占用；页面卸载后可立即开始新请求，旧请求的迟到事件和 finally 不会污染或释放新请求。Token 增量仍允许在背压时丢帧，`StepStart`、`StepResult`、`Done` 则通过内部 ACK 等待 Tauri Channel 实际发送成功；桥接失败会向 Agent 传播并取消已在途的模型/工具 Future，且不会误走 FastPath。
+- **工具计数测试断言修复**：移除 `get_weather` 后基础工具数从 5 变 6，但 `test_openai_tools_format_is_valid` 的断言未同步更新，已修正。
 
 ## [1.0.55] - 2026-07-09
 ### 修复

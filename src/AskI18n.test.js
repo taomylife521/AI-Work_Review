@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import zhCN from './lib/i18n/locales/zh-CN.js';
+import zhTW from './lib/i18n/locales/zh-TW.js';
+import en from './lib/i18n/locales/en.js';
+import ar from './lib/i18n/locales/ar.js';
 
 const CJK = /[一-鿿]/;
 
@@ -50,4 +54,20 @@ test('Ask 每个 provider 都含 en 字段（英文模式不 fallback 到中文�
     providerCount > 0 && enCount === providerCount,
     `provider 数(${providerCount}) != en 字段数(${enCount})，英文模式会 fallback 到中文`,
   );
+});
+
+test('Ask 四语言均提供非空的工具执行失败文案', () => {
+  const locales = { zhCN, zhTW, en, ar };
+
+  for (const [locale, messages] of Object.entries(locales)) {
+    assert.equal(
+      typeof messages.ask.stepFailed,
+      'string',
+      `${locale} 缺少 ask.stepFailed`,
+    );
+    assert.ok(
+      messages.ask.stepFailed.trim().length > 0,
+      `${locale} 的 ask.stepFailed 不能为空`,
+    );
+  }
 });

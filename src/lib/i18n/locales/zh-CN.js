@@ -648,6 +648,7 @@ export default {
       ],
       references: '查看依据（{count}）',
       hits: '条',
+      stepFailed: '工具执行失败',
       requestFailed: '请求失败',
       timeoutError: '请求超时，请稍后重试',
       placeholder: '问点什么，比如：我这周主要做了什么？',

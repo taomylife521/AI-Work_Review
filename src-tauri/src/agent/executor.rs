@@ -5,15 +5,15 @@
 //! 对应 Python: 03_agent_loop.py 里的 agent_run() 函数
 //! 架构位置：在 Tools (Stage 1) 和 Model (Stage 2) 之上
 
-use super::events::{default_tool_label, StreamEvent};
+use super::events::{default_tool_label, StreamEvent, StreamEventSender};
 use super::model::{self, Message, StopReason};
 use super::tools::{ToolRegistry, WebToolsConfig};
 use crate::config::ModelConfig;
 use crate::database::Database;
 use crate::error::AppError;
+use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
 use work_review_core::database::MemorySearchItem;
 
 // ══════════════════════════════════════════════════════════
@@ -29,6 +29,17 @@ pub struct AgentResult {
     pub tool_labels: Vec<String>,
     /// 工具执行收集的引用记录（供前端展示"依据"）
     pub references: Vec<MemorySearchItem>,
+}
+
+/// Agent 执行失败原因。
+///
+/// 接收端关闭不是模型失败：前者表示前端已不再需要结果，必须立即停止后续
+/// 工具、模型和降级流程；后者仍允许 Orchestrator 按既有策略降级。
+#[derive(Debug)]
+pub(crate) enum AgentRunError {
+    EventReceiverClosed,
+    EventDeliveryFailed(String),
+    Execution(AppError),
 }
 
 // ══════════════════════════════════════════════════════════
@@ -110,8 +121,8 @@ impl AgentExecutor {
         ignored_apps: Vec<String>,
         excluded_domains: Vec<String>,
         web_tools: Option<WebToolsConfig>,
-        event_tx: Option<mpsc::Sender<StreamEvent>>,
-    ) -> Result<AgentResult, AppError> {
+        event_tx: Option<StreamEventSender>,
+    ) -> Result<AgentResult, AgentRunError> {
         // 注入当前日期上下文（issue #122）：让模型能正确理解"今天/本周/上周"
         // 等相对时间词，避免工具调用时把日期算错。
         // 联网开启时追加一句能力说明，帮助小模型正确选择联网工具。
@@ -150,29 +161,39 @@ impl AgentExecutor {
         let start = Instant::now();
 
         for _ in 0..max_iter {
+            ensure_event_receiver_open(&event_tx)?;
+
             // ── 第 1 步：调用 LLM（Stage 2） ──
             // 有事件通道时走 token 流式（文本增量实时推给前端，批量合并降低
             // IPC 频率）；无通道（单测/非流式调用方）保持原非流式路径。
-            let response = if event_tx.is_some() {
-                let mut batcher = TokenBatcher::new();
-                let result = {
-                    let mut on_text =
-                        |delta: &str| batcher.push(delta, &event_tx);
-                    model::chat_with_tools_streaming(
-                        model_config,
-                        &sys,
-                        &messages,
-                        &tools,
-                        &mut on_text,
-                    )
-                    .await
-                };
-                batcher.flush(&event_tx);
-                result
-            } else {
-                model::chat_with_tools(model_config, &sys, &messages, &tools).await
-            }
-            .map_err(|e| AppError::Analysis(format!("Agent 调用失败: {e}")))?;
+            let response_result = await_or_event_receiver_closed(&event_tx, async {
+                if event_tx.is_some() {
+                    let mut batcher = TokenBatcher::new();
+                    let result = {
+                        let mut on_text = |delta: &str| batcher.push(delta, &event_tx);
+                        model::chat_with_tools_streaming(
+                            model_config,
+                            &sys,
+                            &messages,
+                            &tools,
+                            &mut on_text,
+                        )
+                        .await
+                    };
+                    batcher.flush(&event_tx);
+                    result
+                } else {
+                    model::chat_with_tools(model_config, &sys, &messages, &tools).await
+                }
+            })
+            .await?;
+
+            // 若模型执行期间前端已离开，关闭原因优先于模型结果：不能把它误判为
+            // 模型失败后继续进入 FastPath 降级，也不能继续执行模型返回的工具调用。
+            ensure_event_receiver_open(&event_tx)?;
+            let response = response_result.map_err(|e| {
+                AgentRunError::Execution(AppError::Analysis(format!("Agent 调用失败: {e}")))
+            })?;
 
             // ── 第 2 步：判断 LLM 的意图 ──
             match response.stop_reason {
@@ -180,7 +201,7 @@ impl AgentExecutor {
                     // LLM 给出最终回答 → 循环结束
                     let content = response.content.unwrap_or_default();
                     let references = tool_context.take_all_references();
-                    emit_done(&event_tx, &content, &references, &tool_labels);
+                    emit_done(&event_tx, &content, &references, &tool_labels).await?;
                     return Ok(AgentResult {
                         answer: content,
                         tool_labels,
@@ -201,7 +222,7 @@ impl AgentExecutor {
                             "模型未返回可执行的工具调用，请稍后重试。".to_string()
                         });
                         let references = tool_context.take_all_references();
-                        emit_done(&event_tx, &content, &references, &tool_labels);
+                        emit_done(&event_tx, &content, &references, &tool_labels).await?;
                         return Ok(AgentResult {
                             answer: content,
                             tool_labels,
@@ -221,34 +242,41 @@ impl AgentExecutor {
                             }
 
                             // 步骤开始：推送 StepStart，并记录引用基线以取本轮增量
-                            emit_event(
+                            emit_control_event(
                                 &event_tx,
                                 StreamEvent::StepStart {
                                     tool: tc.name.clone(),
                                     label: default_tool_label(&tc.name).to_string(),
                                 },
-                            );
+                            )
+                            .await?;
                             let ref_base = tool_context.references_len();
 
                             // 执行工具（Stage 1；联网工具为异步）
-                            let result = match registry
-                                .execute(&tc.name, tc.arguments.clone(), &tool_context)
-                                .await
-                            {
-                                Ok(r) => r,
-                                Err(e) => format!("工具执行失败: {e}"),
+                            // 保留 ok 标志：StepResult 需要区分真正失败 vs 成功但 0 引用。
+                            ensure_event_receiver_open(&event_tx)?;
+                            let execution_result = await_or_event_receiver_closed(
+                                &event_tx,
+                                registry.execute(&tc.name, tc.arguments.clone(), &tool_context),
+                            )
+                            .await?;
+                            let (result, ok) = match execution_result {
+                                Ok(r) => (r, true),
+                                Err(e) => (format!("工具执行失败: {e}"), false),
                             };
 
-                            // 步骤结束：推送 StepResult（携带本轮新增引用）
+                            // 步骤结束：推送 StepResult（携带本轮新增引用 + 成败标志）
                             let new_refs = tool_context.drain_from(ref_base);
-                            emit_event(
+                            emit_control_event(
                                 &event_tx,
                                 StreamEvent::StepResult {
                                     tool: tc.name.clone(),
+                                    ok,
                                     hits: new_refs.len(),
                                     references: new_refs,
                                 },
-                            );
+                            )
+                            .await?;
 
                             // ③ 追加工具结果到对话历史（携带工具名，Gemini 需要）
                             messages.push(Message::tool_result_named(
@@ -267,7 +295,7 @@ impl AgentExecutor {
                         .content
                         .unwrap_or_else(|| "回答被截断，请尝试缩短问题。".to_string());
                     let references = tool_context.take_all_references();
-                    emit_done(&event_tx, &content, &references, &tool_labels);
+                    emit_done(&event_tx, &content, &references, &tool_labels).await?;
                     return Ok(AgentResult {
                         answer: content,
                         tool_labels,
@@ -280,7 +308,7 @@ impl AgentExecutor {
             if start.elapsed().as_secs() > 30 {
                 let content = "处理超时，请尝试更具体的问题。".to_string();
                 let references = tool_context.take_all_references();
-                emit_done(&event_tx, &content, &references, &tool_labels);
+                emit_done(&event_tx, &content, &references, &tool_labels).await?;
                 return Ok(AgentResult {
                     answer: content,
                     tool_labels,
@@ -292,7 +320,7 @@ impl AgentExecutor {
         // ── 超过最大迭代次数 ──
         let content = "抱歉，处理这个问题需要过多步骤。请尝试更具体地描述。".to_string();
         let references = tool_context.take_all_references();
-        emit_done(&event_tx, &content, &references, &tool_labels);
+        emit_done(&event_tx, &content, &references, &tool_labels).await?;
         Ok(AgentResult {
             answer: content,
             tool_labels,
@@ -302,8 +330,7 @@ impl AgentExecutor {
 }
 
 /// Token 增量批量合并器：避免每个 token 一条 IPC 消息打爆通道（容量 64）。
-/// 攒够 64 字节或距上次发送 ≥100ms 就 flush 一次；答案完整性由终态 Done
-/// 事件兜底（前端会用完整答案覆盖流式内容），丢帧只影响过程观感。
+/// 满 64 字节或超过 100ms 时 flush；通道满时丢弃增量（Done 携完整答案兜底）。
 struct TokenBatcher {
     buf: String,
     last_flush: Instant,
@@ -320,18 +347,18 @@ impl TokenBatcher {
         }
     }
 
-    fn push(&mut self, delta: &str, tx: &Option<mpsc::Sender<StreamEvent>>) {
+    fn push(&mut self, delta: &str, tx: &Option<StreamEventSender>) {
         self.buf.push_str(delta);
         if self.buf.len() >= Self::MAX_BYTES || self.last_flush.elapsed() >= Self::MAX_INTERVAL {
             self.flush(tx);
         }
     }
 
-    fn flush(&mut self, tx: &Option<mpsc::Sender<StreamEvent>>) {
+    fn flush(&mut self, tx: &Option<StreamEventSender>) {
         if self.buf.is_empty() {
             return;
         }
-        emit_event(
+        emit_token_event(
             tx,
             StreamEvent::Token {
                 token: std::mem::take(&mut self.buf),
@@ -341,28 +368,67 @@ impl TokenBatcher {
     }
 }
 
-/// 推送一个流式事件；channel 满/关闭都不影响主流程。
-fn emit_event(tx: &Option<mpsc::Sender<StreamEvent>>, evt: StreamEvent) {
+/// Token 仅用于过程观感，通道满或关闭时允许丢弃；完整答案由 Done 兜底。
+fn emit_token_event(tx: &Option<StreamEventSender>, evt: StreamEvent) {
     if let Some(tx) = tx {
-        let _ = tx.try_send(evt);
+        tx.try_send_token(evt);
     }
 }
 
+/// 在开始昂贵步骤前检查事件桥接是否仍存活。
+fn ensure_event_receiver_open(tx: &Option<StreamEventSender>) -> Result<(), AgentRunError> {
+    if tx.as_ref().is_some_and(StreamEventSender::is_closed) {
+        Err(AgentRunError::EventReceiverClosed)
+    } else {
+        Ok(())
+    }
+}
+
+/// 同时等待业务 Future 和桥接关闭信号，避免在已确认断开的请求上继续消耗模型或工具。
+async fn await_or_event_receiver_closed<T>(
+    tx: &Option<StreamEventSender>,
+    future: impl Future<Output = T>,
+) -> Result<T, AgentRunError> {
+    if let Some(tx) = tx {
+        tokio::select! {
+            biased;
+            _ = tx.closed() => Err(AgentRunError::EventReceiverClosed),
+            result = future => Ok(result),
+        }
+    } else {
+        Ok(future.await)
+    }
+}
+
+/// 控制事件必须等到 Tauri Channel 实际发送成功；桥接失败时向上返回取消原因。
+async fn emit_control_event(
+    tx: &Option<StreamEventSender>,
+    evt: StreamEvent,
+) -> Result<(), AgentRunError> {
+    if let Some(tx) = tx {
+        tx.send_control(evt)
+            .await
+            .map_err(AgentRunError::EventDeliveryFailed)?;
+    }
+    Ok(())
+}
+
 /// 推送终态 Done 事件（携带完整答案、引用、工具标签）。
-fn emit_done(
-    tx: &Option<mpsc::Sender<StreamEvent>>,
+async fn emit_done(
+    tx: &Option<StreamEventSender>,
     answer: &str,
     references: &[MemorySearchItem],
     tool_labels: &[String],
-) {
-    emit_event(
+) -> Result<(), AgentRunError> {
+    emit_control_event(
         tx,
         StreamEvent::Done {
             answer: answer.to_string(),
             references: references.to_vec(),
             tool_labels: tool_labels.to_vec(),
         },
-    );
+    )
+    .await
 }
 
 // ══════════════════════════════════════════════════════════
@@ -382,7 +448,7 @@ mod tests {
     /// TokenBatcher：小增量攒批发送，flush 清空缓冲；事件形如 Token{token}。
     #[test]
     fn token批量合并应攒批发送并在flush时清空() {
-        let (tx, mut rx) = mpsc::channel::<StreamEvent>(64);
+        let (tx, mut rx) = StreamEventSender::channel(64);
         let tx = Some(tx);
         let mut batcher = TokenBatcher::new();
 
@@ -392,7 +458,7 @@ mod tests {
 
         // 攒够字节数 → 自动 flush（"你好" 6 字节 + 62 个 'a' = 68 字节 ≥ 64）
         batcher.push(&"a".repeat(62), &tx);
-        match rx.try_recv() {
+        match rx.try_recv().map(|envelope| envelope.event) {
             Ok(StreamEvent::Token { token }) => {
                 assert!(token.starts_with("你好"));
                 assert_eq!(token.len(), 68);
@@ -407,10 +473,142 @@ mod tests {
         // 有余量时 flush → 发送剩余
         batcher.push("尾", &tx);
         batcher.flush(&tx);
-        match rx.try_recv() {
+        match rx.try_recv().map(|envelope| envelope.event) {
             Ok(StreamEvent::Token { token }) => assert_eq!(token, "尾"),
             other => panic!("应收到 Token 事件，实际: {other:?}"),
         }
+    }
+
+    #[test]
+    fn token通道满时允许丢弃增量() {
+        let (sender, mut rx) = StreamEventSender::channel(1);
+        sender.try_send_token(StreamEvent::Token {
+            token: "已占满".to_string(),
+        });
+        let tx = Some(sender);
+        let mut batcher = TokenBatcher::new();
+
+        batcher.push(&"a".repeat(TokenBatcher::MAX_BYTES), &tx);
+
+        assert!(matches!(
+            rx.try_recv().map(|envelope| envelope.event),
+            Ok(StreamEvent::Token { token }) if token == "已占满"
+        ));
+        assert!(rx.try_recv().is_err(), "满通道中的 Token 增量应允许丢弃");
+    }
+
+    #[tokio::test]
+    async fn 控制事件在背压时应等待外部投递确认后再返回() {
+        let (sender, mut rx) = StreamEventSender::channel(1);
+        sender.try_send_token(StreamEvent::Token {
+            token: "先占满通道".to_string(),
+        });
+        let tx = Some(sender);
+
+        let send_task = tokio::spawn(async move {
+            emit_control_event(
+                &tx,
+                StreamEvent::StepStart {
+                    tool: "query_activities".to_string(),
+                    label: "活动查询".to_string(),
+                },
+            )
+            .await
+        });
+
+        tokio::task::yield_now().await;
+        assert!(!send_task.is_finished(), "通道满时控制事件必须等待容量");
+        assert!(matches!(
+            rx.recv().await.map(|envelope| envelope.event),
+            Some(StreamEvent::Token { token }) if token == "先占满通道"
+        ));
+
+        let envelope = rx.recv().await.expect("应收到控制事件");
+        assert!(matches!(
+            &envelope.event,
+            StreamEvent::StepStart { tool, label }
+                if tool == "query_activities" && label == "活动查询"
+        ));
+        tokio::task::yield_now().await;
+        assert!(
+            !send_task.is_finished(),
+            "控制事件仅进入内部通道时不能视为已送达前端"
+        );
+        envelope
+            .delivery_ack
+            .expect("控制事件必须携带投递确认器")
+            .send(Ok(()))
+            .expect("发送确认结果应成功");
+
+        tokio::time::timeout(Duration::from_secs(1), send_task)
+            .await
+            .expect("外部确认后控制事件发送不应超时")
+            .expect("控制事件发送任务不应 panic")
+            .expect("外部投递成功时控制事件应发送成功");
+    }
+
+    #[tokio::test]
+    async fn 控制事件在外部投递失败时应返回失败原因() {
+        let (tx, mut rx) = StreamEventSender::channel(1);
+        let send_task = tokio::spawn(async move {
+            emit_control_event(
+                &Some(tx),
+                StreamEvent::Done {
+                    answer: "不会送达".to_string(),
+                    references: vec![],
+                    tool_labels: vec![],
+                },
+            )
+            .await
+        });
+
+        let envelope = rx.recv().await.expect("应收到控制事件");
+        envelope
+            .delivery_ack
+            .expect("控制事件必须携带投递确认器")
+            .send(Err("Webview 已关闭".to_string()))
+            .expect("发送失败确认应成功");
+
+        let result = send_task.await.expect("控制事件发送任务不应 panic");
+        assert!(matches!(
+            result,
+            Err(AgentRunError::EventDeliveryFailed(message)) if message == "Webview 已关闭"
+        ));
+    }
+
+    #[tokio::test]
+    async fn 控制事件在内部接收端关闭时应返回失败() {
+        let (tx, rx) = StreamEventSender::channel(1);
+        drop(rx);
+
+        let result = emit_control_event(
+            &Some(tx),
+            StreamEvent::Done {
+                answer: "不会送达".to_string(),
+                references: vec![],
+                tool_labels: vec![],
+            },
+        )
+        .await;
+
+        assert!(matches!(result, Err(AgentRunError::EventDeliveryFailed(_))));
+    }
+
+    #[tokio::test]
+    async fn 桥接关闭时应及时取消在途future() {
+        let (tx, rx) = StreamEventSender::channel(1);
+        let tx = Some(tx);
+        let task = tokio::spawn(async move {
+            await_or_event_receiver_closed(&tx, std::future::pending::<()>()).await
+        });
+
+        drop(rx);
+
+        let result = tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("桥接关闭后在途 Future 应及时结束")
+            .expect("取消等待任务不应 panic");
+        assert!(matches!(result, Err(AgentRunError::EventReceiverClosed)));
     }
 
     #[test]

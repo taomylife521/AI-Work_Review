@@ -62,3 +62,60 @@ test('updateLastStreaming 在无 streaming 消息时不改动状态', () => {
   assert.equal(after.messages.length, beforeLen);
   assert.ok(!after.messages.some((m) => m.content === '不应出现'));
 });
+
+test('updateMessageById 在两个 streaming 消息并存时只更新目标消息', () => {
+  assistantStore.reset();
+  assistantStore.setMessages([
+    { id: 'stream-a', role: 'assistant', content: '回答 A', streaming: true },
+    { id: 'stream-b', role: 'assistant', content: '回答 B', streaming: true },
+  ]);
+
+  assistantStore.updateMessageById('stream-b', (message) => ({
+    ...message,
+    content: `${message.content}（更新）`,
+  }));
+
+  const messages = snapshot().messages;
+  assert.equal(messages[0].content, '回答 A');
+  assert.equal(messages[0].streaming, true);
+  assert.equal(messages[1].content, '回答 B（更新）');
+  assert.equal(messages[1].streaming, true);
+});
+
+test('updateMessageById 找不到消息 ID 时保持状态对象不变', () => {
+  assistantStore.reset();
+  assistantStore.setMessages([
+    { id: 'existing', role: 'assistant', content: '原内容', streaming: true },
+  ]);
+  const before = snapshot();
+  let updaterCalled = false;
+
+  assistantStore.updateMessageById('missing', (message) => {
+    updaterCalled = true;
+    return { ...message, content: '不应出现' };
+  });
+
+  assert.strictEqual(snapshot(), before);
+  assert.equal(updaterCalled, false);
+});
+
+test('sending 只允许当前请求结束，旧请求 finally 不会释放新请求', () => {
+  assistantStore.reset();
+
+  assistantStore.beginSending('request-old');
+  assert.equal(snapshot().sending, true);
+  assert.equal(snapshot().sendingRequestId, 'request-old');
+
+  // 旧组件卸载时释放自己的请求，新组件随后开始另一请求。
+  assistantStore.finishSending('request-old');
+  assistantStore.beginSending('request-new');
+
+  // 旧请求稍后进入 finally，不能清理新请求的 sending 状态。
+  assistantStore.finishSending('request-old');
+  assert.equal(snapshot().sending, true);
+  assert.equal(snapshot().sendingRequestId, 'request-new');
+
+  assistantStore.finishSending('request-new');
+  assert.equal(snapshot().sending, false);
+  assert.equal(snapshot().sendingRequestId, null);
+});

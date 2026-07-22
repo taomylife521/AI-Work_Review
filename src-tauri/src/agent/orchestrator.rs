@@ -5,13 +5,12 @@
 //!
 //! 对应 Python: 05_orchestrator.py 里的 Orchestrator 类
 
-use super::events::StreamEvent;
-use super::executor::AgentExecutor;
+use super::events::{StreamEvent, StreamEventSender};
+use super::executor::{AgentExecutor, AgentRunError};
 use super::model::Message;
 use crate::config::ModelConfig;
 use crate::database::Database;
 use crate::error::AppError;
-use tokio::sync::mpsc;
 use work_review_core::database::MemorySearchItem;
 
 // ══════════════════════════════════════════════════════════
@@ -176,7 +175,7 @@ impl Orchestrator {
         ignored_apps: &[String],
         excluded_domains: &[String],
         web_tools: Option<super::tools::WebToolsConfig>,
-        event_tx: Option<mpsc::Sender<StreamEvent>>,
+        event_tx: Option<StreamEventSender>,
     ) -> Result<OrchestratorResult, AppError> {
         let has_model = model_config
             .map(|c| !c.endpoint.trim().is_empty() && !c.model.trim().is_empty())
@@ -184,13 +183,14 @@ impl Orchestrator {
 
         // ① 路由决策
         let decision = route_query(question, has_model);
+        ensure_event_receiver_open(&event_tx)?;
 
         // ② 执行对应路径
         match decision.path {
             QueryPath::Direct => {
                 let answer = direct_answer(question);
                 let tool_labels = vec!["direct".to_string()];
-                emit_done(&event_tx, &answer, &[], &tool_labels);
+                emit_done(&event_tx, &answer, &[], &tool_labels).await?;
                 Ok(OrchestratorResult {
                     answer,
                     used_ai: false,
@@ -203,7 +203,7 @@ impl Orchestrator {
                 // FastPath：用规则查数据 + 简单格式化
                 let answer = fast_answer(question, database, ignored_apps, excluded_domains)?;
                 let tool_labels = vec!["rule-based".to_string()];
-                emit_done(&event_tx, &answer, &[], &tool_labels);
+                emit_done(&event_tx, &answer, &[], &tool_labels).await?;
                 Ok(OrchestratorResult {
                     answer,
                     used_ai: false,
@@ -240,12 +240,17 @@ impl Orchestrator {
                             references: agent_result.references,
                         })
                     }
-                    Err(_e) => {
+                    Err(AgentRunError::EventReceiverClosed) => Err(event_receiver_closed_error()),
+                    Err(AgentRunError::EventDeliveryFailed(message)) => {
+                        Err(event_delivery_error(message))
+                    }
+                    Err(AgentRunError::Execution(_e)) => {
                         // Agent 失败 → 降级到 FastPath（不暴露内部错误细节）
+                        ensure_event_receiver_open(&event_tx)?;
                         let answer =
                             fast_answer(question, database, ignored_apps, excluded_domains)?;
                         let tool_labels = vec!["降级查询".to_string()];
-                        emit_done(&event_tx, &answer, &[], &tool_labels);
+                        emit_done(&event_tx, &answer, &[], &tool_labels).await?;
                         Ok(OrchestratorResult {
                             answer,
                             used_ai: false,
@@ -259,7 +264,7 @@ impl Orchestrator {
             QueryPath::Fallback => {
                 let answer = fallback_answer(question);
                 let tool_labels = vec!["fallback".to_string()];
-                emit_done(&event_tx, &answer, &[], &tool_labels);
+                emit_done(&event_tx, &answer, &[], &tool_labels).await?;
                 Ok(OrchestratorResult {
                     answer,
                     used_ai: false,
@@ -271,20 +276,39 @@ impl Orchestrator {
     }
 }
 
-/// 推送终态 Done 事件（channel 满/关闭都不影响主流程）。
-fn emit_done(
-    tx: &Option<mpsc::Sender<StreamEvent>>,
+fn event_receiver_closed_error() -> AppError {
+    AppError::Analysis("Agent 事件接收端已关闭，已停止后续处理".to_string())
+}
+
+fn event_delivery_error(message: String) -> AppError {
+    AppError::Analysis(format!("Agent 事件投递失败，已停止后续处理: {message}"))
+}
+
+fn ensure_event_receiver_open(tx: &Option<StreamEventSender>) -> Result<(), AppError> {
+    if tx.as_ref().is_some_and(StreamEventSender::is_closed) {
+        Err(event_receiver_closed_error())
+    } else {
+        Ok(())
+    }
+}
+
+/// 推送终态 Done 事件：必须等 Tauri Channel 确认成功，失败时停止当前流程。
+async fn emit_done(
+    tx: &Option<StreamEventSender>,
     answer: &str,
     references: &[MemorySearchItem],
     tool_labels: &[String],
-) {
+) -> Result<(), AppError> {
     if let Some(tx) = tx {
-        let _ = tx.try_send(StreamEvent::Done {
+        tx.send_control(StreamEvent::Done {
             answer: answer.to_string(),
             references: references.to_vec(),
             tool_labels: tool_labels.to_vec(),
-        });
+        })
+        .await
+        .map_err(event_delivery_error)?;
     }
+    Ok(())
 }
 
 // ══════════════════════════════════════════════════════════
@@ -396,15 +420,31 @@ pub fn fast_answer(
     // 跟随用户提问语言（CJK -> 中文，否则英文）
     let is_chinese = prefers_chinese_answer(question);
     let (lbl_overview, lbl_records, lbl_category, lbl_top_apps, lbl_related) = if is_chinese {
-        ("活动总览", "条记录，总时长", "分类分布", "使用最多的应用", "相关记录")
+        (
+            "活动总览",
+            "条记录，总时长",
+            "分类分布",
+            "使用最多的应用",
+            "相关记录",
+        )
     } else {
-        ("Activity overview", "records, total", "Category breakdown", "Top apps", "Related records")
+        (
+            "Activity overview",
+            "records, total",
+            "Category breakdown",
+            "Top apps",
+            "Related records",
+        )
     };
 
     let mut lines = vec![format!(
         "{} ~ {} {}：",
-        date_from.as_deref().unwrap_or(if is_chinese { "全部" } else { "All" }),
-        date_to.as_deref().unwrap_or(if is_chinese { "今天" } else { "Today" }),
+        date_from
+            .as_deref()
+            .unwrap_or(if is_chinese { "全部" } else { "All" }),
+        date_to
+            .as_deref()
+            .unwrap_or(if is_chinese { "今天" } else { "Today" }),
         lbl_overview
     )];
     lines.push(format!(
@@ -464,7 +504,9 @@ pub fn fast_answer(
 }
 
 fn prefers_chinese_answer(question: &str) -> bool {
-    question.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c))
+    question
+        .chars()
+        .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c))
 }
 
 /// FallbackPath：无模型时的模板回答
@@ -491,6 +533,17 @@ fn fallback_answer(question: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::AiProvider;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_database(name: &str) -> Database {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("work-review-{name}-{unique}.db"));
+        Database::new(&path).expect("创建测试数据库失败")
+    }
 
     #[test]
     fn test_route_greeting() {
@@ -604,5 +657,115 @@ mod tests {
         let answer = fallback_answer("Can you chat with me?");
         assert!(answer.contains("AI model"));
         assert!(!answer.contains("我目前无法使用"));
+    }
+
+    #[tokio::test]
+    async fn direct路径的done在通道背压时应等待投递确认() {
+        let database = test_database("direct-done-backpressure");
+        let (tx, mut rx) = StreamEventSender::channel(1);
+        tx.try_send_token(StreamEvent::Token {
+            token: "先占满通道".to_string(),
+        });
+        let history = Vec::new();
+        let filters = Vec::new();
+
+        let handle = Orchestrator::handle(
+            "你好",
+            None,
+            &database,
+            &history,
+            None,
+            &filters,
+            &filters,
+            None,
+            Some(tx),
+        );
+        let receive = async {
+            assert!(matches!(
+                rx.recv().await.map(|envelope| envelope.event),
+                Some(StreamEvent::Token { token }) if token == "先占满通道"
+            ));
+            let envelope = rx.recv().await.expect("应收到 Done 事件");
+            let done = envelope.event.clone();
+            envelope
+                .delivery_ack
+                .expect("Done 必须携带投递确认器")
+                .send(Ok(()))
+                .expect("发送投递确认应成功");
+            done
+        };
+
+        let (result, done) = tokio::join!(handle, receive);
+        result.expect("Direct 路径应正常完成");
+        assert!(matches!(done, StreamEvent::Done { answer, .. } if !answer.is_empty()));
+    }
+
+    #[tokio::test]
+    async fn direct路径投递失败时应返回错误() {
+        let database = test_database("direct-done-delivery-failed");
+        let (tx, mut rx) = StreamEventSender::channel(1);
+        let history = Vec::new();
+        let filters = Vec::new();
+
+        let handle = Orchestrator::handle(
+            "你好",
+            None,
+            &database,
+            &history,
+            None,
+            &filters,
+            &filters,
+            None,
+            Some(tx),
+        );
+        let reject = async {
+            let envelope = rx.recv().await.expect("应收到 Done 事件");
+            envelope
+                .delivery_ack
+                .expect("Done 必须携带投递确认器")
+                .send(Err("Webview 已关闭".to_string()))
+                .expect("发送失败确认应成功");
+        };
+
+        let (result, ()) = tokio::join!(handle, reject);
+        let error = result.expect_err("实际投递失败时 Direct 路径必须返回错误");
+        assert!(
+            error.to_string().contains("Webview 已关闭"),
+            "应保留外部投递失败原因，实际: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn agent事件接收端关闭时不应误走模型失败降级() {
+        let database = test_database("closed-agent-channel");
+        let model_config = ModelConfig {
+            provider: AiProvider::Ollama,
+            endpoint: "not-a-valid-url".to_string(),
+            api_key: None,
+            model: "test-model".to_string(),
+        };
+        let (tx, rx) = StreamEventSender::channel(1);
+        drop(rx);
+        let history = Vec::new();
+        let filters = Vec::new();
+
+        let error = Orchestrator::handle(
+            "分析一下我的工作",
+            Some(&model_config),
+            &database,
+            &history,
+            None,
+            &filters,
+            &filters,
+            None,
+            Some(tx),
+        )
+        .await
+        .expect_err("接收端关闭时应终止，而不是继续模型或降级流程");
+
+        assert!(
+            error.to_string().contains("事件接收端已关闭"),
+            "应保留关闭原因，实际: {error}"
+        );
     }
 }

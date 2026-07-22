@@ -7,6 +7,7 @@ const DEFAULT_STATE = {
   messages: [],
   selectedModelId: BASIC_ASSISTANT_MODEL_ID,
   sending: false,
+  sendingRequestId: null,
 };
 
 function genId() {
@@ -46,6 +47,8 @@ function loadState() {
         typeof parsed?.selectedModelId === 'string' && parsed.selectedModelId.trim()
           ? parsed.selectedModelId
           : BASIC_ASSISTANT_MODEL_ID,
+      sending: false,
+      sendingRequestId: null,
     };
   } catch (error) {
     console.warn('加载助手会话缓存失败:', error);
@@ -104,12 +107,34 @@ function createAssistantStore() {
           ? messages.slice(-40).map((message) => normalizeMessage(message))
           : [],
       })),
-    setSending: (sending) =>
-      update((state) => ({ ...state, sending })),
+    beginSending: (requestId) =>
+      update((state) => ({
+        ...state,
+        sending: true,
+        sendingRequestId: requestId,
+      })),
+    finishSending: (requestId) =>
+      update((state) => {
+        if (state.sendingRequestId !== requestId) return state;
+        return {
+          ...state,
+          sending: false,
+          sendingRequestId: null,
+        };
+      }),
     // 增量更新当前 streaming 的 assistant message（流式事件驱动）。
     updateLastStreaming: (updater) =>
       update((state) => {
         const idx = state.messages.findIndex((m) => m.streaming);
+        if (idx === -1) return state;
+        const newMessages = state.messages.slice();
+        newMessages[idx] = normalizeMessage(updater({ ...newMessages[idx] }));
+        return { ...state, messages: newMessages };
+      }),
+    // 按请求对应的消息 ID 定点更新，避免并发流式消息互相覆盖。
+    updateMessageById: (messageId, updater) =>
+      update((state) => {
+        const idx = state.messages.findIndex((message) => message.id === messageId);
         if (idx === -1) return state;
         const newMessages = state.messages.slice();
         newMessages[idx] = normalizeMessage(updater({ ...newMessages[idx] }));

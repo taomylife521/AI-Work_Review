@@ -645,6 +645,7 @@ export default {
       ],
       references: 'عرض المراجع ({count})',
       hits: 'عناصر',
+      stepFailed: 'فشل تنفيذ الأداة',
       requestFailed: 'فشل الطلب',
       timeoutError: 'انتهت مهلة الطلب، يرجى المحاولة لاحقاً',
       placeholder: 'اسأل أي شيء، مثلاً: على ماذا عملت بشكل رئيسي هذا الأسبوع؟',
