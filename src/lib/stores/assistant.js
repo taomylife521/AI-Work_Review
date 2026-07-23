@@ -6,6 +6,10 @@ const STORAGE_KEY = 'work-review-assistant-state';
 const DEFAULT_STATE = {
   messages: [],
   selectedModelId: BASIC_ASSISTANT_MODEL_ID,
+  // 标记用户是否曾手动操作过模型选择器。
+  // false = 从未选过（首次打开），助手页可自动选中已配置的模型（issue #133）；
+  // 一旦用户手动切换（含切回基础模板），就置 true，不再自动覆盖用户选择。
+  hasUserSelectedModel: false,
   sending: false,
   sendingRequestId: null,
 };
@@ -47,6 +51,7 @@ function loadState() {
         typeof parsed?.selectedModelId === 'string' && parsed.selectedModelId.trim()
           ? parsed.selectedModelId
           : BASIC_ASSISTANT_MODEL_ID,
+      hasUserSelectedModel: Boolean(parsed?.hasUserSelectedModel),
       sending: false,
       sendingRequestId: null,
     };
@@ -92,13 +97,15 @@ function createAssistantStore() {
         ...state,
         messages: [],
       })),
-    setSelectedModelId: (selectedModelId) =>
+    setSelectedModelId: (selectedModelId, { userInitiated = true } = {}) =>
       update((state) => ({
         ...state,
         selectedModelId:
           typeof selectedModelId === 'string' && selectedModelId.trim()
             ? selectedModelId
             : BASIC_ASSISTANT_MODEL_ID,
+        // 只有用户手动操作（handleModelChange）才标记；程序内部初始化不算
+        hasUserSelectedModel: userInitiated ? true : state.hasUserSelectedModel,
       })),
     setMessages: (messages) =>
       update((state) => ({

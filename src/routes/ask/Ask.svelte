@@ -176,7 +176,18 @@
         !modelProfiles.some((profile) => profile.id === selectedModelId)
       ) {
         selectedModelId = BASIC_ASSISTANT_MODEL_ID;
-        assistantStore.setSelectedModelId(BASIC_ASSISTANT_MODEL_ID);
+        assistantStore.setSelectedModelId(BASIC_ASSISTANT_MODEL_ID, { userInitiated: false });
+      }
+
+      // 首次使用：用户从未手动选过模型，但有已配置的模型档案 → 自动选中第一个
+      // （解决"设置页配了模型，助手页却默认用基础模板"的困惑，issue #133）
+      if (
+        selectedModelId === BASIC_ASSISTANT_MODEL_ID &&
+        !assistantState.hasUserSelectedModel &&
+        modelProfiles.length > 0
+      ) {
+        selectedModelId = modelProfiles[0].id;
+        assistantStore.setSelectedModelId(modelProfiles[0].id, { userInitiated: false });
       }
     } catch (e) {
       console.warn('加载模型配置失败:', e);

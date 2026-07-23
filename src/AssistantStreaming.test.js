@@ -63,6 +63,31 @@ test('updateLastStreaming 在无 streaming 消息时不改动状态', () => {
   assert.ok(!after.messages.some((m) => m.content === '不应出现'));
 });
 
+test('setSelectedModelId 默认标记用户已手动选择（hasUserSelectedModel=true）', () => {
+  assistantStore.reset();
+  assert.equal(snapshot().hasUserSelectedModel, false);
+  assistantStore.setSelectedModelId('some-model-id');
+  assert.equal(snapshot().hasUserSelectedModel, true);
+});
+
+test('setSelectedModelId 传 userInitiated:false 时不标记用户已选（程序初始化）', () => {
+  assistantStore.reset();
+  assistantStore.setSelectedModelId('auto-selected', { userInitiated: false });
+  assert.equal(snapshot().hasUserSelectedModel, false);
+  assert.equal(snapshot().selectedModelId, 'auto-selected');
+});
+
+test('用户手动切回基础模板后不再自动选模型（尊重用户选择）', () => {
+  assistantStore.reset();
+  // 程序自动选中（首次）
+  assistantStore.setSelectedModelId('deepseek-profile', { userInitiated: false });
+  assert.equal(snapshot().hasUserSelectedModel, false);
+  // 用户手动切回基础模板
+  assistantStore.setSelectedModelId('__basic__');
+  assert.equal(snapshot().hasUserSelectedModel, true);
+  assert.equal(snapshot().selectedModelId, '__basic__');
+});
+
 test('updateMessageById 在两个 streaming 消息并存时只更新目标消息', () => {
   assistantStore.reset();
   assistantStore.setMessages([
