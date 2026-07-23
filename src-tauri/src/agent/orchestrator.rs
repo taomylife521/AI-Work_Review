@@ -50,12 +50,37 @@ pub struct RouteDecision {
 pub fn route_query(question: &str, has_model: bool) -> RouteDecision {
     let q = question.trim().to_lowercase();
 
-    // ── 规则 1：闲聊 / 纯问答 → 直接回答 ──
-    let greetings = ["你好", "嗨", "hello", "hi", "你能做什么", "帮助", "help"];
-    if greetings.iter().any(|g| q.contains(g)) && q.len() < 20 {
+    // ── 规则 1：闲聊 / 身份 / 能力问答 → 直接回答（不依赖模型）──
+    // 这类问题无论有没有配模型都应给固定模板回答，避免基础模板模式下
+    // "你是谁"被误判到 FallbackPath 回出"无法使用 AI 模型"的蠢回答。
+    let greetings = [
+        "你好",
+        "嗨",
+        "hello",
+        "hi",
+        "你能做什么",
+        "帮助",
+        "help",
+        // 身份类（issue 截图："你是谁"被误判）
+        "你是谁",
+        "你是什么",
+        "你是干",
+        "你叫什么",
+        "介绍",
+        "who are you",
+        "what are you",
+        // 能力类
+        "你能干",
+        "你能帮我",
+        "你会什么",
+        "你能做啥",
+        "你能做什么",
+        "what can you do",
+    ];
+    if greetings.iter().any(|g| q.contains(g)) && q.len() < 30 {
         return RouteDecision {
             path: QueryPath::Direct,
-            reason: "简短问候/求助".to_string(),
+            reason: "身份/问候/能力问答".to_string(),
         };
     }
 
@@ -327,11 +352,40 @@ pub fn direct_answer(question: &str) -> String {
         })
         .to_string();
     }
-    if q.contains("你能做什么") || q.contains("帮助") || q.contains("help") {
+    // 身份类：你是谁 / 你是什么 / 你叫什么 / who are you
+    let is_identity = [
+        "你是谁",
+        "你是什么",
+        "你是干",
+        "你叫什么",
+        "who are you",
+        "what are you",
+    ]
+    .iter()
+    .any(|p| q.contains(p));
+    if is_identity {
         return (if is_chinese {
-            "我可以帮你：\n1. 查看某天/某周的工作记录\n2. 分析时间分布（编码/会议/文档占比）\n3. 对比不同时间段的效率变化\n4. 搜索特定的工作内容\n请告诉我你想了解什么？"
+            "我是 Work Review 的内置工作助手，可以帮你回顾和分析每天的工作记录——包括时间分布、应用使用、工作会话等。\n\n当前是「基础模板」模式，会基于本地记录给出统计。如果你在设置里配置了 AI 模型，可以在下方切换到对应模型，获得更智能的问答能力。"
         } else {
-            "I can help you:\n1. Review work records for a day/week\n2. Analyze time distribution (coding/meetings/docs)\n3. Compare efficiency across periods\n4. Search for specific work items\nWhat would you like to know?"
+            "I'm the built-in work assistant for Work Review. I help you review and analyze your daily work records — time distribution, app usage, work sessions, and more.\n\nCurrently in Basic Template mode, which gives you local stats. If you've configured an AI model in Settings, switch to it below for smarter Q&A."
+        })
+        .to_string();
+    }
+    // 能力类：你能做什么 / 帮助 / help / what can you do
+    if q.contains("你能做什么")
+        || q.contains("帮助")
+        || q.contains("help")
+        || q.contains("你能干")
+        || q.contains("你能帮我")
+        || q.contains("你会什么")
+        || q.contains("你能做啥")
+        || q.contains("介绍")
+        || q.contains("what can you do")
+    {
+        return (if is_chinese {
+            "我可以帮你：\n1. 查看某天/某周的工作记录\n2. 分析时间分布（编码/会议/文档占比）\n3. 对比不同时间段的效率变化\n4. 搜索特定的工作内容\n\n当前是「基础模板」模式。配置 AI 模型后还可以：智能总结、自由问答、联网搜索等。\n请告诉我你想了解什么？"
+        } else {
+            "I can help you:\n1. Review work records for a day/week\n2. Analyze time distribution (coding/meetings/docs)\n3. Compare efficiency across periods\n4. Search for specific work items\n\nCurrently in Basic Template mode. With an AI model configured, you also get: smart summaries, free-form Q&A, web search, and more.\nWhat would you like to know?"
         })
         .to_string();
     }
@@ -510,18 +564,22 @@ fn prefers_chinese_answer(question: &str) -> bool {
 }
 
 /// FallbackPath：无模型时的模板回答
+///
+/// 走到这里的问题既不是身份/问候（DirectPath），也不含工作信号（FastPath），
+/// 且没有 AI 模型可用。文案要诚实说明能力边界，并引导用户到能回答的方向，
+/// 而不是机械地说"无法使用 AI 模型"——那对"你是谁"这类问题很荒谬。
 fn fallback_answer(question: &str) -> String {
     if prefers_chinese_answer(question) {
-        "我目前无法使用 AI 模型进行分析，但你可以尝试：\n\
-         - 询问具体某天的工作记录\n\
-         - 使用时间关键词（今天、昨天、本周等）\n\
-         - 配置 AI 模型后可以获得更智能的分析"
+        "这个问题我暂时需要 AI 模型才能回答好。你可以：\n\
+         - 问我具体的工作记录（比如「今天做了什么」「这周的时间分布」）\n\
+         - 在「设置 → AI 模型」里配置模型，就能自由问答了\n\
+         - 或者在下方模型选择器切换到已配置的模型"
             .to_string()
     } else {
-        "I can't use an AI model for analysis right now, but you can try:\n\
-         - Asking for work records from a specific day\n\
-         - Using time keywords such as today, yesterday, or this week\n\
-         - Configuring an AI model for smarter analysis"
+        "I need an AI model to answer this well. You can:\n\
+         - Ask about specific work records (e.g. \"what did I do today\", \"this week's time breakdown\")\n\
+         - Configure a model in Settings → AI Model for free-form Q&A\n\
+         - Or switch to a configured model in the selector below"
             .to_string()
     }
 }
@@ -638,6 +696,61 @@ mod tests {
         // 放宽后："效率"是工作信号 → 无模型走 Fast（基础模板给统计）。
         let d = route_query("帮我看看效率情况", false);
         assert_eq!(d.path, QueryPath::Fast);
+    }
+
+    #[test]
+    fn 身份类问题无论有无模型都应走直接回答路径() {
+        // "你是谁"在基础模板模式下曾被误判到 FallbackPath，
+        // 回出"无法使用 AI 模型分析"的蠢回答（issue 截图）。
+        assert_eq!(route_query("你是谁", false).path, QueryPath::Direct);
+        assert_eq!(route_query("你是谁", true).path, QueryPath::Direct);
+        assert_eq!(route_query("你是什么", false).path, QueryPath::Direct);
+        assert_eq!(route_query("你叫什么名字", false).path, QueryPath::Direct);
+        assert_eq!(route_query("who are you", false).path, QueryPath::Direct);
+    }
+
+    #[test]
+    fn 能力类问题应走直接回答路径() {
+        assert_eq!(route_query("你能干什么", false).path, QueryPath::Direct);
+        assert_eq!(route_query("你会什么", false).path, QueryPath::Direct);
+        assert_eq!(route_query("介绍一下你自己", false).path, QueryPath::Direct);
+        assert_eq!(route_query("what can you do", false).path, QueryPath::Direct);
+    }
+
+    #[test]
+    fn direct回答身份类问题应提及工作助手身份而非报错() {
+        let answer = direct_answer("你是谁");
+        assert!(
+            answer.contains("工作助手") || answer.contains("Work Review"),
+            "身份回答应说明自己是工作助手，got: {answer}"
+        );
+        assert!(
+            !answer.contains("无法使用"),
+            "身份回答不应出现'无法使用 AI 模型'，got: {answer}"
+        );
+    }
+
+    #[test]
+    fn direct回答能力类问题应列举具体能力() {
+        let answer = direct_answer("你能做什么");
+        assert!(
+            answer.contains("查看") && answer.contains("分析"),
+            "能力回答应列举具体能力，got: {answer}"
+        );
+    }
+
+    #[test]
+    fn fallback回答应引导而非机械报错() {
+        let answer = fallback_answer("随便聊聊");
+        // 不应再出现"无法使用 AI 模型进行分析"这种答非所问的文案
+        assert!(
+            !answer.contains("无法使用 AI 模型进行分析"),
+            "fallback 不应再机械报'无法使用 AI 模型'，got: {answer}"
+        );
+        assert!(
+            answer.contains("工作记录") || answer.contains("模型"),
+            "fallback 应引导到工作记录或配模型，got: {answer}"
+        );
     }
 
     #[test]

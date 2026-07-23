@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **停止记录后两处指示器仍显示绿色脉冲**（#131）：概览右上角"实时"圆点只判断是否"今天"模式，时间轴"活动记录"圆点更是硬编码绿色脉冲——两处都没响应录制状态。新增 `recordingStore`（参照 `assistantStore` 模式），App.svelte 在 `get_recording_state` 初始化和 `recording-state-changed` 事件中写入 store，概览/时间轴读取 store 判断圆点颜色：录制中（绿+脉冲）/ 已停止（灰）。新增 7 个单测。
 - **火山引擎（豆包）连接测试 URL 拼接错误**：连接测试的 `/v1` 回退逻辑假设所有 OpenAI 兼容 API 的端点都以 `/v1` 结尾，但火山引擎用 `/api/v3`、智谱用 `/api/paas/v4`——这些已含版本段，不应再追加 `/v1`（会拼出 `/api/v3/v1/chat/completions` 这种不存在的端点，用户报错 `os error 10061` 根因）。修复 `openai_compatible_chat_completion_urls` 和 `fetch_openai_compatible_models`：识别任何版本号段（`/v1`～`/v9`）后不再回退。新增 3 个测试覆盖火山引擎 v3 / 智谱 v4 / DeepSeek 无版本号三种场景。
 - **助手页配了模型却默认用基础模板**（#133）：用户在设置页配置好 AI 模型并测试通过后，助手页的模型选择器仍默认停在"基础模板"而非已配置的模型——用户不知道要手动切换下拉框，导致 AI 回答"我目前无法使用 AI 模型进行分析"。新增 `hasUserSelectedModel` 标志：首次打开助手页且用户从未手动操作过模型选择器时，如果存在已配置的模型档案，自动选中第一个；一旦用户手动切换（含切回基础模板），就尊重用户选择不再覆盖。新增 3 个单测。
+- **基础模板模式下身份/能力类问答答非所问**："你是谁"被路由到 FallbackPath，机械回答"我目前无法使用 AI 模型进行分析"。根因是 `route_query` 的闲聊触发词列表太窄（只有"你好/hello/帮助"），身份类问题（"你是谁/你是什么/who are you"）和能力类问题（"你能干什么/介绍下自己"）全部漏网。统一修复：扩展 DirectPath 触发词覆盖身份/能力问答；`direct_answer` 新增身份模板（介绍工作助手身份 + 提示当前模式）和能力模板；`fallback_answer` 文案改为引导性而非机械报错（"这个问题我需要 AI 模型才能回答好"）。新增 5 个测试。
 
 ### 优化
 - **日报页面视觉重设计**：去玻璃拟态 + 斜纹纹理，改极简现代风（统一 token、轻阴影、大留白、统计卡重做、表格去重阴影 + zebra、活动时间线折叠样式现代化）。
