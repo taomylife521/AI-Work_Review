@@ -130,30 +130,70 @@ pub fn route_query(question: &str, has_model: bool) -> RouteDecision {
         "最近",
         "这几天",
         "近期",
-        // 工作/统计词
+        // 「做/干/搞」家族
         "做了什么",
+        "做了哪些",
         "主要做了",
+        "干了什么",
+        "搞了什么",
+        // 「忙」家族
         "忙什么",
         "忙啥",
+        "忙不忙",
+        "忙吗",
+        // 「总结/小结」家族
+        "总结",
+        "小结",
+        "汇总",
+        // 工作通用
         "工作",
         "记录",
-        "总结",
         "待办",
-        "时长",
-        "时间",
-        "统计",
-        "会话",
-        "session",
-        "效率",
-        "占比",
-        "比例",
-        "分类",
-        "应用",
         "进度",
         "进展",
         "回顾",
         "复盘",
         "整理",
+        // 「数据/情况/概览」家族
+        "数据",
+        "情况",
+        "概况",
+        "概览",
+        "报告",
+        "汇报",
+        // 「专注/产出」家族
+        "效率",
+        "专注",
+        "产出",
+        "饱和",
+        "摸鱼",
+        "下班",
+        "打卡",
+        "休息",
+        // 「app/软件/程序」家族
+        "应用",
+        "软件",
+        "程序",
+        "工具",
+        "分类",
+        "占比",
+        "比例",
+        // 「时长/多久」家族
+        "时长",
+        "时间",
+        "多久",
+        "小时",
+        "多长",
+        // 「会议」家族
+        "会话",
+        "开会",
+        "会议",
+        "session",
+        // 统计通用
+        "统计",
+        // 「干嘛」家族
+        "干嘛",
+        "干什么",
     ];
     if work_signals.iter().any(|p| q.contains(p)) {
         return RouteDecision {
@@ -409,7 +449,16 @@ pub fn fast_answer(
     };
 
     // 复用 parse_temporal_range（你在 Stage 0 修复过的函数）
-    let (date_from, date_to) = crate::commands::parse_temporal_range(question);
+    let (mut date_from, mut date_to) = crate::commands::parse_temporal_range(question);
+
+    // 无时间词时默认查"今天"：用户问"摸鱼了吗""数据如何""小结"通常指当天，
+    // 查全量（10000 条）反而信息量过大不聚焦。parse_temporal_range 在没匹配到
+    // 任何时间词时返回 (None, None)，这里兜底成今天的日期范围。
+    if date_from.is_none() && date_to.is_none() {
+        let today = chrono::Local::now().date_naive().format("%Y-%m-%d").to_string();
+        date_from = Some(today.clone());
+        date_to = Some(today);
+    }
 
     // 策略：先按时间范围加载活动，再按分类聚合
     let activities = database
@@ -696,6 +745,35 @@ mod tests {
         // 放宽后："效率"是工作信号 → 无模型走 Fast（基础模板给统计）。
         let d = route_query("帮我看看效率情况", false);
         assert_eq!(d.path, QueryPath::Fast);
+    }
+
+    #[test]
+    fn 扩展后常见工作问法应走统计模板而非兜底() {
+        // 这些问法在扩展前都走 FallbackPath（给引导文案），扩展后应走 FastPath（给统计）。
+        let cases = [
+            "忙不忙",
+            "干了什么",
+            "搞了什么",
+            "做了哪些事",
+            "摸鱼了吗",
+            "几点下班的",
+            "写了多少小时代码",
+            "开会开了多久",
+            "数据怎么样",
+            "情况如何",
+            "小结",
+            "在干嘛",
+            "在干什么",
+            "专注度怎么样",
+            "哪个软件用得最多",
+        ];
+        for q in cases {
+            assert_eq!(
+                route_query(q, false).path,
+                QueryPath::Fast,
+                "「{q}」应走 FastPath"
+            );
+        }
     }
 
     #[test]
