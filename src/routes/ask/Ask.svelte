@@ -599,7 +599,7 @@
   <div class="ask-workbench-frame flex h-[calc(100vh-7rem)] flex-col overflow-hidden">
     <div bind:this={chatBody} class="flex-1 overflow-y-auto px-4 pb-40 pt-10" on:scroll={syncStickToBottom}>
       {#if !hasConversation}
-        <div class="ask-welcome-panel mx-auto flex min-h-full max-w-4xl flex-col items-center justify-center text-center">
+        <div class="ask-welcome-panel mx-auto flex max-w-4xl flex-col items-center text-center">
           <span class="ask-kicker">{t('ask.title')}</span>
           <h1 class="mb-2 text-2xl font-semibold tracking-tight text-slate-900 dark:text-[#e6edf3]">{t('ask.title')}</h1>
           <p class="mb-10 text-sm text-slate-500 dark:text-[#7d8590]">{t('ask.subtitle')}</p>

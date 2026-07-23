@@ -11,30 +11,15 @@ use crate::config::AiProvider;
 use crate::database::{Activity, DailyStats};
 use crate::error::{AppError, Result};
 use async_trait::async_trait;
-use reqwest::{Client, Url};
+use reqwest::{Client, StatusCode};
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 
-fn summary_request_timeout(provider: AiProvider, endpoint: &str) -> Duration {
-    if provider == AiProvider::Ollama || is_local_summary_endpoint(endpoint) {
-        Duration::from_secs(300)
-    } else {
-        Duration::from_secs(90)
-    }
-}
-
-fn is_local_summary_endpoint(endpoint: &str) -> bool {
-    Url::parse(endpoint)
-        .ok()
-        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
-        .is_some_and(|host| {
-            matches!(
-                host.as_str(),
-                "localhost" | "127.0.0.1" | "::1" | "[::1]" | "0.0.0.0"
-            )
-        })
+fn summary_request_timeout(_provider: AiProvider, _endpoint: &str) -> Duration {
+    // 日报命令的外层截止时间是 300 秒；给请求留出 60 秒用于回退模板和收尾。
+    Duration::from_secs(240)
 }
 
 fn format_domain_label(
@@ -101,35 +86,177 @@ fn empty_ai_fallback_reason(locale: AppLocale) -> String {
     }
 }
 
-fn request_ai_fallback_reason(locale: AppLocale, error_text: &str) -> String {
-    let normalized = error_text.to_lowercase();
-    let is_config_issue = normalized.contains("未配置")
-        || normalized.contains("not configured")
-        || normalized.contains("api key")
-        || normalized.contains("invalidendpoint")
-        || normalized.contains("endpoint not found")
-        || normalized.contains("endpoint does not exist");
+#[derive(Clone, Copy)]
+enum AiFallbackCategory {
+    ConfigOrAuth,
+    Timeout,
+    Network,
+    Service,
+    MalformedResponse,
+    Unknown,
+}
 
-    match (locale, is_config_issue) {
-        (AppLocale::ZhCn, true) => "配置不可用，已回退到基础模板".to_string(),
-        (AppLocale::ZhCn, false) => "请求失败，已回退到基础模板".to_string(),
-        (AppLocale::ZhTw, true) => "配置不可用，已回退到基礎模板".to_string(),
-        (AppLocale::ZhTw, false) => "請求失敗，已回退到基礎模板".to_string(),
-        (AppLocale::En, true) => {
-            "the AI configuration was unavailable, so the report fell back to the base template"
-                .to_string()
-        }
-        (AppLocale::En, false) => {
-            "the AI request failed, so the report fell back to the base template".to_string()
-        }
-        (AppLocale::Ar, true) => {
-            "تكوين الذكاء الاصطناعي غير متوفر، لذا رجع التقرير إلى القالب الأساسي"
-                .to_string()
-        }
-        (AppLocale::Ar, false) => {
-            "فشل طلب الذكاء الاصطناعي، لذا رجع التقرير إلى القالب الأساسي".to_string()
-        }
+fn classify_ai_request_error(error_text: &str) -> AiFallbackCategory {
+    let normalized = error_text.to_lowercase();
+
+    if [
+        "未配置",
+        "not configured",
+        "api key",
+        "invalidendpoint",
+        "invalid endpoint",
+        "endpoint not found",
+        "endpoint does not exist",
+        "unauthorized",
+        "forbidden",
+        "authentication",
+        "invalid key",
+        "incorrect api key",
+        "http 401",
+        "http 403",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+    {
+        AiFallbackCategory::ConfigOrAuth
+    } else if ["timed out", "timeout", "deadline has elapsed", "超时"]
+        .iter()
+        .any(|marker| normalized.contains(marker))
+    {
+        AiFallbackCategory::Timeout
+    } else if [
+        "error decoding",
+        "decode response",
+        "invalid json",
+        "json error",
+        "malformed response",
+        "serialization",
+        "序列化错误",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+    {
+        AiFallbackCategory::MalformedResponse
+    } else if [
+        "error sending request",
+        "connection refused",
+        "connection reset",
+        "connect error",
+        "dns error",
+        "network error",
+        "tcp error",
+        "tls error",
+        "certificate error",
+        "请求失败",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+    {
+        AiFallbackCategory::Network
+    } else if [
+        "api 错误",
+        "http status",
+        "status code",
+        "rate limit",
+        "too many requests",
+        "service unavailable",
+        "bad gateway",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+    {
+        AiFallbackCategory::Service
+    } else {
+        AiFallbackCategory::Unknown
     }
+}
+
+fn request_ai_fallback_reason(locale: AppLocale, error_text: &str) -> String {
+    let category = classify_ai_request_error(error_text);
+    let reason = match (locale, category) {
+        (AppLocale::ZhCn, AiFallbackCategory::ConfigOrAuth) => {
+            "认证或配置不可用，已回退到基础模板"
+        }
+        (AppLocale::ZhCn, AiFallbackCategory::Timeout) => "请求超时，已回退到基础模板",
+        (AppLocale::ZhCn, AiFallbackCategory::Network) => "网络连接失败，已回退到基础模板",
+        (AppLocale::ZhCn, AiFallbackCategory::Service) => "服务返回错误，已回退到基础模板",
+        (AppLocale::ZhCn, AiFallbackCategory::MalformedResponse) => {
+            "响应格式异常，已回退到基础模板"
+        }
+        (AppLocale::ZhCn, AiFallbackCategory::Unknown) => "请求失败，已回退到基础模板",
+        (AppLocale::ZhTw, AiFallbackCategory::ConfigOrAuth) => {
+            "驗證或設定不可用，已回退到基礎模板"
+        }
+        (AppLocale::ZhTw, AiFallbackCategory::Timeout) => "請求逾時，已回退到基礎模板",
+        (AppLocale::ZhTw, AiFallbackCategory::Network) => "網路連線失敗，已回退到基礎模板",
+        (AppLocale::ZhTw, AiFallbackCategory::Service) => "服務回傳錯誤，已回退到基礎模板",
+        (AppLocale::ZhTw, AiFallbackCategory::MalformedResponse) => {
+            "回應格式異常，已回退到基礎模板"
+        }
+        (AppLocale::ZhTw, AiFallbackCategory::Unknown) => "請求失敗，已回退到基礎模板",
+        (AppLocale::En, AiFallbackCategory::ConfigOrAuth) => {
+            "authentication or AI configuration was unavailable, so the report fell back to the base template"
+        }
+        (AppLocale::En, AiFallbackCategory::Timeout) => {
+            "the AI request timed out, so the report fell back to the base template"
+        }
+        (AppLocale::En, AiFallbackCategory::Network) => {
+            "the network connection failed, so the report fell back to the base template"
+        }
+        (AppLocale::En, AiFallbackCategory::Service) => {
+            "the AI service returned an error, so the report fell back to the base template"
+        }
+        (AppLocale::En, AiFallbackCategory::MalformedResponse) => {
+            "the AI service returned an invalid response, so the report fell back to the base template"
+        }
+        (AppLocale::En, AiFallbackCategory::Unknown) => {
+            "the AI request failed, so the report fell back to the base template"
+        }
+        (AppLocale::Ar, AiFallbackCategory::ConfigOrAuth) => {
+            "تعذرت المصادقة أو إعداد الذكاء الاصطناعي، لذا رجع التقرير إلى القالب الأساسي"
+        }
+        (AppLocale::Ar, AiFallbackCategory::Timeout) => {
+            "انتهت مهلة طلب الذكاء الاصطناعي، لذا رجع التقرير إلى القالب الأساسي"
+        }
+        (AppLocale::Ar, AiFallbackCategory::Network) => {
+            "فشل الاتصال بالشبكة، لذا رجع التقرير إلى القالب الأساسي"
+        }
+        (AppLocale::Ar, AiFallbackCategory::Service) => {
+            "أعادت خدمة الذكاء الاصطناعي خطأً، لذا رجع التقرير إلى القالب الأساسي"
+        }
+        (AppLocale::Ar, AiFallbackCategory::MalformedResponse) => {
+            "أعادت خدمة الذكاء الاصطناعي استجابة غير صالحة، لذا رجع التقرير إلى القالب الأساسي"
+        }
+        (AppLocale::Ar, AiFallbackCategory::Unknown) => {
+            "فشل طلب الذكاء الاصطناعي، لذا رجع التقرير إلى القالب الأساسي"
+        }
+    };
+
+    reason.to_string()
+}
+
+/// 从成功响应中读取正文；字段缺失或类型不匹配属于响应格式异常，空字符串由上层单独处理。
+fn extract_ai_text(response: &serde_json::Value, pointer: &str, provider: &str) -> Result<String> {
+    let text = response
+        .pointer(pointer)
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            AppError::Analysis(format!(
+                "{provider} malformed response: expected text at {pointer}"
+            ))
+        })?;
+
+    Ok(text.trim().to_string())
+}
+
+fn api_response_error(provider: &str, status: StatusCode, error_text: &str) -> AppError {
+    let detail = error_text.trim();
+    let message = if detail.is_empty() {
+        format!("{provider} API 错误 (HTTP {})", status.as_u16())
+    } else {
+        format!("{provider} API 错误 (HTTP {}): {detail}", status.as_u16())
+    };
+    AppError::Analysis(message)
 }
 
 /// 检测是否因 max_tokens 设置过大导致 400（模型输出上限低于请求值）
@@ -234,7 +361,7 @@ impl SummaryAnalyzer {
         }
 
         let result: serde_json::Value = response.json().await?;
-        Ok(result["response"].as_str().unwrap_or("").trim().to_string())
+        extract_ai_text(&result, "/response", "Ollama")
     }
     async fn generate_with_openai_compatible(&self, prompt: &str) -> Result<String> {
         // 第一轮：不设 max_tokens，让模型用自身默认值
@@ -315,11 +442,7 @@ impl SummaryAnalyzer {
             }
 
             let result: serde_json::Value = response.json().await?;
-            return Ok(result["choices"][0]["message"]["content"]
-                .as_str()
-                .unwrap_or("")
-                .trim()
-                .to_string());
+            return extract_ai_text(&result, "/choices/0/message/content", "OpenAI-compatible");
         }
 
         Err(AppError::Analysis(last_error.unwrap_or_else(|| {
@@ -359,19 +482,16 @@ impl SummaryAnalyzer {
 
             if response.status().is_success() {
                 let result: serde_json::Value = response.json().await?;
-                return Ok(result["content"][0]["text"]
-                    .as_str()
-                    .unwrap_or("")
-                    .trim()
-                    .to_string());
+                return extract_ai_text(&result, "/content/0/text", "Claude");
             }
 
+            let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
             if is_max_tokens_too_large(&error_text) {
                 log::info!("Claude max_tokens={max_tokens} 超限，降档重试");
                 continue;
             }
-            return Err(AppError::Analysis(format!("Claude API 错误: {error_text}")));
+            return Err(api_response_error("Claude", status, &error_text));
         }
 
         Err(AppError::Analysis(
@@ -439,15 +559,12 @@ impl SummaryAnalyzer {
 
         if response.status().is_success() {
             let result: serde_json::Value = response.json().await?;
-            return Ok(result["candidates"][0]["content"]["parts"][0]["text"]
-                .as_str()
-                .unwrap_or("")
-                .trim()
-                .to_string());
+            return extract_ai_text(&result, "/candidates/0/content/parts/0/text", "Gemini");
         }
 
+        let status = response.status();
         let error_text = response.text().await.unwrap_or_default();
-        Err(AppError::Analysis(format!("Gemini API 错误: {error_text}")))
+        Err(api_response_error("Gemini", status, &error_text))
     }
 
     async fn generate_ai_content(&self, prompt: &str) -> Result<String> {
@@ -932,18 +1049,26 @@ impl Analyzer for SummaryAnalyzer {
             }
         }
 
+        // 区块编排和正文分析共享同一个 AI 预算，确保在外层 300 秒截止前仍能生成回退报告。
+        let ai_deadline =
+            tokio::time::Instant::now() + summary_request_timeout(self.provider, &self.endpoint);
+
         // 统计区块：AI 编排顺序 + 用户偏好
-        // 有缓存顺序时直接用（记忆性），否则调 LLM 排序
+        // 有缓存顺序时直接用（记忆性），否则调 LLM 排序。
         let default_order = default_summary_order();
         let (ai_order, order_to_cache) = if let Some(ref cached) = self.cached_ai_order {
             if !cached.is_empty() {
                 (Some(cached.clone()), None) // 用缓存，不需要存
             } else {
-                let decided = self.decide_block_order(stats).await;
+                let decided = tokio::time::timeout_at(ai_deadline, self.decide_block_order(stats))
+                    .await
+                    .unwrap_or(None);
                 (decided.clone(), decided) // 新排序，需要存
             }
         } else {
-            let decided = self.decide_block_order(stats).await;
+            let decided = tokio::time::timeout_at(ai_deadline, self.decide_block_order(stats))
+                .await
+                .unwrap_or(None);
             (decided.clone(), decided)
         };
         let ordered = match &ai_order {
@@ -982,20 +1107,28 @@ impl Analyzer for SummaryAnalyzer {
                 .collect(),
         );
 
-        let ai_content = match self
-            .generate_ai_content(&self.build_ai_prompt(date, stats, activities))
-            .await
+        let ai_prompt = self.build_ai_prompt(date, stats, activities);
+        let ai_content = match tokio::time::timeout_at(
+            ai_deadline,
+            self.generate_ai_content(&ai_prompt),
+        )
+        .await
         {
-            Ok(content) if !content.is_empty() => (content, true, None),
-            Ok(_) => (
+            Ok(Ok(content)) if !content.is_empty() => (content, true, None),
+            Ok(Ok(_)) => (
                 self.generate_fallback_ai_content(&apps_list),
                 false,
                 Some(empty_ai_fallback_reason(locale)),
             ),
-            Err(error) => (
+            Ok(Err(error)) => (
                 self.generate_fallback_ai_content(&apps_list),
                 false,
                 Some(request_ai_fallback_reason(locale, &error.to_string())),
+            ),
+            Err(_) => (
+                self.generate_fallback_ai_content(&apps_list),
+                false,
+                Some(request_ai_fallback_reason(locale, "request timeout")),
             ),
         };
 
@@ -1022,8 +1155,9 @@ impl Analyzer for SummaryAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::{
-        empty_ai_fallback_reason, openai_compatible_chat_completion_urls,
-        request_ai_fallback_reason, summary_request_timeout, SummaryAnalyzer,
+        api_response_error, empty_ai_fallback_reason, extract_ai_text,
+        openai_compatible_chat_completion_urls, request_ai_fallback_reason,
+        summary_request_timeout, SummaryAnalyzer,
     };
     use crate::analysis::Analyzer;
     use crate::analysis::AppLocale;
@@ -1080,53 +1214,122 @@ mod tests {
     }
 
     #[test]
-    fn 本地_openai兼容端点应使用更长的日报生成超时() {
+    fn 日报_ai请求应统一使用低于外层截止时间的生成预算() {
+        let expected = Duration::from_secs(240);
+        let outer_deadline = Duration::from_secs(300);
+
         assert_eq!(
             summary_request_timeout(AiProvider::OpenAI, "http://127.0.0.1:1234/v1"),
-            Duration::from_secs(300)
+            expected
         );
-        assert_eq!(
-            summary_request_timeout(AiProvider::OpenAI, "http://localhost:1234/v1"),
-            Duration::from_secs(300)
-        );
-    }
-
-    #[test]
-    fn 本地_ollama端点应使用更长的日报生成超时() {
         assert_eq!(
             summary_request_timeout(AiProvider::Ollama, "http://localhost:11434"),
-            Duration::from_secs(300)
+            expected
         );
-    }
-
-    #[test]
-    fn 远端摘要日报接口应保持原有超时() {
         assert_eq!(
             summary_request_timeout(AiProvider::OpenAI, "https://api.openai.com/v1"),
-            Duration::from_secs(90)
+            expected
         );
         assert_eq!(
             summary_request_timeout(
                 AiProvider::Gemini,
                 "https://generativelanguage.googleapis.com/v1"
             ),
-            Duration::from_secs(90)
+            expected
         );
+        assert!(expected < outer_deadline);
     }
 
     #[test]
-    fn ai回退原因应返回面向前端的友好中文文案() {
+    fn ai回退原因应按安全类别返回面向前端的友好中文文案() {
         assert_eq!(
             empty_ai_fallback_reason(AppLocale::ZhCn),
             "返回空内容，已回退到基础模板"
         );
         assert_eq!(
             request_ai_fallback_reason(AppLocale::ZhCn, "Gemini API Key 未配置"),
-            "配置不可用，已回退到基础模板"
+            "认证或配置不可用，已回退到基础模板"
         );
         assert_eq!(
-            request_ai_fallback_reason(AppLocale::ZhCn, "API 错误: 500"),
-            "请求失败，已回退到基础模板"
+            request_ai_fallback_reason(AppLocale::ZhCn, "HTTP 401 Unauthorized"),
+            "认证或配置不可用，已回退到基础模板"
+        );
+        assert_eq!(
+            request_ai_fallback_reason(AppLocale::ZhCn, "operation timed out"),
+            "请求超时，已回退到基础模板"
+        );
+        assert_eq!(
+            request_ai_fallback_reason(
+                AppLocale::ZhCn,
+                "error sending request: connection refused"
+            ),
+            "网络连接失败，已回退到基础模板"
+        );
+        assert_eq!(
+            request_ai_fallback_reason(AppLocale::ZhCn, "API 错误 (503 Service Unavailable)"),
+            "服务返回错误，已回退到基础模板"
+        );
+        assert_eq!(
+            request_ai_fallback_reason(AppLocale::ZhCn, "error decoding response body"),
+            "响应格式异常，已回退到基础模板"
+        );
+
+        let safe_reason = request_ai_fallback_reason(
+            AppLocale::ZhCn,
+            "Authorization: Bearer secret-token; provider response: internal details",
+        );
+        assert_eq!(safe_reason, "请求失败，已回退到基础模板");
+        assert!(!safe_reason.contains("secret-token"));
+        assert!(!safe_reason.contains("internal details"));
+    }
+
+    #[test]
+    fn ai响应字段缺失或类型错误应归类为响应格式异常() {
+        for response in [
+            serde_json::json!({ "choices": [] }),
+            serde_json::json!({ "choices": [{ "message": { "content": 42 } }] }),
+        ] {
+            let error =
+                extract_ai_text(&response, "/choices/0/message/content", "OpenAI-compatible")
+                    .expect_err("缺失或非字符串的正文应报响应格式异常");
+
+            assert_eq!(
+                request_ai_fallback_reason(AppLocale::ZhCn, &error.to_string()),
+                "响应格式异常，已回退到基础模板"
+            );
+        }
+
+        assert_eq!(
+            extract_ai_text(
+                &serde_json::json!({ "choices": [{ "message": { "content": "  " } }] }),
+                "/choices/0/message/content",
+                "OpenAI-compatible",
+            )
+            .expect("存在的空字符串应留给空内容回退处理"),
+            ""
+        );
+    }
+
+    #[test]
+    fn claude与gemini错误应保留http状态用于安全分类() {
+        let auth_error = api_response_error(
+            "Claude",
+            reqwest::StatusCode::UNAUTHORIZED,
+            "provider-specific body",
+        );
+        assert_eq!(
+            request_ai_fallback_reason(AppLocale::ZhCn, &auth_error.to_string()),
+            "认证或配置不可用，已回退到基础模板"
+        );
+
+        let service_error = api_response_error(
+            "Gemini",
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            "provider-specific body",
+        );
+        assert_eq!(
+            request_ai_fallback_reason(AppLocale::ZhCn, &service_error.to_string()),
+            "服务返回错误，已回退到基础模板"
         );
     }
 
@@ -1142,6 +1345,10 @@ mod tests {
         assert_eq!(
             openai_compatible_chat_completion_urls("https://api.openai.com/v1"),
             vec!["https://api.openai.com/v1/chat/completions".to_string()]
+        );
+        assert_eq!(
+            openai_compatible_chat_completion_urls("https://api.siliconflow.cn/v1"),
+            vec!["https://api.siliconflow.cn/v1/chat/completions".to_string()]
         );
     }
 

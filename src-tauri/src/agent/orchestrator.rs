@@ -50,9 +50,17 @@ pub struct RouteDecision {
 pub fn route_query(question: &str, has_model: bool) -> RouteDecision {
     let q = question.trim().to_lowercase();
 
-    // ── 规则 1：闲聊 / 身份 / 能力问答 → 直接回答（不依赖模型）──
-    // 这类问题无论有没有配模型都应给固定模板回答，避免基础模板模式下
-    // "你是谁"被误判到 FallbackPath 回出"无法使用 AI 模型"的蠢回答。
+    // ── 有模型 → 始终交给 Agent（相信模型）──
+    // 避免身份、问候和能力类问题被固定模板提前截断，确保使用当前选中的模型配置。
+    if has_model {
+        return RouteDecision {
+            path: QueryPath::Agent,
+            reason: "交给模型判断意图".to_string(),
+        };
+    }
+
+    // ── 无模型：闲聊 / 身份 / 能力问答 → 直接回答 ──
+    // 基础模板模式仍提供可用的固定回答，避免落入无法使用模型的兜底提示。
     let greetings = [
         "你好",
         "嗨",
@@ -81,16 +89,6 @@ pub fn route_query(question: &str, has_model: bool) -> RouteDecision {
         return RouteDecision {
             path: QueryPath::Direct,
             reason: "身份/问候/能力问答".to_string(),
-        };
-    }
-
-    // ── 有模型 → 交给 Agent（相信模型）──
-    // 模型自行判断问题是否工作相关、是否调用工作记录工具、如何组织回答。
-    // 不再用关键词规则强行分类，避免"今天天气怎么样"被时间词误判为工作查询。
-    if has_model {
-        return RouteDecision {
-            path: QueryPath::Agent,
-            reason: "交给模型判断意图".to_string(),
         };
     }
 
@@ -652,9 +650,10 @@ mod tests {
         Database::new(&path).expect("创建测试数据库失败")
     }
 
+
     #[test]
-    fn test_route_greeting() {
-        let d = route_query("你好", true);
+    fn test_route_greeting_without_model() {
+        let d = route_query("你好", false);
         assert_eq!(d.path, QueryPath::Direct);
     }
 
@@ -777,11 +776,16 @@ mod tests {
     }
 
     #[test]
-    fn 身份类问题无论有无模型都应走直接回答路径() {
+    fn 已选择模型时身份与问候问题应交给_agent() {
+        assert_eq!(route_query("你是谁", true).path, QueryPath::Agent);
+        assert_eq!(route_query("你好", true).path, QueryPath::Agent);
+    }
+
+    #[test]
+    fn 基础模板模式下身份问题应走直接回答路径() {
         // "你是谁"在基础模板模式下曾被误判到 FallbackPath，
         // 回出"无法使用 AI 模型分析"的蠢回答（issue 截图）。
         assert_eq!(route_query("你是谁", false).path, QueryPath::Direct);
-        assert_eq!(route_query("你是谁", true).path, QueryPath::Direct);
         assert_eq!(route_query("你是什么", false).path, QueryPath::Direct);
         assert_eq!(route_query("你叫什么名字", false).path, QueryPath::Direct);
         assert_eq!(route_query("who are you", false).path, QueryPath::Direct);

@@ -60,3 +60,16 @@ test('时间线实时更新收到新截图后应主动预热缩略图，避免�
   assert.match(source, /listen\('screenshot-taken'/);
   assert.match(source, /if \(newActivity\?\.screenshot_path\) \{\s*loadThumbnail\(newActivity\.screenshot_path\)/);
 });
+
+test('时间线工具栏图标应统一放大且不改变按钮容器', async () => {
+  const source = await readFile(new URL('./Timeline.svelte', import.meta.url), 'utf8');
+  const toolbarStart = source.indexOf('<div class="page-toolbar">');
+  const toolbarEnd = source.indexOf('{#if loading}', toolbarStart);
+  const toolbarSource = source.slice(toolbarStart, toolbarEnd);
+
+  assert.ok(toolbarStart >= 0 && toolbarEnd > toolbarStart);
+  assert.equal((toolbarSource.match(/timeline-toolbar-icon/g) || []).length, 4);
+  assert.match(toolbarSource, /timeline-toolbar-icon h-\[1\.125rem\] w-\[1\.125rem\]/);
+  assert.doesNotMatch(toolbarSource, /(?:w-4 h-4|h-4 w-4)/);
+  assert.equal((toolbarSource.match(/page-control-btn-icon/g) || []).length, 3);
+});
