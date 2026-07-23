@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [1.0.56] - 2026-07-23
 ### 新增
 - **阿拉伯语支持（RTL）**（#128）：新增阿拉伯语界面翻译 + RTL 布局适配（CSS 逻辑属性替换硬编码方向），后端日报/分类名/活动时间线同步支持阿拉伯语输出。社区贡献 by algethamy。
 - **MCP Server 功能增强**：
@@ -16,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **设计 Token 体系**：建立 `--radius-sm/md/lg`（8/12/20px）+ `--shadow-sm/md/lg` + `--space-section/block` 统一基准，app.css 中 35 处硬编码值迁移到 token 变量。
 - **localhost API `/v1/context` 端点**：返回当前前台窗口 + 最近应用列表，供 MCP Server 委托调用。
 - **工作助手 Token 流式输出（阶段 2）**：Agent 回答现按 token 逐字流式推送到前端（`StreamEvent::Token`，后端 64 字节/100ms 批量合并降低 IPC 频率），长回答不再"憋到最后一次性蹦出"。四类 provider（OpenAI 兼容/Ollama/Claude/Gemini）各自实现 SSE/NDJSON 增量解析 + 工具调用分片拼装，流式失败自动回退非流式；请求格式转换抽取为流式/非流式共享函数，超时改为逐块空闲 30s + 总时长 120s 双护栏。新增 10 个装配器/批量器单测。
-- **工作助手联网工具（阶段 1）**：工具系统从"仅同步本地工具"扩展为支持异步工具（`ToolExecutor::Sync/Async` 双通道，5 个本地工具零改动），新增三个联网工具——`fetch_url`（读网页正文，零依赖）、`get_weather`（open-meteo 免费天气，零 Key）、`web_search`（Tavily / 博查，需配 Key）。默认全关，需在「设置 → AI 模型 → 助手联网能力」显式开启（守住隐私默认关立场）；开启后才把联网配置传入 Agent，问题才会发给搜索服务商/目标网站。含 SSRF 护栏（拦本机/内网/链路本地地址，防模型被诱导抓取本机 localhost API），联网提示注入帮助小模型正确选工具。四语言 i18n + 14 个单测（工具门控、SSRF、HTML 提取、天气/搜索格式化、异步统一入口）。
+- **工作助手联网工具（阶段 1）**：工具系统从"仅同步本地工具"扩展为支持异步工具（`ToolExecutor::Sync/Async` 双通道，5 个本地工具零改动），新增三个联网工具——`fetch_url`（读网页正文，零依赖）、`web_search`（支持 Tavily / 博查需配 Key，以及 DuckDuckGo / Bing 免费搜索无需 Key）、`query_activities`（按日期查询活动记录，专为"今天做了什么"类问题设计，替代无法匹配相对时间的 FTS 搜索）。移除了 `get_weather`（open-meteo 超时频繁，天气改走 web_search）。默认全关，需在「设置 → AI 模型 → 助手联网能力」显式开启（守住隐私默认关立场）；开启后才把联网配置传入 Agent，问题才会发给搜索服务商/目标网站。含 SSRF 护栏（拦本机/内网/链路本地地址，防模型被诱导抓取本机 localhost API），联网提示注入帮助小模型正确选工具。四语言 i18n + 单测覆盖工具门控、SSRF、HTML 提取、搜索格式化、异步统一入口。
 
 ### 修复
 - **创意类应用活动时长漏记**：PS/C4D 等创意软件操作时画面几乎不变，但旧逻辑把"键鼠超时 + 画面静止"判定为空闲导致丢时长。反转哈希判定语义：画面静止不再判空闲，仅键鼠 10 分钟硬超时兜底。
@@ -35,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **助手页配了模型却默认用基础模板**（#133）：用户在设置页配置好 AI 模型并测试通过后，助手页的模型选择器仍默认停在"基础模板"而非已配置的模型——用户不知道要手动切换下拉框，导致 AI 回答"我目前无法使用 AI 模型进行分析"。新增 `hasUserSelectedModel` 标志：首次打开助手页且用户从未手动操作过模型选择器时，如果存在已配置的模型档案，自动选中第一个；一旦用户手动切换（含切回基础模板），就尊重用户选择不再覆盖。新增 3 个单测。
 - **基础模板模式下身份/能力类问答答非所问**："你是谁"被路由到 FallbackPath，机械回答"我目前无法使用 AI 模型进行分析"。根因是 `route_query` 的闲聊触发词列表太窄（只有"你好/hello/帮助"），身份类问题（"你是谁/你是什么/who are you"）和能力类问题（"你能干什么/介绍下自己"）全部漏网。统一修复：扩展 DirectPath 触发词覆盖身份/能力问答；`direct_answer` 新增身份模板（介绍工作助手身份 + 提示当前模式）和能力模板；`fallback_answer` 文案改为引导性而非机械报错（"这个问题我需要 AI 模型才能回答好"）。新增 5 个测试。
 - **基础模板模式大幅扩展工作查询关键词覆盖**：之前 `work_signals` 列表只收了某个说法的单一表达（如"做了什么"但不收"干了什么"，"应用"但不收"软件"），导致大量常见工作查询问法（"忙不忙""摸鱼了吗""数据怎么样""开会开了多久""在干嘛"等 15+ 种）落到 FallbackPath 给引导文案。按同义词家族扩展：做/干/搞、忙、数据/情况/概览、专注/产出/摸鱼/下班、app/软件/程序、多久/小时、开会/会议、小结/汇总、干嘛/干什么。同时 `fast_answer` 在无时间词时默认查"今天"（而非全量 10000 条），让"小结""数据如何"等无时间词查询更聚焦。新增 1 个测试覆盖 15 种扩展问法。
+- **日报提示词预设编辑**（#130）：日报页面的提示词预设下拉菜单新增编辑按钮（铅笔图标），用户可以直接修改已有预设的名称和内容，而不必删除后重建。编辑保存逻辑区分"新建"与"更新"两种场景。
+- **配置文件原子写入与故障安全启动**：配置加载/保存改为原子操作（临时文件 + rename + fsync），写入前自动备份上一版本（`.bak`），临时文件通过 RAII 在所有路径（含错误/panic）自动清理。启动时若主配置损坏，从备份恢复或以故障安全默认值（关闭所有采集/权限/远端）启动，保留损坏现场供排查。支持 4 种状态（Loaded / Missing / RecoveredFromBackup / Corrupted），故障状态下跳过权限初始化和自动写回。Unix 临时文件权限 0600 防符号链接劫持。新增覆盖四态组合、原子覆盖写、备份生成、父目录 sync 失败等场景的测试。
+- **MCP Server localhost 请求认证**：MCP Server 对 localhost API 的所有请求现在携带 Bearer token 认证（从 `localhost_api_token.txt` 读取）。fail-closed 设计——token 缺失或格式非法时不发请求，降级到本地模板/历史数据。每次请求重读 token 文件，支持主应用轮换后即时生效，无需重启 MCP。2 秒超时，请求失败不阻塞 MCP 主流程。
+- **Bot 日报生成 API 对齐**：IM Bot（Telegram/飞书/企业微信/钉钉）触发的日报生成改为走标准 localhost API（`POST /v1/reports/generate`，JSON body），替代旧的查询字符串拼接。鉴权从 URL token 升级为 Bearer header（token 不再暴露在 URL/访问日志里）。服务端同时保留 GET（query）和 POST（JSON body）两条路径，旧版 bot 仍可兼容。
 
 ### 优化
 - **日报页面视觉重设计**：去玻璃拟态 + 斜纹纹理，改极简现代风（统一 token、轻阴影、大留白、统计卡重做、表格去重阴影 + zebra、活动时间线折叠样式现代化）。
