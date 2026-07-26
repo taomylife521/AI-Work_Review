@@ -1,6 +1,5 @@
 //! Auto-extracted from the historical `commands.rs`. Behavior unchanged.
 
-use crate::secrets::SecureSaveExt;
 use crate::config::{AppConfig, AvatarFollowupItem, PrivacyConfig};
 use crate::database::Activity;
 use crate::error::AppError;
@@ -299,7 +298,7 @@ pub(crate) fn persist_app_config(
 
         // 保存到文件
         let config_path = state.config_path.clone();
-        config.save_secure(&config_path)?;
+        config.save(&config_path)?;
 
         // 更新隐私过滤器
         state.privacy_filter.update_config(&config.privacy);

@@ -1,6 +1,5 @@
 //! Auto-extracted from the historical `commands.rs`. Behavior unchanged.
 
-use crate::secrets::SecureSaveExt;
 use crate::error::AppError;
 #[cfg(target_os = "linux")]
 use crate::linux_session::{current_linux_desktop_environment, current_linux_desktop_session, LinuxDesktopSession};
@@ -1187,7 +1186,7 @@ pub async fn save_background_image(
     // 更新配置
     let mut s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
     s.config.background_image = Some("background.jpg".to_string());
-    s.config.save_secure(&config_path)?;
+    s.config.save(&config_path)?;
 
     Ok(())
 }
@@ -1237,7 +1236,7 @@ pub async fn clear_background_image(
     // 更新配置
     let mut s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
     s.config.background_image = None;
-    s.config.save_secure(&config_path)?;
+    s.config.save(&config_path)?;
 
     Ok(())
 }

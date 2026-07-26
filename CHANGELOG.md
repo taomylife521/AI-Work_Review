@@ -10,18 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **移除无前端调用的死命令**：`take_screenshot`、`start_recording`、`stop_recording`、`is_screen_locked`、`check_ocr_available`、`is_work_time`（录制暂停/恢复走 `pause_recording`/`resume_recording`,不受影响）;同步删除/更新断言旧实现的守护测试（Linux Wayland 手动截图、分段工作时间的 `is_work_time_in_segments` 断言）,并清理 `screen_lock.rs` 中随之失去调用方的 `is_work_time*` 时间判断辅助函数及其单元测试（锁屏检测本体不受影响）。
 - **README 三语言补齐 Bot 联动范围**：Telegram / 飞书 / 钉钉 / 企业微信（钉钉/企微早已可用,此前仅列前两家）。
 - **本地 macOS 构建改用稳定签名**：移除 `tauri.local.conf.json` 里 `signingIdentity: null` 的覆盖,继承主配置的 "WorkReview Self-Signed" 自签名（配合 `scripts/setup-codesign.sh`）——本地重复构建不再每次触发钥匙串授权弹窗。
+- **撤销未发布的「OS 密钥保险柜」机制**：删除 `secrets` 模块与 `keyring` 依赖,配置保存回归明文直存(本项目定位本地个人工具,密钥仅存本机);载入时自动清空遗留的 `__keychain__` 占位符并提示重新填写。曾运行开发版的,旧密钥仍在系统钥匙串中(搜索 "work-review")可查看后手动删除。
 
 ### 优化（排版体系审计与收敛）
 - **确立字号阶梯并写入规范**（app.css 顶部注释）：10px 极小徽标下限 / 11px 微型标签 / xs 辅文 / sm 正文控件 / 15px 根字号阅读正文 / base+ 标题层;新增样式禁止再造任意档位。
 - **消灭违规档位**：8px Beta 徽章升 10px（中文 8px 不可读,无障碍红线）;10.5px 半像素档归 11px;16px 孤例（用户消息气泡）归 15px 基准;22 处 `text-[12px]` 等价替换为 `text-xs`（像素相同,消除冗余写法）。
 - **修复全局压行 hack**：`items-center` 按钮的 `line-height:1` 升为 1.15——胶囊观感几乎不变,含换行文本的按钮（阿语长分类标签/窄窗）不再叠行。
 - 布局审计结论：根字号 15px+行高 1.6、阅读宽度纪律（日报 52rem/助手 max-w-4xl/超宽收束 108rem）、响应式断点均为合理设计,未改动;39 个组件全量编译验证。
-
-### 新增（安全：OS 密钥保险柜）
-- **敏感密钥不再明文落盘**：新增 `secrets` 模块——16 类敏感字段（LLM/嵌入/搜索 Key、四家机器人凭据、S3/WebDAV 密钥、逐模型档案 Key）真实值存入系统钥匙串（macOS Keychain / Windows 凭据管理器 / Linux secret-service）,磁盘 JSON 与 .bak 备份仅存 `__keychain__` 占位符。
-- **零业务改动的注水/剥离架构**：载入时注水回内存（业务代码读到的仍是真实值）,全部 11 处落盘调用统一替换为 `save_secure`（克隆→剥离→写盘）;旧配置明文密钥在首次载入时自动迁移进钥匙串,下一次保存后磁盘转为占位符,无需用户操作。
-- **降级安全**：钥匙串不可用（如 Linux 无 secret-service）时回退明文并记录警告,不阻断使用。新增名录完整性/无旁路 save/依赖声明三重守护测试。
-- 依赖新增 `keyring 3`;Linux 构建需 dbus 开发库（sync-secret-service 依赖）。SQLCipher 数据库加密为下一立项（需在本轮 cargo 验证通过后进行）。
 
 ### 修复（核心统计链路专项审计）
 - **时间线与日统计口径统一**：`get_timeline` 此前按"结束时间戳落在当天"选行并求原始时长总和——跨午夜会话（如 22:00 干到次日 01:00 的同一页面）整段 3 小时计入结束日、前一日时间线完全消失，与日统计（正确按天裁剪）数字对不上。现改为与日统计相同的区间重叠语义 + 窗口内按日裁剪求和。

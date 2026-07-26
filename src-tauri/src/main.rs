@@ -33,13 +33,11 @@ mod privacy;
 mod remote_upload;
 mod screen_lock;
 mod screenshot;
-mod secrets;
 mod storage;
 mod telegram_bot;
 mod wecom_bot;
 mod work_intelligence;
 
-use crate::secrets::SecureSaveExt;
 use config::{config_backup_path, AppConfig, AvatarFollowupItem, ConfigLoadStatus};
 use database::Database;
 use once_cell::sync::OnceCell;
@@ -504,6 +502,54 @@ fn should_initialize_avatar_input(status: ConfigLoadStatus) -> bool {
 
 fn should_run_duplicate_cleanup(status: ConfigLoadStatus) -> bool {
     !status.requires_fail_safe()
+}
+
+/// 清理历史遗留的钥匙串占位符。
+/// 早期未发布版本曾把敏感字段真实值迁入系统钥匙串,磁盘配置写成 "__keychain__" 占位符;
+/// 该机制已整体移除。这里把残留占位符清空,避免被当作真实密钥使用（需在设置中重新填写）。
+fn clear_legacy_keychain_placeholders(config: &mut crate::config::AppConfig) {
+    const PLACEHOLDER: &str = "__keychain__";
+    let mut cleared = 0u32;
+    {
+        let mut clear_opt = |field: &mut Option<String>| {
+            if field.as_deref() == Some(PLACEHOLDER) {
+                *field = None;
+                cleared += 1;
+            }
+        };
+        clear_opt(&mut config.text_model.api_key);
+        clear_opt(&mut config.vision_model.api_key);
+        clear_opt(&mut config.ai_provider.api_key);
+        clear_opt(&mut config.openai_api_key);
+        clear_opt(&mut config.assistant_search_api_key);
+        clear_opt(&mut config.embedding_api_key);
+        clear_opt(&mut config.telegram_bot_token);
+        clear_opt(&mut config.feishu_app_secret);
+        clear_opt(&mut config.feishu_verification_token);
+        clear_opt(&mut config.feishu_encrypt_key);
+        clear_opt(&mut config.wecom_token);
+        clear_opt(&mut config.wecom_encoding_aes_key);
+        clear_opt(&mut config.dingtalk_app_secret);
+        for profile in config.text_model_profiles.iter_mut() {
+            clear_opt(&mut profile.model_config.api_key);
+        }
+    }
+    {
+        let mut clear_str = |field: &mut String| {
+            if field.as_str() == PLACEHOLDER {
+                field.clear();
+                cleared += 1;
+            }
+        };
+        clear_str(&mut config.remote_storage.s3.access_key);
+        clear_str(&mut config.remote_storage.s3.secret_key);
+        clear_str(&mut config.remote_storage.webdav.password);
+    }
+    if cleared > 0 {
+        log::warn!(
+            "检测到 {cleared} 个历史钥匙串占位符（机制已移除），已清空对应字段，请在设置中重新填写密钥"
+        );
+    }
 }
 
 fn describe_config_file_issue(path: &Path, error: Option<&str>) -> String {
@@ -3415,14 +3461,14 @@ async fn main() {
     #[allow(unused_mut)]
     let mut config = load_result.config;
 
-    // 密钥保险柜：占位符注水为真实值;旧明文顺带迁移进系统钥匙串
-    secrets::hydrate_config(&mut config);
+    // 清理历史遗留的钥匙串占位符（该机制已移除）
+    clear_legacy_keychain_placeholders(&mut config);
 
     // 迁移旧版 excluded_apps → app_rules
     if config.privacy.migrate_legacy_excluded_apps() {
         log::info!("已迁移旧版 excluded_apps 到 app_rules");
         if config_load_status.allows_automatic_save() {
-            if let Err(e) = config.save_secure(&config_path) {
+            if let Err(e) = config.save(&config_path) {
                 log::warn!("保存迁移后的配置失败: {e}");
             }
         }
@@ -3458,7 +3504,7 @@ async fn main() {
         }
         config.last_app_version = Some(current_version);
         if config_load_status.allows_automatic_save() {
-            if let Err(e) = config.save_secure(&config_path) {
+            if let Err(e) = config.save(&config_path) {
                 log::warn!("保存版本信息失败: {e}");
             }
         }
@@ -3489,7 +3535,7 @@ async fn main() {
             if config.macos_screen_capture_permission_prompted != already_prompted
                 && config_load_status.allows_automatic_save()
             {
-                if let Err(e) = config.save_secure(&config_path) {
+                if let Err(e) = config.save(&config_path) {
                     log::warn!("保存 macOS 录屏权限提示状态失败: {e}");
                 }
             }

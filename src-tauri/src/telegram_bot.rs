@@ -1,4 +1,3 @@
-use crate::secrets::SecureSaveExt;
 use crate::bot_common::{
     build_device_list, handle_cmd, normalize_command, progress_text_for_command, DeviceEndpoint,
     NON_TEXT_REPLY, OUTPUT_DIVIDER,
@@ -588,7 +587,7 @@ fn handle_bind_command(
         }
         BindCodeApplyResult::Expired => {
             let config_path = state.config_path.clone();
-            if let Err(e) = next_config.save_secure(&config_path) {
+            if let Err(e) = next_config.save(&config_path) {
                 log::warn!("清理过期 Telegram Bot 绑定码失败: {e}");
             } else {
                 state.config = next_config;
@@ -598,7 +597,7 @@ fn handle_bind_command(
         BindCodeApplyResult::Invalid => BindCommandResult::reply(bind_invalid_reply(chat_id)),
         BindCodeApplyResult::Success => {
             let config_path = state.config_path.clone();
-            match next_config.save_secure(&config_path) {
+            match next_config.save(&config_path) {
                 Ok(_) => {
                     state.config = next_config;
                     BindCommandResult::success(bind_success_reply(chat_id), chat_id)
