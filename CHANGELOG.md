@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### 清理（提交前排查与工程收尾）
-- **移除无前端调用的死命令**：`take_screenshot`、`start_recording`、`stop_recording`、`is_screen_locked`、`check_ocr_available`、`is_work_time`（录制暂停/恢复走 `pause_recording`/`resume_recording`,不受影响）;同步删除/更新断言旧实现的守护测试（Linux Wayland 手动截图、分段工作时间的 `is_work_time_in_segments` 断言）。
+- **移除无前端调用的死命令**：`take_screenshot`、`start_recording`、`stop_recording`、`is_screen_locked`、`check_ocr_available`、`is_work_time`（录制暂停/恢复走 `pause_recording`/`resume_recording`,不受影响）;同步删除/更新断言旧实现的守护测试（Linux Wayland 手动截图、分段工作时间的 `is_work_time_in_segments` 断言）,并清理 `screen_lock.rs` 中随之失去调用方的 `is_work_time*` 时间判断辅助函数及其单元测试（锁屏检测本体不受影响）。
 - **README 三语言补齐 Bot 联动范围**：Telegram / 飞书 / 钉钉 / 企业微信（钉钉/企微早已可用,此前仅列前两家）。
 - **本地 macOS 构建改用稳定签名**：移除 `tauri.local.conf.json` 里 `signingIdentity: null` 的覆盖,继承主配置的 "WorkReview Self-Signed" 自签名（配合 `scripts/setup-codesign.sh`）——本地重复构建不再每次触发钥匙串授权弹窗。
 
