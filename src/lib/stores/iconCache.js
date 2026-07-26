@@ -70,10 +70,16 @@ function touchCacheKey(cacheKey) {
 }
 
 function pruneCache() {
-    while (_cacheKeys.length > MAX_ICON_CACHE) {
+    let scanned = 0;
+    while (_cacheKeys.length > MAX_ICON_CACHE && scanned < _cacheKeys.length) {
         const oldest = _cacheKeys.shift();
+        // 仍在请求中的 key 不能淘汰：删除 pending 标记会导致同一应用重复发起请求
+        if (_pendingRequests[oldest]) {
+            _cacheKeys.push(oldest);
+            scanned += 1;
+            continue;
+        }
         delete _iconCache[oldest];
-        delete _pendingRequests[oldest];
         delete _failedAt[oldest];
     }
 }

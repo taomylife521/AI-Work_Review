@@ -1,5 +1,6 @@
 //! Auto-extracted from the historical `commands.rs`. Behavior unchanged.
 
+use crate::secrets::SecureSaveExt;
 use crate::config::{AppConfig, AvatarFollowupItem, PrivacyConfig};
 use crate::database::Activity;
 use crate::error::AppError;
@@ -126,6 +127,22 @@ pub fn resolve_single_date(input: Option<&str>) -> String {
     }
 }
 
+/// 校验调用方传入的截图相对路径，防止绝对路径或 `..` 越界访问 data_dir 之外的文件
+pub(crate) fn validate_relative_path(path: &str) -> Result<(), AppError> {
+    use std::path::{Component, Path};
+
+    let p = Path::new(path);
+    if p.is_absolute() {
+        return Err(AppError::Unknown("非法路径：不允许使用绝对路径".to_string()));
+    }
+    if p.components()
+        .any(|c| matches!(c, Component::ParentDir | Component::Prefix(_)))
+    {
+        return Err(AppError::Unknown("非法路径：不允许包含 .. 等越界路径".to_string()));
+    }
+    Ok(())
+}
+
 pub(crate) fn collect_privacy_filters(state: &AppState) -> (Vec<String>, Vec<String>) {
     crate::privacy::collect_privacy_filters(&state.config)
 }
@@ -146,10 +163,12 @@ pub(crate) fn filter_activities_by_privacy(
         .into_iter()
         .filter(|activity| {
             let app_lower = activity.app_name.to_lowercase();
+            // 单向小写子串匹配，与 privacy::matches_ignored_app 保持一致：
+            // 不做反向包含，避免忽略长名称时误伤短名称应用。
             if !no_app_filter
                 && ignored_apps
                     .iter()
-                    .any(|ignored| app_lower.contains(ignored) || ignored.contains(&app_lower))
+                    .any(|ignored| !ignored.is_empty() && app_lower.contains(ignored))
             {
                 return false;
             }
@@ -280,7 +299,7 @@ pub(crate) fn persist_app_config(
 
         // 保存到文件
         let config_path = state.config_path.clone();
-        config.save(&config_path)?;
+        config.save_secure(&config_path)?;
 
         // 更新隐私过滤器
         state.privacy_filter.update_config(&config.privacy);

@@ -290,3 +290,27 @@ test('端到端：只回传已完成上一轮，并携带可靠的工具摘要',
     },
   ]);
 });
+
+test('成功步骤的 digest 应以受预算限制的附注进入历史', () => {
+  const messages = [
+    { role: 'user', content: '今天做了什么' },
+    {
+      role: 'assistant',
+      content: '主要在写代码。',
+      streaming: false,
+      steps: [
+        { tool: 'query_activities', status: 'done', ok: true, digest: 'Top应用: Xcode(120分)、Chrome(40分)' },
+        { tool: 'web_search', status: 'done', ok: false, digest: '不应出现：失败步骤不带数据' },
+      ],
+    },
+    { role: 'user', content: '那 Chrome 主要在看什么' },
+  ];
+
+  const payload = buildHistoryPayload(messages);
+  const assistantEntry = payload.find((m) => m.role === 'assistant');
+  assert.ok(assistantEntry.content.includes('[上轮工具数据摘要]'));
+  assert.ok(assistantEntry.content.includes('query_activities: Top应用: Xcode(120分)'));
+  assert.ok(!assistantEntry.content.includes('不应出现'));
+  // 工具符号摘要仍在
+  assert.ok(assistantEntry.content.includes('[工具：'));
+});

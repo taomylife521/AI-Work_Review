@@ -48,6 +48,7 @@ async-trait = "0.1"
 
 # 其他
 uuid = { version = "1.6", features = ["v4", "serde"] }
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 once_cell = "1.19"
 dirs = "5.0"
 image = "0.25.9"

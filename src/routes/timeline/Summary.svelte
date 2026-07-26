@@ -3,6 +3,7 @@
   import { onMount } from 'svelte';
   import { link, params } from 'svelte-spa-router';
   import { formatDurationLocalized, locale, t } from '$lib/i18n/index.js';
+  import { formatUserError } from '$lib/utils/errorDisplay.js';
   import LocalizedDatePicker from '../../lib/components/LocalizedDatePicker.svelte';
   import {
     getFullSummary,
@@ -68,7 +69,7 @@
     try {
       summaries = await invoke('get_hourly_summaries', { date: selectedDate });
     } catch (e) {
-      error = e.toString();
+      error = formatUserError(e, t('common.loadFailedRetry'));
     } finally {
       loading = false;
     }
@@ -77,6 +78,8 @@
   // 仅在日期变化时加载，避免 onMount + 响应式语句双重触发
   $: if (selectedDate && selectedDate !== lastLoadedDate) {
     lastLoadedDate = selectedDate;
+    // 切换日期时重置展开状态，避免上一天展开的小时残留到新日期
+    expandedHours = new Set();
     loadSummaries();
   }
 </script>
@@ -273,7 +276,7 @@
   .summary-editorial-shell::before {
     content: '';
     position: absolute;
-    left: calc(0.25rem + var(--summary-anchor-width) + 0.5rem);
+    inset-inline-start: calc(0.25rem + var(--summary-anchor-width) + 0.5rem);
     top: 0.4rem;
     bottom: 0.4rem;
     width: 2px;
@@ -308,7 +311,7 @@
     content: '';
     position: absolute;
     top: 1.2rem;
-    right: 0.05rem;
+    inset-inline-end: 0.05rem;
     width: 0.8rem;
     height: 0.8rem;
     border-radius: 999px;
@@ -501,6 +504,10 @@
     color: #94a3b8;
   }
 
+  :global(.dark) .summary-state-error {
+    color: #f87171;
+  }
+
   :global(.dark) .summary-editorial-shell::before {
     background: linear-gradient(180deg, rgba(248, 250, 252, 0.84), rgba(148, 163, 184, 0.08));
   }
@@ -585,7 +592,7 @@
     }
 
     .summary-editorial-shell::before {
-      left: calc(0.25rem + var(--summary-anchor-width) - 0.72rem);
+      inset-inline-start: calc(0.25rem + var(--summary-anchor-width) - 0.72rem);
     }
 
     .summary-band {

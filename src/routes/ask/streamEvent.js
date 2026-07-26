@@ -1,3 +1,6 @@
+/** 与后端 executor.rs 的 CANCELLED_ANSWER 常量保持一致。 */
+export const CANCELLED_ANSWER_MARKER = '已按你的要求停止。';
+
 function mergeReferences(existing, incoming) {
   const current = Array.isArray(existing) ? existing : [];
   const additions = Array.isArray(incoming) ? incoming : [];
@@ -69,6 +72,8 @@ export function reduceStreamEvent(message, event, fallbackError) {
                         ? event.hits
                         : undefined,
                     references: eventReferences,
+                    // 工具结果摘要：随下一轮历史回传给模型，追问时无需重查
+                    ...(typeof event.digest === 'string' ? { digest: event.digest } : {}),
                   }
                 : step
             );
@@ -81,6 +86,34 @@ export function reduceStreamEvent(message, event, fallbackError) {
         terminal: false,
       };
     }
+    case 'confirmRequest': {
+      // 行动确认卡片：找到该工具最近的 running 步骤，标记为待确认
+      const steps = Array.isArray(message.steps) ? message.steps : [];
+      const targetIndex = findLatestRunningStep(steps, event.tool);
+      const confirmPatch = {
+        confirmId: event.confirmId,
+        summary: typeof event.summary === 'string' ? event.summary : '',
+        confirmStatus: 'pending',
+      };
+      const nextSteps =
+        targetIndex === -1
+          ? [
+              ...steps,
+              {
+                tool: event.tool,
+                label: event.label,
+                status: 'running',
+                ...confirmPatch,
+              },
+            ]
+          : steps.map((step, index) =>
+              index === targetIndex ? { ...step, ...confirmPatch } : step
+            );
+      return {
+        message: { ...message, steps: nextSteps },
+        terminal: false,
+      };
+    }
     case 'token':
       return {
         message: {
@@ -89,18 +122,23 @@ export function reduceStreamEvent(message, event, fallbackError) {
         },
         terminal: false,
       };
-    case 'done':
+    case 'done': {
+      // 用户主动停止：保留已流式出来的部分内容，不被停止占位文案整体覆盖
+      const cancelled =
+        event.answer === CANCELLED_ANSWER_MARKER && (message.content ?? '').trim();
       return {
         message: {
           ...message,
-          content: event.answer ?? message.content,
+          content: cancelled ? message.content : event.answer ?? message.content,
           references: event.references?.length ? event.references : message.references,
           toolLabels: event.toolLabels?.length ? event.toolLabels : message.toolLabels,
           streaming: false,
           failed: false,
+          stopped: Boolean(cancelled) || event.answer === CANCELLED_ANSWER_MARKER,
         },
         terminal: true,
       };
+    }
     case 'error':
       return {
         message: {

@@ -3,6 +3,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { cache } from '../../lib/stores/cache.js';
   import { locale, t } from '$lib/i18n/index.js';
+  import { formatUserError } from '$lib/utils/errorDisplay.js';
   import { showToast } from '../../lib/stores/toast.js';
 
   import SettingsGeneral from './components/SettingsGeneral.svelte';
@@ -196,7 +197,7 @@
       if (!config.privacy.excluded_keywords) config.privacy.excluded_keywords = [];
       delete config.privacy.sensitive_keywords;
     } catch (e) {
-      error = e.toString();
+      error = formatUserError(e, t('common.loadFailedRetry'));
       console.error('加载配置失败:', e);
       settingsRuntimePlatform = '';
     } finally {
@@ -244,7 +245,7 @@
         successTimer = null;
       }, 3000);
     } catch (e) {
-      error = e.toString();
+      error = formatUserError(e, t('common.loadFailedRetry'));
     } finally {
       saving = false;
     }
@@ -384,7 +385,7 @@
               <span class="inline-flex items-center gap-1 whitespace-nowrap">
                 <span>{t(tab.labelKey)}</span>
                 {#if tab.beta}
-                  <span class="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1 py-px text-[8px] font-semibold uppercase tracking-[0.06em] text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                  <span class="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1 py-px text-[10px] font-semibold uppercase tracking-[0.06em] text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
                     Beta
                   </span>
                 {/if}

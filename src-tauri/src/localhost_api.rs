@@ -9,7 +9,7 @@ use std::io::Write;
 use std::net::TcpListener as StdTcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use subtle::ConstantTimeEq;
 use tauri::AppHandle;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -65,6 +65,8 @@ struct ExportReportRequest {
     content: Option<String>,
     #[serde(default)]
     export_dir: Option<String>,
+    #[serde(default)]
+    locale: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -184,6 +186,10 @@ fn write_localhost_api_token(path: &Path, token: &str) -> Result<()> {
     let mut file = open_secret_file(path)?;
     file.write_all(token.as_bytes())?;
     file.flush()?;
+    // 主动刷新缓存，保证生成/轮换后新 token 立即生效
+    if let Ok(mut cache) = LOCALHOST_API_TOKEN_CACHE.lock() {
+        *cache = Some((path.to_path_buf(), token.to_string(), Instant::now()));
+    }
     Ok(())
 }
 
@@ -199,6 +205,30 @@ fn read_localhost_api_token_from_path(path: &Path) -> Result<Option<String>> {
     } else {
         Ok(Some(token))
     }
+}
+
+/// 本地 API token 内存缓存：(token 文件路径, token, 读取时刻)。
+/// 避免每个请求都做磁盘 IO；TTL 内轮换的旧 token 仍短暂可用（约 5 秒），可接受。
+/// 写入/轮换 token 时会主动刷新缓存，新 token 立即生效。
+static LOCALHOST_API_TOKEN_CACHE: Mutex<Option<(PathBuf, String, Instant)>> = Mutex::new(None);
+const LOCALHOST_API_TOKEN_CACHE_TTL: Duration = Duration::from_secs(5);
+
+fn read_localhost_api_token_cached(path: &Path) -> Result<Option<String>> {
+    if let Ok(cache) = LOCALHOST_API_TOKEN_CACHE.lock() {
+        if let Some((cached_path, token, read_at)) = cache.as_ref() {
+            if cached_path == path && read_at.elapsed() < LOCALHOST_API_TOKEN_CACHE_TTL {
+                return Ok(Some(token.clone()));
+            }
+        }
+    }
+
+    let token = read_localhost_api_token_from_path(path)?;
+    if let Some(token) = token.as_ref() {
+        if let Ok(mut cache) = LOCALHOST_API_TOKEN_CACHE.lock() {
+            *cache = Some((path.to_path_buf(), token.clone(), Instant::now()));
+        }
+    }
+    Ok(token)
 }
 
 fn extract_bearer_token(value: &str) -> Option<&str> {
@@ -710,6 +740,7 @@ async fn route_request(
                     body.date,
                     body.content,
                     body.export_dir,
+                    body.locale,
                     state,
                 )
                 .map(|path| {
@@ -898,8 +929,13 @@ async fn route_request(
                 return HttpResponse::error(404, "飞书 Bot 未启用");
             }
             let body_str = String::from_utf8_lossy(&request.body);
-            let resp =
-                crate::feishu_bot::handle_feishu_webhook(&body_str, &config, &data_dir).await;
+            let resp = crate::feishu_bot::handle_feishu_webhook(
+                &request.headers,
+                &body_str,
+                &config,
+                &data_dir,
+            )
+            .await;
             Ok(HttpResponse {
                 status: resp.status,
                 reason: reason_phrase(resp.status),
@@ -1035,7 +1071,7 @@ fn authorize_request(request: &ParsedRequest, state: &Arc<Mutex<AppState>>) -> R
         let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
         localhost_api_token_path(&state.data_dir)
     };
-    let Some(expected_token) = read_localhost_api_token_from_path(&token_path)? else {
+    let Some(expected_token) = read_localhost_api_token_cached(&token_path)? else {
         return Err(AppError::Config("缺少或无效的本地 API token".to_string()));
     };
 

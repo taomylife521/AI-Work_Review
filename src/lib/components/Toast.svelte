@@ -21,16 +21,20 @@
 </script>
 
 {#if toastState}
-  <div class="fixed inset-x-0 bottom-6 z-[210] flex justify-center px-4 animate-fadeIn pointer-events-none">
+  <div
+    class="fixed inset-x-0 bottom-6 z-[210] flex justify-center px-4 animate-fadeIn pointer-events-none"
+    role="status"
+    aria-live="polite"
+  >
     <button
       type="button"
       on:click={clearToast}
-      class={`max-w-full min-h-11 px-4 py-2.5 rounded-xl shadow-lg dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] text-sm font-medium leading-none flex items-center gap-2 pointer-events-auto ${toastClass}`}
+      class={`max-w-xl min-h-11 px-4 py-2.5 rounded-xl shadow-lg dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] text-sm font-medium flex items-center gap-2 pointer-events-auto ${toastClass}`}
     >
       <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={iconPath} />
       </svg>
-      <span class="leading-none text-center">{toastState.message}</span>
+      <span class="leading-snug text-center break-words min-w-0">{toastState.message}</span>
     </button>
   </div>
 {/if}

@@ -38,8 +38,15 @@ test('侧边栏品牌区不再渲染副标题装饰文字', async () => {
 test('侧边栏激活态高亮条应位于图标区外侧，避免与导航图标重叠', async () => {
   const appCssSource = await readFile(new URL('../../app.css', import.meta.url), 'utf8');
 
-  assert.match(appCssSource, /\.sidebar-nav-rail\s*\{[\s\S]*left:\s*0\.55rem/);
-  assert.doesNotMatch(appCssSource, /\.sidebar-nav-rail\s*\{[\s\S]*left:\s*0\.95rem/);
+  // 逻辑属性（RTL 下自动镜像），位置仍为 0.55rem 图标区外侧
+  assert.match(appCssSource, /\.sidebar-nav-rail\s*\{[\s\S]*inset-inline-start:\s*0\.55rem/);
+  assert.doesNotMatch(appCssSource, /\.sidebar-nav-rail\s*\{[\s\S]*inset-inline-start:\s*0\.95rem/);
+});
+
+test('激活态高亮条必须真实渲染（此前只有样式没有 DOM，指示条从未出现）', async () => {
+  const source = await readFile(new URL('./Sidebar.svelte', import.meta.url), 'utf8');
+
+  assert.match(source, /class="sidebar-nav-rail"/);
 });
 
 test('侧边栏不应继续提供独立的设备节点入口，节点能力应收回设置页 Beta 标签', async () => {

@@ -47,14 +47,8 @@ pub(crate) fn get_app_category_overview_inner(
         .collect())
 }
 
-#[tauri::command]
-pub async fn get_app_category_overview(
-    state: State<'_, Arc<Mutex<AppState>>>,
-) -> Result<Vec<AppCategoryOverviewItem>, AppError> {
-    get_app_category_overview_inner(state.inner())
-}
 
-fn upsert_app_category_rule(config: &mut AppConfig, app_name: &str, category: &str) {
+pub(crate) fn upsert_app_category_rule(config: &mut AppConfig, app_name: &str, category: &str) {
     let normalized_app_name = crate::monitor::normalize_display_app_name(app_name);
     let custom_keys: Vec<String> = config
         .custom_categories
@@ -78,7 +72,7 @@ fn upsert_app_category_rule(config: &mut AppConfig, app_name: &str, category: &s
     });
 }
 
-fn reclassify_app_history_in_state(
+pub(crate) fn reclassify_app_history_in_state(
     state: &AppState,
     app_name: &str,
     category: &str,
@@ -187,15 +181,6 @@ pub async fn set_app_category_rule(
     reclassify_app_history_in_state(&state, trimmed_app_name, &category)
 }
 
-#[tauri::command]
-pub async fn reclassify_app_history(
-    app_name: String,
-    category: String,
-    state: State<'_, Arc<Mutex<AppState>>>,
-) -> Result<usize, AppError> {
-    let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-    reclassify_app_history_in_state(&state, &app_name, &category)
-}
 
 /// 分类信息（前端展示用）
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -340,7 +325,25 @@ pub async fn delete_custom_category(
     };
 
     persist_app_config(next_config, app, state.inner())?;
-    Ok(affected)
+
+    // 同步更新历史活动记录，避免旧数据仍引用已删除的分类
+    let reassigned_rows = {
+        let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+        match state.database.reassign_activity_category(&key, &fallback) {
+            Ok(count) => {
+                if count > 0 {
+                    log::info!("删除分类 {key}: 已将 {count} 条历史活动记录归类到 {fallback}");
+                }
+                count
+            }
+            Err(e) => {
+                log::warn!("删除分类 {key}: 重新归类历史活动记录失败: {e}");
+                0
+            }
+        }
+    };
+
+    Ok(affected + reassigned_rows)
 }
 
 /// 语义分类信息（前端展示用）

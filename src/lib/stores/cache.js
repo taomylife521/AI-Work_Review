@@ -47,12 +47,15 @@ function createCache() {
 
   function evictOldEntries(obj, currentDate) {
     if (Object.keys(obj).length <= MAX_CACHE_DAYS) return obj;
-    const cutoff = new Date(currentDate);
+    // key 可能是 "YYYY-MM-DD" 或 "YYYY-MM-DD:locale"（日报缓存），先剥离 locale 后缀
+    const baseDate = String(currentDate).split(':')[0];
+    const cutoff = new Date(`${baseDate}T12:00:00`);
+    if (Number.isNaN(cutoff.getTime())) return obj;
     cutoff.setDate(cutoff.getDate() - MAX_CACHE_DAYS);
     const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`;
     const filtered = {};
     for (const [k, v] of Object.entries(obj)) {
-      if (k >= cutoffStr) filtered[k] = v;
+      if (String(k).split(':')[0] >= cutoffStr) filtered[k] = v;
     }
     return filtered;
   }
@@ -61,9 +64,10 @@ function createCache() {
     subscribe,
 
     // 检查缓存是否有效（包含跨天检测）
+    // 兼容两种调用：isValid(整个缓存对象, key) 或 isValid(缓存条目, ttl类型)
     isValid: (cache, key = null) => {
       if (!cache) return false;
-      const data = key ? cache[key] : cache;
+      const data = key != null && cache[key] !== undefined ? cache[key] : cache;
       if (!data || !data.timestamp) return false;
 
       // 概览数据跨天检测：日期不匹配则缓存失效

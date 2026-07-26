@@ -133,8 +133,8 @@
         invoke('get_timeline', { date: today, limit: 20, offset: 0 }),
         invoke('get_hourly_summaries', { date: today })
       ]).then(([activities, summaries]) => cache.setTimeline(today, activities, summaries)),
-      // 3. 日报 (今天) - 检查是否已存在
-      invoke('get_saved_report', { date: today }).then(report => {
+      // 3. 日报 (今天) - 检查是否已存在（必须带上当前语言，否则会把中文日报缓存到其他语言的 key 下）
+      invoke('get_saved_report', { date: today, locale: $locale }).then(report => {
         if (report) cache.setReport(`${today}:${$locale}`, report);
       })
     ]).then(() => {
@@ -313,7 +313,13 @@
     // #118: 主窗口隐藏（静默驻留/轻量）时暂停 CSS 动画，降低后台 WebView2 GPU 占用
     safeListen('main-window-visibility', (event) => {
       syncMainWindowVisibility(event.payload);
-    }).then((unlisten) => pendingCleanup.push(unlisten));
+    }).then((unlisten) => {
+      if (disposed) {
+        try { if (unlisten) unlisten(); } catch {}
+      } else {
+        pendingCleanup.push(unlisten);
+      }
+    });
 
     // 同步注册的 locale subscription 立即可清理
     pendingCleanup.push(() => unsubscribeLocale());
@@ -395,7 +401,7 @@
         isPaused = event.payload.isPaused;
         recordingStore.setState(event.payload.isRecording, event.payload.isPaused);
       });
-      if (disposed) return;
+      if (disposed) { try { if (unlistenRecordingState) unlistenRecordingState(); } catch {} return; }
       pendingCleanup.push(unlistenRecordingState);
 
       const unlistenConfigChanged = await safeListen('config-changed', (event) => {
@@ -403,7 +409,7 @@
         applyUiVisualStyle(event.payload?.ui_visual_style || 'c');
         cache.setConfig(event.payload);
       });
-      if (disposed) return;
+      if (disposed) { try { if (unlistenConfigChanged) unlistenConfigChanged(); } catch {} return; }
       pendingCleanup.push(unlistenConfigChanged);
 
       const unlistenAvatarTimeline = await safeListen('avatar-open-timeline', async (event) => {
@@ -425,7 +431,7 @@
           console.error('桌宠跳转时间线失败:', e);
         }
       });
-      if (disposed) return;
+      if (disposed) { try { if (unlistenAvatarTimeline) unlistenAvatarTimeline(); } catch {} return; }
       pendingCleanup.push(unlistenAvatarTimeline);
 
       // 监听背景图更新事件（来自设置页，实时预览）
@@ -462,6 +468,7 @@
       // 日报自动生成检测：每分钟检查一次
       let lastAutoGenDate = null;  // 防止同一天重复触发
       let autoGenRunning = false;  // 防止并发生成
+      let memorySynthRunning = false;  // 防止洞察合成并发
       const autoReportTimer = setInterval(async () => {
         if (autoGenRunning) return;  // 上一轮还没完成，跳过
         const now = new Date();
@@ -477,7 +484,7 @@
         if (currentTotalMinutes >= workEndTotalMinutes && lastAutoGenDate !== today) {
           try {
             // 检查今日是否已有日报
-            const existingReport = await invoke('get_saved_report', { date: today });
+            const existingReport = await invoke('get_saved_report', { date: today, locale: currentLocale });
             if (!existingReport) {
               devLog('工作结束时间到达，自动生成日报...');
               autoGenRunning = true;
@@ -498,13 +505,20 @@
         }
 
         // AI 工作记忆：每天工作结束后自动合成洞察
-        if (currentTotalMinutes >= workEndTotalMinutes) {
+        if (currentTotalMinutes >= workEndTotalMinutes && !memorySynthRunning) {
           try {
             const config = await invoke('get_config');
             if (config.memory_enabled && config.memory_last_synthesis_date !== today) {
-              await invoke('synthesize_insights', {});
-              await invoke('save_config', { config: { ...config, memory_last_synthesis_date: today } });
-              devLog('工作记忆合成完成');
+              memorySynthRunning = true;
+              try {
+                await invoke('synthesize_insights', {});
+                // 合成可能耗时较长，重新拉取最新配置再写入，避免覆盖期间用户改动的其他设置
+                const freshConfig = await invoke('get_config');
+                await invoke('save_config', { config: { ...freshConfig, memory_last_synthesis_date: today } });
+                devLog('工作记忆合成完成');
+              } finally {
+                memorySynthRunning = false;
+              }
             }
           } catch (e) {
             console.warn('工作记忆合成失败:', e);
@@ -535,7 +549,7 @@
           { priority: Boolean(event.payload?.browser_url) }
         );
       });
-      if (disposed) return;
+      if (disposed) { try { if (unlisten) unlisten(); } catch {} return; }
       pendingCleanup.push(unlisten);
     })();
 
@@ -621,7 +635,10 @@
     {/if}
   </div>
 
-  <div class="app-shell-stage relative z-10 flex-1 grid grid-cols-[13.5rem_minmax(0,1fr)] gap-3 m-2 {platform !== 'macos' ? 'app-shell-stage--windowbar' : 'app-shell-stage--macos'}">
+  <!-- 注意：这里不能加 z-index（如 z-10），否则会形成层叠上下文，
+       把内部弹窗/Toast（z-[100..210]）整体压到拖拽条 z-50 之下，
+       导致弹窗顶部 28px 被拖拽层拦截成"点击变拖动窗口"。 -->
+  <div class="app-shell-stage relative flex-1 grid grid-cols-[13.5rem_minmax(0,1fr)] gap-3 m-2 {platform !== 'macos' ? 'app-shell-stage--windowbar' : 'app-shell-stage--macos'}">
     <!-- 左侧边栏 -->
     <aside class="app-shell-sidebar-frame min-h-0">
       <div class="app-shell-sidebar h-full flex flex-col overflow-hidden">

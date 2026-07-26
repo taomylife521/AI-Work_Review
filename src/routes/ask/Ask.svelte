@@ -3,11 +3,14 @@
   import { fly } from 'svelte/transition';
   import { invoke, Channel } from '@tauri-apps/api/core';
   import { marked } from 'marked';
+  import DOMPurify from 'dompurify';
   import { assistantStore, BASIC_ASSISTANT_MODEL_ID } from '../../lib/stores/assistant.js';
   import { buildHistoryPayload } from './historyPayload.js';
   import { createRequestEventGate } from './requestEventGate.js';
   import { reduceStreamEvent } from './streamEvent.js';
   import { formatDurationLocalized, locale, t, tm, translateCategoryLabel } from '$lib/i18n/index.js';
+  import { formatUserError } from '$lib/utils/errorDisplay.js';
+  import { trapFocus } from '$lib/utils/focusTrap.js';
 
   marked.use({
     gfm: true,
@@ -27,7 +30,7 @@
   $: sending = assistantState.sending ?? false;
   $: messages = assistantState.messages ?? [];
   $: currentLocale = $locale;
-  $: starterPrompts = dynamicPrompts.length ? dynamicPrompts : (tm('ask.starterPrompts') || []);
+  $: starterPrompts = (currentLocale, dynamicPrompts.length ? dynamicPrompts : (tm('ask.starterPrompts') || []));
   let dynamicPrompts = [];
 
   // 模型选择器
@@ -93,10 +96,19 @@
       en: 'Anthropic Claude',
       'zh-TW': 'Anthropic Claude',
     },
+    openrouter: { 'zh-CN': 'OpenRouter', en: 'OpenRouter', 'zh-TW': 'OpenRouter' },
+    groq: { 'zh-CN': 'Groq', en: 'Groq', 'zh-TW': 'Groq' },
+    xai: { 'zh-CN': 'xAI Grok', en: 'xAI Grok', 'zh-TW': 'xAI Grok' },
+    mistral: { 'zh-CN': 'Mistral', en: 'Mistral', 'zh-TW': 'Mistral' },
+    lmstudio: { 'zh-CN': 'LM Studio (本地)', en: 'LM Studio (Local)', 'zh-TW': 'LM Studio（本機）' },
+    custom: { 'zh-CN': '自定义接口', en: 'Custom endpoint', 'zh-TW': '自訂介面' },
   };
 
   function localizedProviderName(providerId) {
-    return providerDisplayNames[providerId]?.[currentLocale] || providerId || '';
+    return providerDisplayNames[providerId]?.[currentLocale]
+      || providerDisplayNames[providerId]?.en
+      || providerId
+      || '';
   }
 
   function displayModelProfileName(profile) {
@@ -199,14 +211,19 @@
 
     // 配了 AI 模型时，基于当前工作记录动态生成 starter prompts（替代固定 4 条）
     refreshDynamicPrompts();
+
+    // P3：加载会话列表；DB 为空且 localStorage 有旧历史时做一次性导入
+    await loadConversations();
+    if (!destroyed) {
+      await migrateLegacyMessagesIfNeeded();
+    }
   });
 
   onDestroy(() => {
     destroyed = true;
-    if (activeSendingRequestId) {
-      assistantStore.finishSending(activeSendingRequestId);
-      activeSendingRequestId = null;
-    }
+    // 注意：不在这里清 sending 状态——请求在后台继续跑（切页面不取消），
+    // 全局 store 保留"生成中"标记,切回助手页能看到进行中的气泡;
+    // submitQuestion 的 finally（120s 超时兜底）保证状态必然收尾,不会僵尸。
     unsubscribeAssistant();
   });
 
@@ -324,7 +341,7 @@
     const cached = renderedMarkdownCache.get(normalized);
     if (cached) return cached;
 
-    const html = marked.parse(normalized);
+    const html = DOMPurify.sanitize(marked.parse(normalized));
     renderedMarkdownCache.set(normalized, html);
 
     // 控制缓存上限，避免长会话内存持续增长
@@ -397,11 +414,192 @@
   }
 
   async function clearConversation() {
-    assistantStore.clearMessages();
+    // "新对话"：不删除旧会话，只解绑并清空当前视图；下次发送时自动落库新会话
+    assistantStore.setConversation(null, []);
     error = null;
     await tick();
     await scrollToBottom('auto', 2);
     composer?.focus();
+    loadConversations();
+  }
+
+  // ══════════ P3：会话持久化 ══════════
+  let conversations = [];
+  let showConversationList = false;
+  $: conversationId = assistantState.conversationId ?? null;
+
+  function openConversationDrawer() {
+    showConversationList = true;
+    loadConversations();
+  }
+
+  /** 迁移期把未翻译的 key 存进过标题的历史数据，显示时兜底翻译。 */
+  function displayConversationTitle(title) {
+    return title === 'ask.importedConversation' ? t('ask.importedConversation') : title;
+  }
+
+  async function loadConversations() {
+    try {
+      conversations = await invoke('list_assistant_conversations', { limit: 30 });
+    } catch (e) {
+      console.warn('加载助手会话列表失败:', e);
+      conversations = [];
+    }
+  }
+
+  function storedMessageToUiMessage(row) {
+    let steps = [];
+    if (row.toolDigest) {
+      try {
+        const parsed = JSON.parse(row.toolDigest);
+        if (Array.isArray(parsed)) {
+          steps = parsed.map((s) => ({
+            tool: s.tool,
+            label: s.label || s.tool,
+            status: 'done',
+            ok: s.ok,
+            hits: s.hits,
+            digest: s.digest,
+            references: [],
+          }));
+        }
+      } catch {
+        // ignore corrupted digest, keep message body
+      }
+    }
+    return {
+      role: row.role,
+      content: row.content,
+      steps,
+      streaming: false,
+      failed: false,
+      modelName: row.modelName || undefined,
+      usedAi: Boolean(row.modelName),
+    };
+  }
+
+  async function switchConversation(id) {
+    if (sending) return;
+    showConversationList = false;
+    try {
+      const rows = await invoke('get_assistant_messages', { conversationId: id });
+      assistantStore.setConversation(id, rows.map(storedMessageToUiMessage));
+      error = null;
+      await tick();
+      await scrollToBottom('auto', 2);
+    } catch (e) {
+      console.warn('加载会话消息失败:', e);
+    }
+  }
+
+  async function deleteConversation(id) {
+    try {
+      await invoke('delete_assistant_conversation', { conversationId: id });
+      if (conversationId === id) {
+        assistantStore.setConversation(null, []);
+      }
+      await loadConversations();
+    } catch (e) {
+      console.warn('删除会话失败:', e);
+    }
+  }
+
+  /** 确保当前对话已落库；返回会话 id（失败时返回 null，不阻塞聊天）。 */
+  async function ensureConversation(firstQuestion) {
+    if (conversationId != null) return conversationId;
+    try {
+      const title = String(firstQuestion || '').slice(0, 24) || t('ask.newConversation');
+      const id = await invoke('create_assistant_conversation', { title });
+      assistantStore.setConversationId(id);
+      loadConversations();
+      return id;
+    } catch (e) {
+      console.warn('创建会话失败（本轮仅内存保存）:', e);
+      return null;
+    }
+  }
+
+  /** 每轮完成后把 user + assistant 消息写入 SQLite。 */
+  async function persistRound(convId, question, assistantMessage) {
+    if (convId == null || !assistantMessage) return;
+    try {
+      await invoke('append_assistant_message', {
+        conversationId: convId,
+        role: 'user',
+        content: question,
+        toolDigest: null,
+        modelName: null,
+      });
+      const digest = (assistantMessage.steps || [])
+        .filter((s) => s.status === 'done')
+        .map((s) => ({ tool: s.tool, label: s.label, ok: s.ok, hits: s.hits, digest: s.digest }));
+      await invoke('append_assistant_message', {
+        conversationId: convId,
+        role: 'assistant',
+        content: assistantMessage.content || '',
+        toolDigest: digest.length ? JSON.stringify(digest) : null,
+        modelName: assistantMessage.modelName || null,
+      });
+    } catch (e) {
+      console.warn('保存会话消息失败:', e);
+    }
+  }
+
+  /** 一次性迁移：DB 无会话且 localStorage 有历史 → 导入为一个会话。 */
+  async function migrateLegacyMessagesIfNeeded() {
+    try {
+      if (conversations.length > 0 || !messages.length) return;
+      const legacy = messages.filter(
+        (m) => (m.role === 'user' || m.role === 'assistant') && !m.streaming && m.content
+      );
+      if (!legacy.length) return;
+      const id = await invoke('create_assistant_conversation', {
+        title: t('ask.importedConversation'),
+      });
+      for (const m of legacy) {
+        await invoke('append_assistant_message', {
+          conversationId: id,
+          role: m.role,
+          content: m.content,
+          toolDigest: null,
+          modelName: m.modelName || null,
+        });
+      }
+      assistantStore.setConversationId(id);
+      await loadConversations();
+    } catch (e) {
+      console.warn('迁移历史对话失败:', e);
+    }
+  }
+
+  // ══════════ P2：行动确认 / P0：停止 ══════════
+  async function respondConfirm(messageId, step, approved) {
+    if (!step?.confirmId || step.confirmStatus !== 'pending') return;
+    try {
+      await invoke('confirm_assistant_action', {
+        confirmId: step.confirmId,
+        approved,
+      });
+      assistantStore.updateMessageById(messageId, (m) => ({
+        ...m,
+        steps: (m.steps || []).map((s) =>
+          s.confirmId === step.confirmId
+            ? { ...s, confirmStatus: approved ? 'approved' : 'denied' }
+            : s
+        ),
+      }));
+    } catch (e) {
+      console.warn('回传确认结果失败:', e);
+    }
+  }
+
+  async function stopCurrentRequest() {
+    if (!activeSendingRequestId) return;
+    try {
+      await invoke('cancel_assistant_request', { requestId: activeSendingRequestId });
+    } catch (e) {
+      console.warn('发送停止信号失败:', e);
+    }
   }
 
   const ASK_TIMEOUT_MS = 120_000;
@@ -423,6 +621,9 @@
     error = null;
 
     const history = buildHistoryPayload(messages);
+
+    // P3：确保会话已落库（失败不阻塞聊天，仅本轮不持久化）
+    const convId = await ensureConversation(trimmed);
 
     assistantStore.appendMessage({
       role: 'user',
@@ -472,6 +673,7 @@
           history,
           modelConfig: getSelectedModelConfig(),
           locale: currentLocale,
+          requestId: assistantMessageId,
           onEvent: channel,
         }),
         ASK_TIMEOUT_MS
@@ -493,10 +695,16 @@
         usedAi: answer?.usedAi ?? m.usedAi,
         modelName: answer?.modelName ?? m.modelName,
       }));
+
+      // P3：本轮完成 → 持久化（从 store 取终态消息）
+      const finalMessage = (assistantState.messages || []).find(
+        (m) => m.id === assistantMessageId
+      );
+      persistRound(convId, trimmed, finalMessage);
     } catch (e) {
       requestGate?.close();
       if (!destroyed) {
-        error = e.toString();
+        error = formatUserError(e, t('common.loadFailedRetry'));
       }
       // 只把错误写入本次占位消息，迟到的旧事件不会影响后续请求。
       assistantStore.updateMessageById(assistantMessageId, (m) => ({
@@ -558,7 +766,7 @@
       const stats = await invoke('get_today_stats');
       const recentApps = (stats?.app_usage || []).slice(0, 3).map((a) => a.app_name).join(t('common.listSeparator'));
       const topCategory = translateCategoryLabel(stats?.category_usage?.[0]?.category || '');
-      const workMinutes = Math.round((stats?.total_work_duration || 0) / 60);
+      const workMinutes = Math.round((stats?.work_time_duration || 0) / 60);
 
       const systemPrompt = t('ask.starterSystemPrompt');
       const userPrompt = t('ask.starterUserPrompt', {
@@ -595,6 +803,14 @@
   });
 </script>
 
+<svelte:window
+  on:keydown={(e) => {
+    if (e.key === 'Escape' && showConversationList) {
+      showConversationList = false;
+    }
+  }}
+/>
+
 <div class="page-shell ask-workbench-shell h-full" data-locale={currentLocale}>
   <div class="ask-workbench-frame flex h-[calc(100vh-7rem)] flex-col overflow-hidden">
     <div bind:this={chatBody} class="flex-1 overflow-y-auto px-4 pb-40 pt-10" on:scroll={syncStickToBottom}>
@@ -629,12 +845,14 @@
                   {#if message.steps?.length}
                     <div class="mb-3 flex flex-col gap-1">
                       {#each message.steps as step, si}
-                        <details class="group/step rounded-lg bg-slate-50/60 dark:bg-[#161b22]/30 overflow-hidden">
+                        <details class="group/step rounded-lg bg-slate-50/60 dark:bg-[#161b22]/30 overflow-hidden" open={step.confirmStatus === 'pending' || undefined}>
                           <summary
                             class="flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-500 dark:text-[#7d8590] cursor-pointer select-none list-none transition-colors hover:bg-slate-100/60 dark:hover:bg-[#21262d]/40"
                             in:fly={{ x: -4, duration: 160 }}
                           >
-                            {#if step.status === 'running'}
+                            {#if step.confirmStatus === 'pending'}
+                              <span class="inline-block h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                            {:else if step.status === 'running'}
                               <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-500 dark:border-indigo-900/60 dark:border-t-indigo-400"></span>
                             {:else if step.ok === false}
                               <span class="inline-block h-1.5 w-1.5 rounded-full bg-rose-500"></span>
@@ -644,7 +862,11 @@
                               <span class="inline-block h-1.5 w-1.5 rounded-full bg-slate-400"></span>
                             {/if}
                             <span class="font-medium">{step.label}</span>
-                            {#if step.status === 'done' && step.ok === false}
+                            {#if step.confirmStatus === 'pending'}
+                              <span class="text-amber-600 dark:text-amber-400">· {t('ask.actionPending')}</span>
+                            {:else if step.confirmStatus === 'denied'}
+                              <span class="text-slate-400 dark:text-[#636c76]">· {t('ask.actionDenied')}</span>
+                            {:else if step.status === 'done' && step.ok === false}
                               <span class="text-rose-500 dark:text-rose-400">· {t('ask.stepFailed')}</span>
                             {:else if step.status === 'done' && step.tool === 'search_memory' && step.ok === true && step.hits != null}
                               <span class="text-slate-400 dark:text-[#636c76]">· {step.hits} {t('ask.hits')}</span>
@@ -653,6 +875,31 @@
                               <svg class="w-3 h-3 ml-auto shrink-0 text-slate-400 transition-transform group-open/step:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                             {/if}
                           </summary>
+                          {#if step.confirmId && step.summary}
+                            <div class="px-2.5 pb-2 pt-1.5 border-t border-amber-200/60 dark:border-amber-800/40 bg-amber-50/50 dark:bg-amber-950/20">
+                              <p class="text-xs leading-relaxed text-slate-700 dark:text-[#adbac7]">{step.summary}</p>
+                              {#if step.confirmStatus === 'pending'}
+                                <div class="mt-2 flex items-center gap-2">
+                                  <button
+                                    class="rounded-lg bg-indigo-500 px-3 py-1 text-xs font-medium text-white transition hover:bg-indigo-600 active:scale-95"
+                                    on:click={() => respondConfirm(message.id, step, true)}
+                                  >
+                                    {t('ask.approveAction')}
+                                  </button>
+                                  <button
+                                    class="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-100 active:scale-95 dark:border-[#30363d] dark:text-[#adbac7] dark:hover:bg-[#21262d]"
+                                    on:click={() => respondConfirm(message.id, step, false)}
+                                  >
+                                    {t('ask.denyAction')}
+                                  </button>
+                                </div>
+                              {:else if step.confirmStatus === 'approved'}
+                                <p class="mt-1 text-[11px] text-emerald-600 dark:text-emerald-400">{t('ask.actionApproved')}</p>
+                              {:else if step.confirmStatus === 'denied'}
+                                <p class="mt-1 text-[11px] text-slate-500 dark:text-[#7d8590]">{t('ask.actionDeniedNote')}</p>
+                              {/if}
+                            </div>
+                          {/if}
                           {#if step.references?.length}
                             <div class="px-2.5 pb-2 pt-1 space-y-1 border-t border-slate-200/60 dark:border-[#30363d]/40">
                               {#each step.references as ref}
@@ -705,7 +952,7 @@
                     </details>
                   {/if}
                 {:else}
-                  <p class="whitespace-pre-wrap break-words text-[16px] font-medium leading-7 tracking-[0.01em]">{message.content}</p>
+                  <p class="whitespace-pre-wrap break-words text-[15px] font-medium leading-7 tracking-[0.01em]">{message.content}</p>
                 {/if}
               </div>
             </div>
@@ -776,15 +1023,30 @@
               </select>
 
               {#if sending}
-                <span class="shrink-0 text-[11px] text-slate-400 dark:text-[#636c76]">{t('ask.thinking')}</span>
+                <button
+                  type="button"
+                  class="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-rose-200 px-2.5 py-1 text-[11px] font-medium text-rose-500 transition hover:bg-rose-50 dark:border-rose-900/60 dark:text-rose-400 dark:hover:bg-rose-950/30"
+                  on:click={stopCurrentRequest}
+                >
+                  <span class="inline-block h-2 w-2 rounded-[2px] bg-current"></span>
+                  {t('ask.stopGenerating')}
+                </button>
               {:else}
                 <button
                   type="button"
                   class="shrink-0 rounded-full px-2.5 py-1 text-[11px] text-slate-400 transition hover:bg-slate-100/80 hover:text-slate-700 dark:text-[#636c76] dark:hover:bg-[#21262d]/70 dark:hover:text-[#adbac7]"
                   on:click={clearConversation}
-                  disabled={!hasConversation}
+                  disabled={!hasConversation && conversationId == null}
                 >
-                  {t('ask.clearing')}
+                  {t('ask.newConversation')}
+                </button>
+                <button
+                  type="button"
+                  class="shrink-0 rounded-full px-2.5 py-1 text-[11px] text-slate-400 transition hover:bg-slate-100/80 hover:text-slate-700 dark:text-[#636c76] dark:hover:bg-[#21262d]/70 dark:hover:text-[#adbac7]"
+                  on:click={openConversationDrawer}
+                  disabled={!conversations.length}
+                >
+                  {t('ask.conversationHistory')}
                 </button>
               {/if}
             </div>
@@ -814,3 +1076,68 @@
     </div>
   </div>
 </div>
+
+<!-- 历史会话抽屉：页内侧滑面板，选中即回到对话 -->
+{#if showConversationList}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <div
+    class="fixed inset-0 z-[160] flex justify-end bg-slate-950/32 backdrop-blur-sm animate-fadeIn"
+    role="presentation"
+    on:click|self={() => (showConversationList = false)}
+  >
+    <div
+      use:trapFocus
+      role="dialog"
+      aria-modal="true"
+      aria-label={t('ask.conversationHistory')}
+      class="flex h-full w-80 max-w-[85vw] flex-col border-s border-slate-200/80 bg-white shadow-2xl dark:border-[#30363d] dark:bg-[#161b22]"
+      in:fly={{ x: 320, duration: 220 }}
+    >
+      <div class="flex items-center justify-between gap-2 border-b border-slate-200/70 px-4 py-3 dark:border-[#30363d]/70">
+        <h3 class="text-sm font-semibold text-slate-900 dark:text-[#e6edf3]">{t('ask.conversationHistory')}</h3>
+        <div class="flex items-center gap-1.5">
+          <button
+            type="button"
+            class="rounded-lg px-2.5 py-1 text-xs font-medium text-indigo-500 transition hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-950/40"
+            on:click={() => { showConversationList = false; clearConversation(); }}
+          >
+            {t('ask.newConversation')}
+          </button>
+          <button
+            type="button"
+            class="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:text-[#636c76] dark:hover:bg-[#21262d] dark:hover:text-[#adbac7]"
+            on:click={() => (showConversationList = false)}
+            title={t('common.cancel')}
+          >
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      </div>
+      <div class="app-floating-scroll flex-1 overflow-y-auto p-2">
+        {#each conversations as conv (conv.id)}
+          <div class="group/conv flex items-center gap-1 rounded-xl px-2.5 py-2 transition hover:bg-slate-100/80 dark:hover:bg-[#21262d]/70 {conv.id === conversationId ? 'bg-indigo-50/80 dark:bg-indigo-950/30' : ''}">
+            <button
+              type="button"
+              class="min-w-0 flex-1 text-start"
+              on:click={() => switchConversation(conv.id)}
+            >
+              <span class="block truncate text-[13px] font-medium text-slate-700 dark:text-[#c9d1d9]">{displayConversationTitle(conv.title)}</span>
+              <span class="block text-[11px] text-slate-400 dark:text-[#636c76]">{t('ask.conversationMeta', { count: conv.messageCount })}</span>
+            </button>
+            <button
+              type="button"
+              class="shrink-0 rounded-md p-1 text-slate-300 opacity-0 transition hover:text-rose-500 group-hover/conv:opacity-100 focus-visible:opacity-100 dark:text-[#484f58] dark:hover:text-rose-400"
+              on:click|stopPropagation={() => deleteConversation(conv.id)}
+              title={t('ask.deleteConversation')}
+            >
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+        {:else}
+          <p class="px-3 py-6 text-center text-xs text-slate-400 dark:text-[#636c76]">{t('ask.conversationEmpty')}</p>
+        {/each}
+      </div>
+    </div>
+  </div>
+{/if}

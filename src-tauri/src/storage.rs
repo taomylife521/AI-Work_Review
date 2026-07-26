@@ -51,12 +51,14 @@ impl StorageManager {
 
         // 3. 检查存储空间是否超限
         let current_size = self.calculate_storage_size()?;
-        let total_size_mb = current_size as f64 / 1024.0 / 1024.0;
 
         // 如果超过限制，继续删除最旧的数据
         if current_size > (self.config.storage_limit_mb as u64 * 1024 * 1024) {
             screenshots_deleted += self.cleanup_oldest_until_under_limit()?;
         }
+
+        // 清理完成后重新统计占用，确保日志与返回结果反映清理后的实际大小
+        let total_size_mb = self.calculate_storage_size()? as f64 / 1024.0 / 1024.0;
 
         log::info!(
             "存储清理完成: 删除 {screenshots_deleted} 个截图目录, {ocr_logs_deleted} 个 OCR 日志, 当前占用 {total_size_mb:.1} MB"

@@ -197,7 +197,7 @@ Work Review 的核心始终是**本地记录**。AI 的作用是让记录更容�
 | **基础模板** | 零配置，输出稳定的结构化结果 |
 | **AI 增强** | 调用你自行配置的模型服务，让问答和总结更自然 |
 
-支持的提供商：Ollama (本地) / OpenAI 兼容 / DeepSeek / 通义千问 / 智谱 / Kimi / 豆包 / MiniMax / SiliconFlow / Gemini / Claude
+支持的提供商：Ollama (本地) / LM Studio (本地) / OpenAI 兼容 / DeepSeek / 通义千问 / 智谱 / Kimi / 豆包 / MiniMax / SiliconFlow / Gemini / Claude / OpenRouter / Groq / xAI Grok / Mistral / 自定义接口
 
 ---
 
@@ -273,9 +273,9 @@ GDK_BACKEND=x11 ./Work_Review
 </details>
 
 <details>
-<summary>Bot 联动（Telegram / 飞书）</summary>
+<summary>Bot 联动（Telegram / 飞书 / 钉钉 / 企业微信）</summary>
 
-通过本地 API + 多设备注册，从 Telegram / 飞书远程查询记录与生成日报。支持命令：`/devices`、`/report`、`/generate` 等。仅限个人和本人多设备联动使用。
+通过本地 API + 多设备注册，从 Telegram / 飞书 / 钉钉 / 企业微信远程查询记录与生成日报。支持命令：`/devices`、`/report`、`/generate` 等。仅限个人和本人多设备联动使用。
 
 </details>
 

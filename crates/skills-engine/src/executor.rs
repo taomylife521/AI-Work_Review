@@ -17,6 +17,10 @@ pub struct ExecutionContext {
     pub ai_api_key: Option<String>,
     /// AI 模型名
     pub ai_model: Option<String>,
+    /// 是否允许执行包含 Script 步骤的技能（默认应传 false）。
+    /// Script 步骤可从技能包反序列化而来且引擎尚无 required_permissions
+    /// 校验链路，调用方必须显式授权后才放行，防止恶意技能包携带脚本执行。
+    pub allow_script_skills: bool,
 }
 
 /// 技能执行结果
@@ -71,6 +75,27 @@ impl SkillExecutor {
                 duration_ms: start.elapsed().as_millis() as u64,
                 success: false,
                 error: Some(format!("技能已禁用: {skill_id}")),
+            };
+        }
+
+        // 安全门禁：包含 Script 步骤的技能默认拒绝执行。
+        // Script 步骤可随技能包反序列化进来，而引擎当前没有
+        // required_permissions 的执行期校验链路，先做保守拦截，
+        // 仅当调用方显式传入 allow_script_skills=true 时放行。
+        let has_script_step = package
+            .pipeline
+            .transforms
+            .iter()
+            .any(|t| matches!(t, TransformStep::Script { .. }));
+        if has_script_step && !ctx.allow_script_skills {
+            log::warn!("技能 {skill_id} 包含 Script 步骤，未获得 allow_script_skills 授权，已拒绝执行");
+            return ExecutionResult {
+                skill_id: skill_id.to_string(),
+                output: String::new(),
+                content_type: OutputContentType::Text,
+                duration_ms: start.elapsed().as_millis() as u64,
+                success: false,
+                error: Some(format!("技能包含未授权的 Script 步骤，已拒绝执行: {skill_id}")),
             };
         }
 

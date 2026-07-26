@@ -1,5 +1,6 @@
 //! Auto-extracted from the historical `commands.rs`. Behavior unchanged.
 
+use crate::secrets::SecureSaveExt;
 use crate::config::AppConfig;
 use crate::database::Database;
 use crate::error::AppError;
@@ -38,6 +39,13 @@ pub async fn save_config(
     app: AppHandle,
     state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<(), AppError> {
+    // 模型端点安全校验：远程端点必须使用 https，明文 http 仅允许本机/内网（Ollama 等）
+    super::ai::validate_model_endpoint(&config.text_model.endpoint)?;
+    super::ai::validate_model_endpoint(&config.vision_model.endpoint)?;
+    super::ai::validate_model_endpoint(&config.ai_provider.endpoint)?;
+    for profile in &config.text_model_profiles {
+        super::ai::validate_model_endpoint(&profile.model_config.endpoint)?;
+    }
     persist_app_config(config, app, state.inner())
 }
 
@@ -265,7 +273,7 @@ pub async fn change_data_dir(
     };
 
     let config_path = target_dir.join("config.json");
-    config.save(&config_path)?;
+    config.save_secure(&config_path)?;
     crate::save_data_dir_preference(&target_dir)?;
 
     // 重新获取锁，仅做轻量状态更新

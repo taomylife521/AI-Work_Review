@@ -53,8 +53,29 @@ function localizeRuntimeStatusMessage(message) {
     return t('updater.noInstallAvailable');
   }
 
-  // 未识别的后端状态串原样返回会泄漏中文，回退到通用文案
-  return '';
+  matched = text.match(/^正在下载更新\s+(\d+)%（(.+)）$/);
+  if (matched) {
+    return t('updater.downloadingPercent', { percent: matched[1], sourceLabel: matched[2] });
+  }
+
+  matched = text.match(/^正在下载更新\s+([\d.]+)\s*MB（(.+)）$/);
+  if (matched) {
+    return t('updater.downloadingSize', { size: matched[1], sourceLabel: matched[2] });
+  }
+
+  matched = text.match(/^下载完成，正在安装（(.+)）\.\.\.$/);
+  if (matched) {
+    return t('updater.installingFromSource', { sourceLabel: matched[1] });
+  }
+
+  matched = text.match(/^源\s+(.+)\s+更新失败，准备尝试下一个源\.\.\.$/);
+  if (matched) {
+    return t('updater.sourceFailedRetrying', { sourceLabel: matched[1] });
+  }
+
+  // 未识别的后端状态串原样返回会泄漏中文，回退到通用文案（而非清空状态栏，
+  // 否则下载/安装过程中界面会看起来处于空闲状态）
+  return t('updater.inProgress');
 }
 
 async function getRuntimePlatform() {

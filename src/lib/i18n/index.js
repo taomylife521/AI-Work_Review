@@ -316,8 +316,8 @@ export function formatLocalizedTime(date, options) {
 
 export function formatDurationLocalized(seconds, { compact = false } = {}) {
   const currentLocale = get(locale);
-  const hourUnit = currentLocale === 'zh-TW' ? (compact ? '時' : '小時') : currentLocale === 'ar' ? (compact ? 'س' : ' ساعة ') : (compact ? 'h' : '小时');
-  const minuteUnit = currentLocale === 'zh-TW' ? (compact ? '分' : '分鐘') : currentLocale === 'ar' ? (compact ? 'د' : ' دقيقة ') : (compact ? 'm' : '分钟');
+  const hourUnit = currentLocale === 'zh-TW' ? (compact ? '時' : '小時') : currentLocale === 'ar' ? (compact ? 'س' : ' ساعة ') : (compact ? '时' : '小时');
+  const minuteUnit = currentLocale === 'zh-TW' ? (compact ? '分' : '分鐘') : currentLocale === 'ar' ? (compact ? 'د' : ' دقيقة ') : (compact ? '分' : '分钟');
   const secondUnit = currentLocale === 'zh-TW' ? '秒' : currentLocale === 'ar' ? 'ث' : '秒';
 
   if (!seconds || seconds <= 0) {

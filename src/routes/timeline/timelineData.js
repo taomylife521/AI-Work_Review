@@ -41,7 +41,7 @@ export function upsertTimelineActivity(currentActivities, newActivity) {
     const merged = {
       ...existing,
       timestamp: newActivity.timestamp,
-      screenshot_path: newActivity.screenshot_path || existingActivity.screenshot_path,
+      screenshot_path: newActivity.screenshot_path || existing.screenshot_path,
     };
     return prepareTimelineActivities(
       currentActivities.map((activity, idx) =>

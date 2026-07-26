@@ -57,7 +57,7 @@
             </button>
           {/if}
           <div
-            class="pointer-events-none relative text-[12px] font-semibold leading-[1.35] tracking-[0.01em]"
+            class="pointer-events-none relative text-xs font-semibold leading-[1.35] tracking-[0.01em]"
             class:pr-8={bubble?.persistent}
             style="display: block; min-height: 27px; max-height: 140px; overflow: hidden; text-align: {compactBubbleMessage ? 'center' : 'left'}; word-break: normal; overflow-wrap: anywhere; white-space: normal;"
           >

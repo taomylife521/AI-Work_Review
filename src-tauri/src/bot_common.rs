@@ -94,6 +94,25 @@ pub fn no_available_device_reply() -> String {
     "❌ 无可用设备\n请先启用本地 API 并生成 Token。".to_string()
 }
 
+pub fn device_not_found_reply(name: &str) -> String {
+    format!("❌ 未找到设备 {name}\n请使用 /devices 查看设备列表。")
+}
+
+/// 按名称选择设备：显式指定了设备名但未匹配时返回错误提示（Err 为回复文案），
+/// 仅在未指定设备名时回退到第一台设备。
+fn select_device<'a>(
+    devices: &'a [DeviceEndpoint],
+    name: &str,
+) -> Result<&'a DeviceEndpoint, String> {
+    if let Some(device) = find_device(devices, name) {
+        return Ok(device);
+    }
+    if name.is_empty() || name == "本机" || name == "local" {
+        return devices.first().ok_or_else(no_available_device_reply);
+    }
+    Err(device_not_found_reply(name))
+}
+
 pub fn connection_failed_reply(device_name: &str) -> String {
     format!("❌ 连接失败\n设备：{device_name}\n请检查地址、Token 与网络连通性。")
 }
@@ -282,11 +301,9 @@ pub async fn handle_cmd(client: &Client, devices: &[DeviceEndpoint], text: &str)
             Some(lines.join("\n"))
         }
         "device" | "设备" => {
-            let device = match find_device(devices, parts.get(1).copied().unwrap_or(""))
-                .or_else(|| devices.first())
-            {
-                Some(d) => d,
-                None => return Some(no_available_device_reply()),
+            let device = match select_device(devices, parts.get(1).copied().unwrap_or("")) {
+                Ok(d) => d,
+                Err(reply) => return Some(reply),
             };
             let url = format!("{}/v1/device?token={}", device.url, device.token);
             match api_get(client, &url).await {
@@ -312,11 +329,9 @@ pub async fn handle_cmd(client: &Client, devices: &[DeviceEndpoint], text: &str)
             }
         }
         "reports" | "日报列表" => {
-            let device = match find_device(devices, parts.get(1).copied().unwrap_or(""))
-                .or_else(|| devices.first())
-            {
-                Some(d) => d,
-                None => return Some(no_available_device_reply()),
+            let device = match select_device(devices, parts.get(1).copied().unwrap_or("")) {
+                Ok(d) => d,
+                Err(reply) => return Some(reply),
             };
             let url = format!("{}/v1/reports?token={}&limit=10", device.url, device.token);
             match api_get(client, &url).await {
@@ -347,11 +362,9 @@ pub async fn handle_cmd(client: &Client, devices: &[DeviceEndpoint], text: &str)
         }
         "report" | "日报" => {
             let date = crate::commands::resolve_single_date(parts.get(1).copied());
-            let device = match find_device(devices, parts.get(2).copied().unwrap_or(""))
-                .or_else(|| devices.first())
-            {
-                Some(d) => d,
-                None => return Some(no_available_device_reply()),
+            let device = match select_device(devices, parts.get(2).copied().unwrap_or("")) {
+                Ok(d) => d,
+                Err(reply) => return Some(reply),
             };
             let url = format!("{}/v1/reports/{}?token={}", device.url, date, device.token);
             match api_get(client, &url).await {
@@ -385,55 +398,43 @@ pub async fn handle_cmd(client: &Client, devices: &[DeviceEndpoint], text: &str)
         }
         "generate" | "生成日报" => {
             let date = crate::commands::resolve_single_date(parts.get(1).copied());
-            let device = match find_device(devices, parts.get(2).copied().unwrap_or(""))
-                .or_else(|| devices.first())
-            {
-                Some(d) => d,
-                None => return Some(no_available_device_reply()),
+            let device = match select_device(devices, parts.get(2).copied().unwrap_or("")) {
+                Ok(d) => d,
+                Err(reply) => return Some(reply),
             };
-            match build_generate_report_request(client, device, &date)
-                .send()
-                .await
-            {
-                Ok(r) => {
-                    let data: serde_json::Value = match r.json().await {
-                        Ok(d) => d,
-                        Err(e) => {
-                            return Some(format!(
-                                "❌ 解析设备响应失败\n设备：{}\n日期：{}\n原因：{e}",
-                                device.name, date
-                            ))
+            // 日报生成可长达 120 秒，而企微等被动回复通道 5 秒即超时；
+            // 因此改为后台任务生成 + 立即回执，结果通过 /report 查询。
+            let request = build_generate_report_request(client, device, &date);
+            let device_name = device.name.clone();
+            let task_date = date.clone();
+            tokio::spawn(async move {
+                match request.send().await {
+                    Ok(response) => match response.json::<serde_json::Value>().await {
+                        Ok(data) => {
+                            if let Some(err) = data.get("error") {
+                                log::warn!(
+                                    "机器人后台生成日报失败: 设备={device_name} 日期={task_date} 原因={}",
+                                    err.as_str().unwrap_or("未知错误")
+                                );
+                            } else {
+                                log::info!(
+                                    "机器人后台生成日报完成: 设备={device_name} 日期={task_date}"
+                                );
+                            }
                         }
-                    };
-                    if let Some(err) = data.get("error") {
-                        return Some(format!(
-                            "❌ 生成失败\n设备：{}\n日期：{}\n原因：{}",
-                            device.name,
-                            date,
-                            err.as_str().unwrap_or("未知错误")
-                        ));
-                    }
-                    match data.get("content").and_then(|v| v.as_str()) {
-                        Some(content) => {
-                            let content = normalize_report_for_chat(content);
-                            Some(format!(
-                                "✅ 生成完成\n{OUTPUT_DIVIDER}\n设备：{}\n日期：{}\n\n{}",
-                                device.name,
-                                date,
-                                truncate(&content, 3800)
-                            ))
-                        }
-                        None => Some(format!(
-                            "❌ 设备返回数据格式异常\n设备：{}\n日期：{}",
-                            device.name, date
-                        )),
-                    }
+                        Err(e) => log::warn!(
+                            "机器人后台生成日报响应解析失败: 设备={device_name} 日期={task_date} 原因={e}"
+                        ),
+                    },
+                    Err(e) => log::warn!(
+                        "机器人后台生成日报请求失败: 设备={device_name} 日期={task_date} 原因={e}"
+                    ),
                 }
-                Err(e) => Some(format!(
-                    "❌ 生成失败\n设备：{}\n日期：{}\n原因：{}",
-                    device.name, date, e
-                )),
-            }
+            });
+            Some(format!(
+                "⏳ 已开始生成 {date} 日报（{}），完成后可用 /report {date} 查看",
+                device.name
+            ))
         }
         _ => Some(UNKNOWN_CMD_REPLY.to_string()),
     }

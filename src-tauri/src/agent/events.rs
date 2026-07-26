@@ -25,11 +25,24 @@ pub enum StreamEvent {
     /// 这对前端"上一轮工具历史摘要"很关键：成功的工具即便 hits=0（如
     /// query_activities/web_search，它们不往 collected_references 写数据）
     /// 也不应被标记为"0 条 = 失败"，否则下一轮模型会误以为工具失效而避开它。
+    ///
+    /// `digest` 是工具结果的截断摘要（约 400 字）。前端把它存进消息记录，
+    /// 追问时随历史回传，让模型无需重查工具就能引用上一轮的数据。
     StepResult {
         tool: String,
         ok: bool,
         hits: usize,
         references: Vec<MemorySearchItem>,
+        digest: String,
+    },
+    /// 行动工具确认请求：executor 暂停等待用户在前端批准/拒绝。
+    /// 前端渲染确认卡片，用户点击后调用 `confirm_assistant_action` 命令回传决定。
+    #[serde(rename_all = "camelCase")]
+    ConfirmRequest {
+        confirm_id: String,
+        tool: String,
+        label: String,
+        summary: String,
     },
     /// LLM 文本增量（token 流式）。后端做了小批量合并，一个事件可含多个字符。
     Token { token: String },
@@ -114,6 +127,21 @@ pub fn default_tool_label(tool: &str) -> &'static str {
         "category_search" => "分类检索",
         "trend_comparison" => "趋势对比",
         "query_activities" => "活动查询",
+        "fetch_url" => "读取网页",
+        "web_search" => "联网搜索",
+        "get_work_sessions" => "工作时段",
+        "get_insights" => "工作洞察",
+        "weekly_review" => "周期回顾",
+        "extract_todos" => "待办提取",
+        "get_daily_report" => "读取日报",
+        "get_current_context" => "实时上下文",
+        "semantic_search" => "记忆检索(语义)",
+        "create_todo" => "新建待办",
+        "set_app_category" => "设置分类",
+        "pause_recording" => "暂停记录",
+        "resume_recording" => "恢复记录",
+        "open_timeline" => "打开时间线",
+        "generate_daily_report" => "生成日报",
         _ => "处理中",
     }
 }
@@ -155,12 +183,26 @@ mod tests {
             ok: true,
             hits: 0,
             references: vec![],
+            digest: "Top应用: A(30分)".to_string(),
         })
         .expect("StepResult 事件必须可序列化");
         assert_eq!(step_ok["type"], "stepResult");
         assert_eq!(step_ok["tool"], "query_activities");
         assert_eq!(step_ok["ok"], true);
         assert_eq!(step_ok["hits"], 0);
+        assert_eq!(step_ok["digest"], "Top应用: A(30分)");
+
+        // ConfirmRequest：前端读 event.confirmId / event.summary 渲染确认卡片。
+        let confirm = serde_json::to_value(StreamEvent::ConfirmRequest {
+            confirm_id: "c1".to_string(),
+            tool: "create_todo".to_string(),
+            label: "新建待办".to_string(),
+            summary: "新建待办：整理周报".to_string(),
+        })
+        .expect("ConfirmRequest 事件必须可序列化");
+        assert_eq!(confirm["type"], "confirmRequest");
+        assert_eq!(confirm["confirmId"], "c1");
+        assert_eq!(confirm["summary"], "新建待办：整理周报");
 
         let done = serde_json::to_value(StreamEvent::Done {
             answer: "答案".to_string(),

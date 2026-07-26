@@ -16,6 +16,7 @@
     t,
     translateCategoryLabel,
   } from '$lib/i18n/index.js';
+  import { formatUserError } from '$lib/utils/errorDisplay.js';
   import {
     getPreferredTimelineAppName,
     shouldPreferTimelineFallbackIcon,
@@ -42,6 +43,7 @@
   let selectedDate = getLocalDateString();
   let selectedActivity = null;
   let unlisten = null;
+  let componentDestroyed = false;
   let currentTime = new Date();
   let clockInterval;
   let handleVisibilityChange;
@@ -343,7 +345,8 @@
   }
 
   function iconStyle(info) {
-    return `background: ${hexToRGBA(info.color, 0.95)}`;
+    // 通过 CSS 变量让明暗两套主题分别取不同透明度，避免暗色下出现近实心浅色块
+    return `--icon-bg-light: ${hexToRGBA(info.color, 0.95)}; --icon-bg-dark: ${hexToRGBA(info.color, 0.3)}`;
   }
 
   async function createCustomCategory() {
@@ -645,7 +648,7 @@
       );
       preloadAppIcons(uniqueIconEntries, invoke);
     } catch (e) {
-      error = e.toString();
+      error = formatUserError(e, t('common.loadFailedRetry'));
       console.error('获取时间线失败:', e);
     } finally {
       loading = false;
@@ -796,14 +799,10 @@
       if (selectedActivity && (selectedActivity.category || 'other') === key) {
         selectedActivity = { ...selectedActivity, category: 'other' };
       }
-      const appMatchKey = normalizeAppMatchKey(selectedActivity?.app_name || '');
-      if (appMatchKey) {
-        activities = activities.map((item) =>
-          normalizeAppMatchKey(item.app_name) === appMatchKey && (item.category || 'other') === key
-            ? { ...item, category: 'other' }
-            : item
-        );
-      }
+      // 后端已把历史记录统一改回退分类，这里同步所有本地行（不只限当前应用）
+      activities = activities.map((item) =>
+        (item.category || 'other') === key ? { ...item, category: 'other' } : item
+      );
 
       showToast(
         t('timeline.categoryDeleted', { category: name, count: affected }),
@@ -1021,20 +1020,31 @@
     
     // 监听新截屏事件，智能更新（合并或新增）
     // 核心逻辑：后端已完成聚合，前端只按 id 替换，否则视作新活动插入
-    unlisten = await listen('screenshot-taken', (event) => {
-      if (isToday && !document.hidden) {
-        const newActivity = event.payload;
-        if (newActivity?.screenshot_path) {
-          loadThumbnail(newActivity.screenshot_path);
+    try {
+      const un = await listen('screenshot-taken', (event) => {
+        if (isToday && !document.hidden) {
+          const newActivity = event.payload;
+          if (newActivity?.screenshot_path) {
+            loadThumbnail(newActivity.screenshot_path);
+          }
+          activities = upsertTimelineActivity(activities, newActivity);
+          cache.invalidate('overview');
         }
-        activities = upsertTimelineActivity(activities, newActivity);
-        cache.invalidate('overview');
+      });
+      // 组件可能在 await 期间已销毁，避免监听器泄漏
+      if (componentDestroyed) {
+        un();
+      } else {
+        unlisten = un;
       }
-    });
+    } catch (e) {
+      console.warn('注册 screenshot-taken 监听失败:', e);
+    }
 
   });
 
   onDestroy(() => {
+    componentDestroyed = true;
     if (unlisten) unlisten();
     if (clockInterval) clearInterval(clockInterval);
     if (handleVisibilityChange) document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -1352,13 +1362,13 @@
                 {#if !cat.is_system}
                   <button
                     on:click|stopPropagation={() => startRenameCategory(cat)}
-                    class="absolute -top-1.5 left-1/2 -translate-x-1/2 w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs leading-none opacity-0 group-hover:opacity-100 hover:bg-blue-600 transition-opacity shadow-sm dark:shadow-none"
+                    class="absolute -top-1.5 left-1/2 -translate-x-1/2 w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs leading-none opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-blue-600 transition-opacity shadow-sm dark:shadow-none"
                     disabled={categorySaving}
                     title={t('timeline.renameCategory')}
                   >✎</button>
                   <button
                     on:click|stopPropagation={() => pendingDeleteCategory = { key: cat.key, name: getCategoryDisplayName(cat) }}
-                    class="absolute -top-1.5 -end-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center text-xs leading-none opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-opacity shadow-sm dark:shadow-none"
+                    class="absolute -top-1.5 -end-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center text-xs leading-none opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-red-600 transition-opacity shadow-sm dark:shadow-none"
                     disabled={categorySaving}
                     title={t('timeline.deleteCategory')}
                   >×</button>
@@ -1990,6 +2000,7 @@
     overflow: hidden;
     flex-shrink: 0;
     color: #111827;
+    background: var(--icon-bg-light, rgba(226, 232, 240, 0.95));
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
   }
 
@@ -2179,7 +2190,8 @@
 
   .timeline-load-more {
     position: relative;
-    padding: 0 1.25rem 1.4rem calc(1.25rem + var(--timeline-anchor-width));
+    padding: 0 1.25rem 1.4rem;
+    padding-inline-start: calc(1.25rem + var(--timeline-anchor-width));
   }
 
   .timeline-load-more-btn {
@@ -2333,6 +2345,12 @@
     color: #fdba74;
   }
 
+  :global(.dark) .timeline-app-icon {
+    color: #e6edf3;
+    background: var(--icon-bg-dark, rgba(51, 65, 85, 0.74));
+    box-shadow: none;
+  }
+
   :global(.dark) .timeline-app-icon-blue {
     background: rgba(30, 64, 175, 0.34);
   }
@@ -2445,7 +2463,8 @@
     }
 
     .timeline-load-more {
-      padding: 0 0.85rem 1.1rem calc(0.85rem + var(--timeline-anchor-width));
+      padding: 0 0.85rem 1.1rem;
+      padding-inline-start: calc(0.85rem + var(--timeline-anchor-width));
     }
   }
 </style>

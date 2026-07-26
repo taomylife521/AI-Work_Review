@@ -121,6 +121,7 @@ pub async fn get_screenshot_thumbnail(
     path: String,
     state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<String, AppError> {
+    super::shared::validate_relative_path(&path)?;
     let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
     let full_path = state.data_dir.join(&path);
     state
@@ -134,6 +135,7 @@ pub async fn get_screenshot_full(
     path: String,
     state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<String, AppError> {
+    super::shared::validate_relative_path(&path)?;
     let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
     let full_path = state.data_dir.join(&path);
     state
@@ -141,14 +143,4 @@ pub async fn get_screenshot_full(
         .generate_full_image_base64(&full_path)
 }
 
-/// 获取指定日期的 OCR 日志
-#[tauri::command]
-pub async fn get_ocr_log(
-    date: String,
-    state: State<'_, Arc<Mutex<AppState>>>,
-) -> Result<String, AppError> {
-    let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-    let ocr_logger = crate::ocr_logger::OcrLogger::new(&state.data_dir);
-    ocr_logger.read_log(&date)
-}
 

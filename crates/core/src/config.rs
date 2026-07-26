@@ -48,6 +48,24 @@ pub enum AiProvider {
     /// 稀宇科技 MiniMax
     #[serde(rename = "minimax")]
     MiniMax,
+    /// OpenRouter（多模型聚合）
+    #[serde(rename = "openrouter")]
+    OpenRouter,
+    /// Groq（高速推理）
+    #[serde(rename = "groq")]
+    Groq,
+    /// xAI Grok
+    #[serde(rename = "xai")]
+    XAI,
+    /// Mistral AI
+    #[serde(rename = "mistral")]
+    Mistral,
+    /// LM Studio（本地）
+    #[serde(rename = "lmstudio")]
+    LmStudio,
+    /// 自定义 OpenAI 兼容接口
+    #[serde(rename = "custom")]
+    Custom,
 }
 
 impl AiProvider {
@@ -71,6 +89,12 @@ impl AiProvider {
             AiProvider::Moonshot => "月之暗面 Kimi",
             AiProvider::Doubao => "火山引擎 豆包",
             AiProvider::MiniMax => "稀宇科技 MiniMax",
+            AiProvider::OpenRouter => "OpenRouter",
+            AiProvider::Groq => "Groq",
+            AiProvider::XAI => "xAI Grok",
+            AiProvider::Mistral => "Mistral",
+            AiProvider::LmStudio => "LM Studio (本地)",
+            AiProvider::Custom => "自定义接口",
         }
     }
 
@@ -88,6 +112,12 @@ impl AiProvider {
             AiProvider::Moonshot => "https://api.moonshot.cn/v1",
             AiProvider::Doubao => "https://ark.cn-beijing.volces.com/api/v3",
             AiProvider::MiniMax => "https://api.minimaxi.com/v1",
+            AiProvider::OpenRouter => "https://openrouter.ai/api/v1",
+            AiProvider::Groq => "https://api.groq.com/openai/v1",
+            AiProvider::XAI => "https://api.x.ai/v1",
+            AiProvider::Mistral => "https://api.mistral.ai/v1",
+            AiProvider::LmStudio => "http://localhost:1234/v1",
+            AiProvider::Custom => "",
         }
     }
 
@@ -105,6 +135,12 @@ impl AiProvider {
             AiProvider::Moonshot => "moonshot-v1-8k",
             AiProvider::Doubao => "doubao-lite-4k",
             AiProvider::MiniMax => "MiniMax-M2.5",
+            AiProvider::OpenRouter => "openrouter/auto",
+            AiProvider::Groq => "llama-3.3-70b-versatile",
+            AiProvider::XAI => "grok-2-latest",
+            AiProvider::Mistral => "mistral-small-latest",
+            AiProvider::LmStudio => "local-model",
+            AiProvider::Custom => "",
         }
     }
 
@@ -120,6 +156,12 @@ impl AiProvider {
                 | AiProvider::Moonshot
                 | AiProvider::Doubao
                 | AiProvider::MiniMax
+                | AiProvider::OpenRouter
+                | AiProvider::Groq
+                | AiProvider::XAI
+                | AiProvider::Mistral
+                | AiProvider::LmStudio
+                | AiProvider::Custom
         )
     }
 }
@@ -1066,6 +1108,22 @@ pub struct AppConfig {
     /// 搜索服务 API Key（为空时 web_search 工具不注册，网页读取/天气不受影响）
     #[serde(default)]
     pub assistant_search_api_key: Option<String>,
+    /// 语义记忆总开关（隐私默认关：开启后 OCR/标题会送往嵌入模型；
+    /// 本地 Ollama 时数据不出机，云端 API 时明示出网）
+    #[serde(default)]
+    pub memory_semantic_enabled: bool,
+    /// 嵌入服务商："ollama"（本地默认）/ "openai"（OpenAI 兼容 /v1/embeddings）
+    #[serde(default = "default_embedding_provider")]
+    pub embedding_provider: String,
+    /// 嵌入服务地址（Ollama 默认 http://localhost:11434）
+    #[serde(default = "default_embedding_endpoint")]
+    pub embedding_endpoint: String,
+    /// 嵌入模型名（Ollama 默认 nomic-embed-text；OpenAI 兼容常用 BAAI/bge-m3 等）
+    #[serde(default = "default_embedding_model")]
+    pub embedding_model: String,
+    /// 嵌入服务 API Key（Ollama 不需要）
+    #[serde(default)]
+    pub embedding_api_key: Option<String>,
     /// 是否启用桌面化身窗口
     #[serde(default)]
     pub avatar_enabled: bool,
@@ -1145,6 +1203,15 @@ fn default_avatar_scale() -> f64 {
 }
 fn default_assistant_search_provider() -> String {
     "tavily".to_string()
+}
+fn default_embedding_provider() -> String {
+    "ollama".to_string()
+}
+fn default_embedding_endpoint() -> String {
+    "http://localhost:11434".to_string()
+}
+fn default_embedding_model() -> String {
+    "nomic-embed-text".to_string()
 }
 fn default_standard_work_hours() -> f64 {
     8.0
@@ -1256,6 +1323,11 @@ impl Default for AppConfig {
             assistant_web_access_enabled: false,
             assistant_search_provider: default_assistant_search_provider(),
             assistant_search_api_key: None,
+            memory_semantic_enabled: false,
+            embedding_provider: default_embedding_provider(),
+            embedding_endpoint: default_embedding_endpoint(),
+            embedding_model: default_embedding_model(),
+            embedding_api_key: None,
             avatar_enabled: false,
             avatar_scale: default_avatar_scale(),
             avatar_opacity: default_avatar_opacity(),

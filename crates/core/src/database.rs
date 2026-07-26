@@ -38,9 +38,11 @@ fn matches_ignored_app_for_stats(app_name: &str, ignored_apps: &[String]) -> boo
         return false;
     }
 
+    // 单向小写子串匹配，与 privacy::matches_ignored_app 保持一致：
+    // 不做反向包含，避免忽略 "Google Chrome Canary" 时误伤 "Google Chrome"。
     ignored_apps
         .iter()
-        .any(|ignored| app_lower.contains(ignored) || ignored.contains(&app_lower))
+        .any(|ignored| !ignored.is_empty() && app_lower.contains(ignored))
 }
 
 fn merged_domain_matches_excluded(domain: &str, excluded_domain: &str) -> bool {
@@ -300,6 +302,82 @@ pub struct WorkInsight {
     pub archived: bool,
 }
 
+/// 语义记忆检索命中项（屏幕级数字记忆）
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticMemoryHit {
+    pub chunk_id: i64,
+    pub date: String,
+    pub app_name: String,
+    pub title: String,
+    pub browser_url: Option<String>,
+    pub excerpt: String,
+    /// 归一化余弦相似度（0~1，越大越相关）
+    pub score: f64,
+}
+
+/// 语义记忆索引状态
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticMemoryStats {
+    pub total_chunks: usize,
+    pub embedded_chunks: usize,
+    /// 已消费到的活动记录 id 游标（增量索引起点）
+    pub last_indexed_activity_id: i64,
+}
+
+/// 把归一化 f32 向量编码为 LE 字节（存 BLOB）。
+pub fn encode_embedding(vector: &[f32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(vector.len() * 4);
+    for v in vector {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out
+}
+
+/// BLOB → f32 向量（长度非 4 的倍数时丢弃尾部残字节）。
+pub fn decode_embedding(blob: &[u8]) -> Vec<f32> {
+    blob.chunks_exact(4)
+        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .collect()
+}
+
+/// 向量 L2 归一化（零向量原样返回，检索时点积为 0 自然沉底）。
+pub fn normalize_embedding(mut vector: Vec<f32>) -> Vec<f32> {
+    let norm = vector.iter().map(|v| v * v).sum::<f32>().sqrt();
+    if norm > f32::EPSILON {
+        for v in &mut vector {
+            *v /= norm;
+        }
+    }
+    vector
+}
+
+/// 助手会话（持久化于 SQLite，替代 localStorage 40 条上限）
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AssistantConversation {
+    pub id: i64,
+    pub title: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub message_count: usize,
+}
+
+/// 助手会话消息
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AssistantStoredMessage {
+    pub id: i64,
+    pub conversation_id: i64,
+    pub role: String,
+    pub content: String,
+    /// 该轮工具执行摘要（JSON 字符串，前端存档；追问时随历史回传给模型）
+    pub tool_digest: Option<String>,
+    pub model_name: Option<String>,
+    pub created_at: i64,
+}
+
 /// 工作记忆搜索结果
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -389,6 +467,22 @@ fn calculate_work_time_segments_overlap(
             calculate_work_time_overlap_duration(interval_end, duration, day_start, day_end, ws, we)
         })
         .sum()
+}
+
+/// 下一个「本地时区整点」边界。
+/// 之前用 `(t / 3600 + 1) * 3600` 按 UTC 整点切桶，在 UTC+5:30/+5:45/+9:30 等
+/// 非整小时时区，本地小时在 UTC 半点翻转，跨本地整点的区间会整段归入起点小时。
+/// 整小时时区（如 UTC+8）两种算法结果一致。
+fn next_local_hour_boundary(t: i64) -> i64 {
+    use chrono::Timelike;
+    match chrono::DateTime::from_timestamp(t, 0) {
+        Some(dt) => {
+            let local = dt.with_timezone(&chrono::Local);
+            let secs_into_hour = i64::from(local.minute()) * 60 + i64::from(local.second());
+            t + (3600 - secs_into_hour)
+        }
+        None => (t / 3600 + 1) * 3600,
+    }
 }
 
 fn calculate_covered_duration(mut ranges: Vec<(i64, i64)>) -> i64 {
@@ -505,6 +599,13 @@ impl Database {
         }
 
         let conn = Connection::open(db_path)?;
+        // WAL 模式提升并发读写能力（主应用与 MCP Server 可能同时访问同一库）；
+        // synchronous=NORMAL 在 WAL 下已足够安全；busy_timeout 避免锁竞争时立刻报错。
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL;
+             PRAGMA synchronous=NORMAL;
+             PRAGMA busy_timeout=5000;",
+        )?;
         let db = Self {
             conn: Arc::new(Mutex::new(conn)),
         };
@@ -651,6 +752,57 @@ impl Database {
                 denied_count INTEGER NOT NULL DEFAULT 0,
                 archived INTEGER NOT NULL DEFAULT 0
             )",
+            [],
+        )?;
+
+        // === 助手会话持久化 ===
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS assistant_conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS assistant_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                tool_digest TEXT,
+                model_name TEXT,
+                created_at INTEGER NOT NULL
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_assistant_messages_conversation
+             ON assistant_messages (conversation_id, id)",
+            [],
+        )?;
+
+        // === 语义记忆块（屏幕级数字记忆） ===
+        // 按 (日期, 应用, 标题/域名) 聚合的记忆单元；embedding 为归一化 f32 LE 字节，
+        // NULL 表示尚未嵌入（索引任务增量补齐）。
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS memory_chunks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chunk_key TEXT NOT NULL UNIQUE,
+                date TEXT NOT NULL,
+                app_name TEXT NOT NULL,
+                title TEXT NOT NULL,
+                browser_url TEXT,
+                content TEXT NOT NULL,
+                embedding BLOB,
+                last_activity_id INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_chunks_date ON memory_chunks (date)",
             [],
         )?;
 
@@ -990,21 +1142,6 @@ impl Database {
         Ok(())
     }
 
-    /// 精确增加活动时长（用于事件驱动时长计算）
-    /// 当检测到应用切换时，将上一个应用的实际使用时长累加到其记录
-    pub fn add_duration(&self, id: i64, duration_delta: i64) -> Result<()> {
-        let conn = self.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
-
-        conn.execute(
-            "UPDATE activities SET duration = duration + ?1 WHERE id = ?2",
-            params![duration_delta, id],
-        )?;
-
-        log::debug!("精确时长累加: id={id}, +{duration_delta}秒");
-        Ok(())
-    }
 
     /// 更新活动的 OCR 文本
     pub fn update_activity_ocr(&self, id: i64, ocr_text: Option<String>) -> Result<()> {
@@ -1034,39 +1171,20 @@ impl Database {
         Ok(())
     }
 
-    /// 删除指定应用在指定时间之后的旧记录（保留 keep_id），返回删除数量和截图路径
-    pub fn delete_old_activities_by_app(
-        &self,
-        app_name: &str,
-        keep_id: i64,
-        since_timestamp: i64,
-    ) -> Result<(usize, Vec<String>)> {
+    /// 将指定分类下的历史活动记录重新归类到目标分类，返回更新的行数
+    pub fn reassign_activity_category(&self, from: &str, to: &str) -> Result<usize> {
         let conn = self.conn.lock().map_err(|e| {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
 
-        // 先获取要删除的记录的截图路径
-        let mut stmt = conn.prepare(
-            "SELECT screenshot_path FROM activities 
-             WHERE app_name = ?1 AND id != ?2 AND timestamp >= ?3",
+        let count = conn.execute(
+            "UPDATE activities SET category = ?1 WHERE category = ?2",
+            params![to, from],
         )?;
 
-        let paths: Vec<String> = stmt
-            .query_map(params![app_name, keep_id, since_timestamp], |row| {
-                row.get::<_, String>(0)
-            })?
-            .filter_map(|r| r.ok())
-            .filter(|p| !p.is_empty())
-            .collect();
-
-        // 删除旧记录
-        let deleted = conn.execute(
-            "DELETE FROM activities 
-             WHERE app_name = ?1 AND id != ?2 AND timestamp >= ?3",
-            params![app_name, keep_id, since_timestamp],
-        )?;
-        Ok((deleted, paths))
+        Ok(count)
     }
+
 
     /// 删除指定日期之前的所有活动记录（使用时间戳范围查询以利用索引）
     pub fn delete_activities_before_date(&self, before_date: &str) -> Result<usize> {
@@ -1595,7 +1713,7 @@ impl Database {
                     let hour = chrono::DateTime::from_timestamp(t, 0)
                         .map(|dt| dt.with_timezone(&chrono::Local).format("%H").to_string())
                         .unwrap_or_default();
-                    let bucket_end = (t / 3600 + 1) * 3600;
+                    let bucket_end = next_local_hour_boundary(t);
                     let range_end = overlap_end.min(bucket_end);
                     if let Ok(h) = hour.parse::<usize>() {
                         if h < 24 {
@@ -1896,7 +2014,7 @@ impl Database {
                             END
                         ORDER BY timestamp DESC, id DESC
                     ) as rn,
-                    SUM(duration) OVER (
+                    SUM(MAX(0, MIN(timestamp, ?2) - MAX(timestamp - duration, ?1))) OVER (
                         PARTITION BY
                             app_name,
                             CASE
@@ -1905,7 +2023,7 @@ impl Database {
                             END
                     ) as total_duration
                 FROM activities
-                WHERE timestamp >= ?1 AND timestamp < ?2
+                WHERE timestamp > ?1 AND (timestamp - duration) < ?2
              )
              SELECT
                 id,
@@ -2047,7 +2165,7 @@ impl Database {
                 let hour = chrono::DateTime::from_timestamp(t, 0)
                     .map(|dt| dt.with_timezone(&chrono::Local).format("%H").to_string())
                     .unwrap_or_default();
-                let bucket_end = (t / 3600 + 1) * 3600;
+                let bucket_end = next_local_hour_boundary(t);
                 let range_end = overlap_end.min(bucket_end);
 
                 if let Ok(hour) = hour.parse::<i32>() {
@@ -2481,46 +2599,65 @@ impl Database {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
 
+        // 聚合下推到 SQL：按原始 app_name 分组求和，避免把全史活动逐行搬到 Rust 侧；
+        // executable_path / screenshot_url 用相关子查询取时间最近的非空值，
+        // 与旧实现"按 timestamp DESC 取第一个可用值"的语义一致。
         let mut stmt = conn.prepare(
-            "SELECT app_name, duration, executable_path, screenshot_url, timestamp
-             FROM activities
-             ORDER BY timestamp DESC, id DESC",
+            "SELECT a.app_name,
+                    SUM(a.duration),
+                    COUNT(*),
+                    MAX(a.timestamp),
+                    (SELECT e.executable_path FROM activities e
+                      WHERE e.app_name = a.app_name AND e.executable_path IS NOT NULL
+                      ORDER BY e.timestamp DESC, e.id DESC LIMIT 1),
+                    (SELECT s.screenshot_url FROM activities s
+                      WHERE s.app_name = a.app_name AND s.screenshot_url IS NOT NULL
+                        AND TRIM(s.screenshot_url) <> ''
+                      ORDER BY s.timestamp DESC, s.id DESC LIMIT 1)
+             FROM activities a
+             GROUP BY a.app_name",
         )?;
 
-        let rows: Vec<(String, i64, Option<String>, Option<String>, i64)> = stmt
+        let rows: Vec<(String, i64, i64, i64, Option<String>, Option<String>)> = stmt
             .query_map([], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, i64>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
                 ))
             })?
             .filter_map(|r| r.ok())
             .collect();
 
+        // Rust 侧只对归一化后同名的应用做二次合并（分组数远小于活动行数）
         let mut merged: HashMap<String, (i64, i64, Option<String>, Option<String>, i64)> =
             HashMap::new();
-        for (raw_name, duration, executable_path, screenshot_url, timestamp) in rows {
+        for (raw_name, duration, count, latest_ts, executable_path, screenshot_url) in rows {
             let normalized = crate::categorize::normalize_display_app_name(&raw_name);
             let entry = merged
-                .entry(normalized.clone())
+                .entry(normalized)
                 .or_insert((0, 0, None, None, i64::MIN));
             entry.0 += duration;
-            entry.1 += 1;
-            if entry.2.is_none() && executable_path.is_some() {
-                entry.2 = executable_path;
-            }
-            if screenshot_url
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .is_some()
-                && timestamp >= entry.4
-            {
-                entry.3 = screenshot_url;
-                entry.4 = timestamp;
+            entry.1 += count;
+            if latest_ts >= entry.4 {
+                // 更近活跃的分组优先提供 executable_path / screenshot_url
+                if executable_path.is_some() {
+                    entry.2 = executable_path;
+                }
+                if screenshot_url.is_some() {
+                    entry.3 = screenshot_url;
+                }
+                entry.4 = latest_ts;
+            } else {
+                if entry.2.is_none() {
+                    entry.2 = executable_path;
+                }
+                if entry.3.is_none() {
+                    entry.3 = screenshot_url;
+                }
             }
         }
 
@@ -2552,59 +2689,90 @@ impl Database {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
 
+        // 聚合下推到 SQL：category 取每组最新一行的值（SQLite 裸列 + MAX 语义），
+        // executable_path / screenshot_url 用相关子查询取时间最近的非空值，与旧实现一致。
         let mut stmt = conn.prepare(
-            "SELECT app_name, category, duration, timestamp, executable_path, screenshot_url
-             FROM activities
-             ORDER BY timestamp DESC, id DESC",
+            "SELECT a.app_name,
+                    a.category,
+                    SUM(a.duration),
+                    COUNT(*),
+                    MAX(a.timestamp),
+                    (SELECT e.executable_path FROM activities e
+                      WHERE e.app_name = a.app_name AND e.executable_path IS NOT NULL
+                      ORDER BY e.timestamp DESC, e.id DESC LIMIT 1),
+                    (SELECT s.screenshot_url FROM activities s
+                      WHERE s.app_name = a.app_name AND s.screenshot_url IS NOT NULL
+                        AND TRIM(s.screenshot_url) <> ''
+                      ORDER BY s.timestamp DESC, s.id DESC LIMIT 1)
+             FROM activities a
+             GROUP BY a.app_name",
         )?;
 
-        let rows: Vec<(String, String, i64, i64, Option<String>, Option<String>)> = stmt
+        let rows: Vec<(
+            String,
+            String,
+            i64,
+            i64,
+            i64,
+            Option<String>,
+            Option<String>,
+        )> = stmt
             .query_map([], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, i64>(2)?,
                     row.get::<_, i64>(3)?,
-                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, i64>(4)?,
                     row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
                 ))
             })?
             .filter_map(|row| row.ok())
             .collect();
 
+        // Rust 侧只对归一化后同名（忽略大小写）的应用做二次合并
         let mut merged: HashMap<String, AppCategorySnapshot> = HashMap::new();
-        for (raw_name, category, duration, timestamp, executable_path, screenshot_url) in rows {
+        for (raw_name, category, total_duration, count, latest_timestamp, executable_path, screenshot_url) in
+            rows
+        {
             let normalized_name = crate::categorize::normalize_display_app_name(&raw_name);
             let key = normalized_name.to_lowercase();
 
-            let entry = merged.entry(key).or_insert_with(|| AppCategorySnapshot {
-                app_name: normalized_name.clone(),
-                category: category.clone(),
-                total_duration: 0,
-                count: 0,
-                executable_path: executable_path.clone(),
-                latest_timestamp: timestamp,
-                screenshot_url: None,
-            });
-
-            entry.total_duration += duration;
-            entry.count += 1;
-            if entry.executable_path.is_none() && executable_path.is_some() {
-                entry.executable_path = executable_path.clone();
-            }
-            if timestamp >= entry.latest_timestamp {
-                entry.latest_timestamp = timestamp;
-                entry.app_name = normalized_name;
-                entry.category = category;
-            }
-            if entry.screenshot_url.is_none()
-                && screenshot_url
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .is_some()
-            {
-                entry.screenshot_url = screenshot_url;
+            if let Some(entry) = merged.get_mut(&key) {
+                entry.total_duration += total_duration;
+                entry.count += count;
+                if latest_timestamp >= entry.latest_timestamp {
+                    entry.latest_timestamp = latest_timestamp;
+                    entry.app_name = normalized_name;
+                    entry.category = category;
+                    if executable_path.is_some() {
+                        entry.executable_path = executable_path;
+                    }
+                    if screenshot_url.is_some() {
+                        entry.screenshot_url = screenshot_url;
+                    }
+                } else {
+                    if entry.executable_path.is_none() {
+                        entry.executable_path = executable_path;
+                    }
+                    if entry.screenshot_url.is_none() {
+                        entry.screenshot_url = screenshot_url;
+                    }
+                }
+            } else {
+                merged.insert(
+                    key,
+                    AppCategorySnapshot {
+                        app_name: normalized_name,
+                        category,
+                        total_duration,
+                        count,
+                        executable_path,
+                        latest_timestamp,
+                        screenshot_url,
+                    },
+                );
             }
         }
 
@@ -2840,6 +3008,7 @@ impl Database {
              WHERE daily_reports_fts MATCH ?1
                AND (?2 IS NULL OR d.date >= ?2)
                AND (?3 IS NULL OR d.date <= ?3)
+             GROUP BY d.date
              ORDER BY fts.rank
              LIMIT ?4",
         )?;
@@ -3017,6 +3186,315 @@ impl Database {
         Ok(conn.last_insert_rowid())
     }
 
+    // ══════════════════════════════════════════════════════════
+    // 助手会话持久化
+    // ══════════════════════════════════════════════════════════
+
+    /// 新建助手会话，返回会话 id。同时清理最旧的超额会话（保留最近 100 个）。
+    pub fn create_assistant_conversation(&self, title: &str) -> Result<i64> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let now = chrono::Utc::now().timestamp();
+        conn.execute(
+            "INSERT INTO assistant_conversations (title, created_at, updated_at) VALUES (?1, ?2, ?2)",
+            params![title, now],
+        )?;
+        let id = conn.last_insert_rowid();
+        // 超额清理：删除最旧的会话及其消息
+        conn.execute(
+            "DELETE FROM assistant_messages WHERE conversation_id IN (
+                SELECT id FROM assistant_conversations
+                ORDER BY updated_at DESC LIMIT -1 OFFSET 100
+            )",
+            [],
+        )?;
+        conn.execute(
+            "DELETE FROM assistant_conversations WHERE id IN (
+                SELECT id FROM assistant_conversations
+                ORDER BY updated_at DESC LIMIT -1 OFFSET 100
+            )",
+            [],
+        )?;
+        Ok(id)
+    }
+
+    /// 会话列表（按最近更新排序），附带消息数。
+    pub fn list_assistant_conversations(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<AssistantConversation>> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT c.id, c.title, c.created_at, c.updated_at,
+                    (SELECT COUNT(*) FROM assistant_messages m WHERE m.conversation_id = c.id)
+             FROM assistant_conversations c
+             ORDER BY c.updated_at DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |row| {
+            Ok(AssistantConversation {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                created_at: row.get(2)?,
+                updated_at: row.get(3)?,
+                message_count: row.get::<_, i64>(4)? as usize,
+            })
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(AppError::Database)
+    }
+
+    /// 读取会话消息（按插入顺序）。
+    pub fn get_assistant_messages(
+        &self,
+        conversation_id: i64,
+    ) -> Result<Vec<AssistantStoredMessage>> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT id, conversation_id, role, content, tool_digest, model_name, created_at
+             FROM assistant_messages WHERE conversation_id = ?1 ORDER BY id ASC",
+        )?;
+        let rows = stmt.query_map(params![conversation_id], |row| {
+            Ok(AssistantStoredMessage {
+                id: row.get(0)?,
+                conversation_id: row.get(1)?,
+                role: row.get(2)?,
+                content: row.get(3)?,
+                tool_digest: row.get(4)?,
+                model_name: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(AppError::Database)
+    }
+
+    /// 追加消息并刷新会话 updated_at。返回消息 id。
+    pub fn append_assistant_message(
+        &self,
+        conversation_id: i64,
+        role: &str,
+        content: &str,
+        tool_digest: Option<&str>,
+        model_name: Option<&str>,
+    ) -> Result<i64> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let now = chrono::Utc::now().timestamp();
+        conn.execute(
+            "INSERT INTO assistant_messages (conversation_id, role, content, tool_digest, model_name, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![conversation_id, role, content, tool_digest, model_name, now],
+        )?;
+        let id = conn.last_insert_rowid();
+        conn.execute(
+            "UPDATE assistant_conversations SET updated_at = ?1 WHERE id = ?2",
+            params![now, conversation_id],
+        )?;
+        Ok(id)
+    }
+
+
+    /// 删除会话及其全部消息。
+    pub fn delete_assistant_conversation(&self, conversation_id: i64) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        conn.execute(
+            "DELETE FROM assistant_messages WHERE conversation_id = ?1",
+            params![conversation_id],
+        )?;
+        conn.execute(
+            "DELETE FROM assistant_conversations WHERE id = ?1",
+            params![conversation_id],
+        )?;
+        Ok(())
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // 语义记忆（屏幕级数字记忆）
+    // ══════════════════════════════════════════════════════════
+
+    /// 按 id 游标增量读取活动记录（含 OCR 文本），供语义索引消费。
+    pub fn get_activities_after_id(&self, after_id: i64, limit: usize) -> Result<Vec<Activity>> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT id, timestamp, app_name, window_title, screenshot_path, ocr_text,
+                    category, duration, browser_url, executable_path,
+                    semantic_category, semantic_confidence, screenshot_url
+             FROM activities WHERE id > ?1 ORDER BY id ASC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![after_id, limit as i64], |row| {
+            Ok(Activity {
+                id: Some(row.get(0)?),
+                timestamp: row.get(1)?,
+                app_name: row.get(2)?,
+                window_title: row.get(3)?,
+                screenshot_path: row.get(4)?,
+                ocr_text: row.get(5)?,
+                category: row.get(6)?,
+                duration: row.get(7)?,
+                browser_url: row.get(8)?,
+                executable_path: row.get(9)?,
+                semantic_category: row.get(10)?,
+                semantic_confidence: row.get(11)?,
+                screenshot_url: row.get(12)?,
+            })
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(AppError::Database)
+    }
+
+    /// 写入/更新记忆块。内容变化时清空 embedding（待重嵌入）。
+    #[allow(clippy::too_many_arguments)]
+    pub fn upsert_memory_chunk(
+        &self,
+        chunk_key: &str,
+        date: &str,
+        app_name: &str,
+        title: &str,
+        browser_url: Option<&str>,
+        content: &str,
+        last_activity_id: i64,
+    ) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let now = chrono::Utc::now().timestamp();
+        conn.execute(
+            "INSERT INTO memory_chunks
+                 (chunk_key, date, app_name, title, browser_url, content, embedding, last_activity_id, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7, ?8)
+             ON CONFLICT(chunk_key) DO UPDATE SET
+                 last_activity_id = excluded.last_activity_id,
+                 updated_at = excluded.updated_at,
+                 content = CASE
+                     WHEN LENGTH(excluded.content) > LENGTH(memory_chunks.content)
+                     THEN excluded.content ELSE memory_chunks.content END,
+                 embedding = CASE
+                     WHEN LENGTH(excluded.content) > LENGTH(memory_chunks.content)
+                     THEN NULL ELSE memory_chunks.embedding END",
+            params![chunk_key, date, app_name, title, browser_url, content, last_activity_id, now],
+        )?;
+        Ok(())
+    }
+
+    /// 取待嵌入的记忆块（id, content）。
+    pub fn get_unembedded_memory_chunks(&self, limit: usize) -> Result<Vec<(i64, String)>> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT id, content FROM memory_chunks WHERE embedding IS NULL
+             ORDER BY id ASC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(AppError::Database)
+    }
+
+    /// 写入记忆块 embedding（传入前请先 L2 归一化）。
+    pub fn set_memory_chunk_embedding(&self, chunk_id: i64, embedding: &[u8]) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        conn.execute(
+            "UPDATE memory_chunks SET embedding = ?1 WHERE id = ?2",
+            params![embedding, chunk_id],
+        )?;
+        Ok(())
+    }
+
+    /// 索引状态：总块数 / 已嵌入块数 / 活动 id 游标。
+    pub fn semantic_memory_stats(&self) -> Result<SemanticMemoryStats> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let (total, embedded, cursor): (i64, i64, i64) = conn.query_row(
+            "SELECT COUNT(*),
+                    COUNT(embedding),
+                    COALESCE(MAX(last_activity_id), 0)
+             FROM memory_chunks",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        Ok(SemanticMemoryStats {
+            total_chunks: total as usize,
+            embedded_chunks: embedded as usize,
+            last_indexed_activity_id: cursor,
+        })
+    }
+
+    /// 语义检索：对全部已嵌入块做流式点积（向量已归一化，点积=余弦），
+    /// 边扫边维护 Top-K，不把全部向量载入内存。个人量级（万级块）毫秒-百毫秒级。
+    pub fn search_memory_chunks_semantic(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+    ) -> Result<Vec<SemanticMemoryHit>> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT id, date, app_name, title, browser_url, content, embedding
+             FROM memory_chunks WHERE embedding IS NOT NULL",
+        )?;
+        let mut rows = stmt.query([])?;
+
+        // 小顶堆语义：保留分数最高的 limit 条（用 Vec + 阈值淘汰，K 很小）
+        let mut top: Vec<SemanticMemoryHit> = Vec::with_capacity(limit + 1);
+        while let Some(row) = rows.next()? {
+            let blob: Vec<u8> = row.get(6)?;
+            let vector = decode_embedding(&blob);
+            if vector.len() != query_embedding.len() {
+                continue; // 维度不匹配（换过嵌入模型的旧块），跳过
+            }
+            let score: f32 = vector
+                .iter()
+                .zip(query_embedding.iter())
+                .map(|(a, b)| a * b)
+                .sum();
+            let score = f64::from(score);
+            if top.len() >= limit
+                && top.last().map(|h| h.score).unwrap_or(f64::MIN) >= score
+            {
+                continue;
+            }
+            let content: String = row.get(5)?;
+            let hit = SemanticMemoryHit {
+                chunk_id: row.get(0)?,
+                date: row.get(1)?,
+                app_name: row.get(2)?,
+                title: row.get(3)?,
+                browser_url: row.get(4)?,
+                excerpt: truncate_excerpt(&content, 240),
+                score,
+            };
+            let pos = top
+                .binary_search_by(|h| {
+                    score
+                        .partial_cmp(&h.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .unwrap_or_else(|p| p);
+            top.insert(pos, hit);
+            if top.len() > limit {
+                top.pop();
+            }
+        }
+        Ok(top)
+    }
+
+
     /// 获取活跃洞察（未归档，confidence > 0.3），按置信度降序。
     pub fn get_active_insights(&self, limit: usize) -> Result<Vec<WorkInsight>> {
         let conn = self.conn.lock().map_err(|e| {
@@ -3044,23 +3522,6 @@ impl Database {
             .map_err(AppError::Database)
     }
 
-    /// 用户反馈：positive=true（确认）→ confidence +0.1, confirmed +1
-    /// positive=false（否认）→ confidence -0.2, denied +1；低于 0.3 自动归档
-    pub fn feedback_insight(&self, id: i64, positive: bool) -> Result<()> {
-        let conn = self.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
-        let delta = if positive { 0.1 } else { -0.2 };
-        conn.execute(
-            "UPDATE insights SET confidence = MIN(1.0, MAX(0.0, confidence + ?1)),
-             confirmed_count = confirmed_count + CASE WHEN ?2 = 1 THEN 1 ELSE 0 END,
-             denied_count = denied_count + CASE WHEN ?2 = 0 THEN 1 ELSE 0 END,
-             archived = CASE WHEN confidence + ?1 < 0.3 THEN 1 ELSE archived END
-             WHERE id = ?3",
-            rusqlite::params![delta, if positive { 1 } else { 0 }, id],
-        )?;
-        Ok(())
-    }
 
     /// 检查是否存在相似洞察（同类型 + 内容包含关键词），用于去重。
     pub fn has_similar_insight(&self, insight_type: &str, keyword: &str) -> Result<bool> {

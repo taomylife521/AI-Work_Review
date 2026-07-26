@@ -124,7 +124,7 @@ test('状态气泡应采用贴头短气泡，减少白卡感和视觉侵入', ()
   assert.match(source, /min-height: 40px/);
   assert.match(source, /padding: 6px 14px 7px 14px/);
   assert.match(source, /display: block;/);
-  assert.match(source, /text-\[12px\] font-semibold leading-\[1\.35\]/);
+  assert.match(source, /text-xs font-semibold leading-\[1\.35\]/);
   assert.match(source, /rounded-\[16px\]/);
   assert.match(source, /shadow-\[0_10px_24px_rgba\(15,23,42,0\.1\),0_3px_10px_rgba\(15,23,42,0\.05\)\]/);
   assert.match(source, /word-break: normal/);

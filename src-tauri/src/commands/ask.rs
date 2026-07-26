@@ -599,18 +599,23 @@ pub(crate) async fn generate_text_answer_with_model(
             }
 
             let gemini_base = model_config.endpoint.trim().trim_end_matches('/');
+            // Key 走请求头而非 URL query，避免进代理日志/Referer（与 ai.rs / model.rs 一致）
             let gemini_url = format!(
-                "{}/models/{}:generateContent?key={}",
-                gemini_base, model_config.model, api_key
+                "{}/models/{}:generateContent",
+                gemini_base, model_config.model
             );
             let response = client
                 .post(&gemini_url)
+                .header("x-goog-api-key", api_key)
                 .json(&serde_json::json!({
+                    // system 指令走 systemInstruction 字段（而非拼进 user content），
+                    // 保持系统指令优先级，降低外部文本注入的影响面
                     "contents": [{
-                        "parts": [{
-                            "text": format!("{}\n\n{}", system_prompt, prompt)
-                        }]
+                        "parts": [{ "text": prompt }]
                     }],
+                    "systemInstruction": {
+                        "parts": [{ "text": system_prompt }]
+                    },
                     "generationConfig": {
                         "temperature": 0.2,
                         "maxOutputTokens": 1600
@@ -729,6 +734,278 @@ where
     Ok(())
 }
 
+// ══════════════════════════════════════════════════════════
+// 助手运行时桥接：停止 / 确认 / 行动 / 实时上下文
+// ══════════════════════════════════════════════════════════
+
+/// 在途请求的停止信号（request_id → watch sender）。前端"停止"按钮触发
+/// `cancel_assistant_request` 置位，executor 在安全点收束。
+static ASSISTANT_CANCEL_SENDERS: once_cell::sync::Lazy<
+    Mutex<std::collections::HashMap<String, tokio::sync::watch::Sender<bool>>>,
+> = once_cell::sync::Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
+
+/// 待确认的行动（confirm_id → (创建时间, oneshot sender)）。
+/// 用户在确认卡片上点击后经 `confirm_assistant_action` 回传。
+static ASSISTANT_CONFIRMATIONS: once_cell::sync::Lazy<
+    Mutex<std::collections::HashMap<String, (std::time::Instant, tokio::sync::oneshot::Sender<bool>)>>,
+> = once_cell::sync::Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
+
+/// 请求结束时移除停止信号注册（无论正常返回还是错误）。
+struct CancelRegistrationGuard {
+    request_id: Option<String>,
+}
+
+impl Drop for CancelRegistrationGuard {
+    fn drop(&mut self) {
+        if let Some(id) = self.request_id.take() {
+            if let Ok(mut map) = ASSISTANT_CANCEL_SENDERS.lock() {
+                map.remove(&id);
+            }
+        }
+    }
+}
+
+/// 前端"停止"按钮：置位在途请求的取消信号。
+#[tauri::command]
+pub async fn cancel_assistant_request(request_id: String) -> Result<(), AppError> {
+    let map = ASSISTANT_CANCEL_SENDERS
+        .lock()
+        .map_err(|e| AppError::Unknown(e.to_string()))?;
+    if let Some(tx) = map.get(&request_id) {
+        let _ = tx.send(true);
+    }
+    Ok(())
+}
+
+/// 前端确认卡片：回传用户对某个行动的批准/拒绝。
+#[tauri::command]
+pub async fn confirm_assistant_action(confirm_id: String, approved: bool) -> Result<(), AppError> {
+    let entry = {
+        let mut map = ASSISTANT_CONFIRMATIONS
+            .lock()
+            .map_err(|e| AppError::Unknown(e.to_string()))?;
+        map.remove(&confirm_id)
+    };
+    if let Some((_, tx)) = entry {
+        // executor 侧超时后 rx 已 drop，send 失败是正常情况
+        let _ = tx.send(approved);
+    }
+    Ok(())
+}
+
+/// 确认桥：注册 oneshot 并返回等待 Future。插入时顺带清理超过 1 小时的陈旧条目。
+fn build_confirm_bridge() -> crate::agent::ConfirmBridge {
+    crate::agent::ConfirmBridge {
+        wait: std::sync::Arc::new(|confirm_id: String| {
+            let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+            if let Ok(mut map) = ASSISTANT_CONFIRMATIONS.lock() {
+                map.retain(|_, (created, _)| created.elapsed().as_secs() < 3600);
+                map.insert(confirm_id, (std::time::Instant::now(), tx));
+            }
+            Box::pin(async move {
+                match rx.await {
+                    Ok(true) => crate::agent::ConfirmDecision::Approved,
+                    Ok(false) => crate::agent::ConfirmDecision::Denied,
+                    Err(_) => crate::agent::ConfirmDecision::TimedOut,
+                }
+            })
+        }),
+    }
+}
+
+/// 实时上下文：当前前台窗口（经隐私过滤）+ 今日概况。
+/// 注入 system prompt，并作为 get_current_context 工具的数据源。
+fn build_realtime_context_text(state_arc: &Arc<Mutex<AppState>>) -> String {
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let active_window = crate::monitor::get_active_window_fast().ok();
+
+    let mut parts: Vec<String> = Vec::new();
+
+    if let Ok(s) = state_arc.lock() {
+        // 前台窗口（尊重隐私规则：Skip 不注入，Anonymize 脱敏标题并去 URL）
+        if let Some(w) = active_window.as_ref() {
+            match s.privacy_filter.check_privacy_full(
+                &w.app_name,
+                &w.window_title,
+                w.browser_url.as_deref(),
+            ) {
+                crate::privacy::PrivacyAction::Skip => {}
+                crate::privacy::PrivacyAction::Anonymize => {
+                    parts.push(format!("当前前台应用: {} — [内容已脱敏]", w.app_name));
+                }
+                crate::privacy::PrivacyAction::Record => {
+                    let title: String = w.window_title.chars().take(80).collect();
+                    parts.push(format!("当前前台应用: {} — {}", w.app_name, title));
+                }
+            }
+        }
+
+        // 今日概况：从今日时间线聚合（轻量，最多 300 行）
+        if let Ok(activities) = s.database.get_timeline(&today, Some(300), None) {
+            let (ignored_apps, excluded_domains) = collect_privacy_filters(&s);
+            let activities = super::filter_activities_by_privacy(
+                activities,
+                &ignored_apps,
+                &excluded_domains,
+            );
+            if !activities.is_empty() {
+                let total: i64 = activities.iter().map(|a| a.duration).sum();
+                let mut app_totals: std::collections::HashMap<String, i64> =
+                    std::collections::HashMap::new();
+                for a in &activities {
+                    *app_totals.entry(a.app_name.clone()).or_insert(0) += a.duration;
+                }
+                let mut ranked: Vec<(String, i64)> = app_totals.into_iter().collect();
+                ranked.sort_by(|a, b| b.1.cmp(&a.1));
+                let top: Vec<String> = ranked
+                    .iter()
+                    .take(3)
+                    .map(|(name, secs)| format!("{}({}分)", name, secs / 60))
+                    .collect();
+                parts.push(format!(
+                    "今日已记录约 {} 分钟，Top应用: {}",
+                    total / 60,
+                    top.join("、")
+                ));
+            }
+        }
+    }
+
+    if parts.is_empty() {
+        "当前无实时上下文（可能刚启动或今日暂无记录）。".to_string()
+    } else {
+        parts.join("；")
+    }
+}
+
+/// 行动桥：把 Agent 的写操作落到真实的应用状态/配置/事件上。
+/// 所有操作已经过 executor 的用户确认流程。
+fn build_action_bridge(
+    app: tauri::AppHandle,
+    state_arc: Arc<Mutex<AppState>>,
+    locale: Option<String>,
+) -> crate::agent::ActionBridge {
+    crate::agent::ActionBridge {
+        run: std::sync::Arc::new(move |action| {
+            let app = app.clone();
+            let state_arc = state_arc.clone();
+            let locale = locale.clone();
+            Box::pin(async move { execute_assistant_action(action, app, state_arc, locale).await })
+        }),
+    }
+}
+
+async fn execute_assistant_action(
+    action: crate::agent::AssistantAction,
+    app: tauri::AppHandle,
+    state_arc: Arc<Mutex<AppState>>,
+    locale: Option<String>,
+) -> Result<String, String> {
+    use crate::agent::AssistantAction;
+
+    match action {
+        AssistantAction::CreateTodo { text } => {
+            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            let next_config = {
+                let s = state_arc.lock().map_err(|e| e.to_string())?;
+                let mut next = s.config.clone();
+                next.avatar_followups.push(crate::config::AvatarFollowupItem {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    title: text.clone(),
+                    date: today,
+                    source_app: "工作助手".to_string(),
+                    source_title: "助手对话".to_string(),
+                    project_key: String::new(),
+                    created_at: chrono::Utc::now().timestamp(),
+                    status: "open".to_string(),
+                });
+                next
+            };
+            super::persist_app_config(next_config, app, &state_arc)
+                .map_err(|e| format!("保存待办失败: {e}"))?;
+            Ok(format!("已创建待办：{text}"))
+        }
+
+        AssistantAction::SetAppCategory { app_name, category } => {
+            let next_config = {
+                let s = state_arc.lock().map_err(|e| e.to_string())?;
+                let mut next = s.config.clone();
+                super::category::upsert_app_category_rule(&mut next, &app_name, &category);
+                next
+            };
+            super::persist_app_config(next_config, app, &state_arc)
+                .map_err(|e| format!("保存分类规则失败: {e}"))?;
+            let updated = {
+                let s = state_arc.lock().map_err(|e| e.to_string())?;
+                super::category::reclassify_app_history_in_state(&s, &app_name, &category)
+                    .map_err(|e| format!("同步历史记录失败: {e}"))?
+            };
+            Ok(format!(
+                "已把「{app_name}」的分类改为「{category}」，同步更新 {updated} 条历史记录"
+            ))
+        }
+
+        AssistantAction::PauseRecording => {
+            {
+                let mut s = state_arc.lock().map_err(|e| e.to_string())?;
+                s.is_paused = true;
+            }
+            crate::emit_recording_state_changed(&app);
+            Ok("已暂停屏幕活动记录".to_string())
+        }
+
+        AssistantAction::ResumeRecording => {
+            {
+                let mut s = state_arc.lock().map_err(|e| e.to_string())?;
+                s.is_recording = true;
+                s.is_paused = false;
+            }
+            crate::emit_recording_state_changed(&app);
+            Ok("已恢复屏幕活动记录".to_string())
+        }
+
+        AssistantAction::OpenTimeline { date } => {
+            use tauri::Emitter;
+            let date = if date.is_empty() {
+                chrono::Local::now().format("%Y-%m-%d").to_string()
+            } else {
+                date
+            };
+            app.emit("avatar-open-timeline", serde_json::json!({ "date": date }))
+                .map_err(|e| format!("打开时间线失败: {e}"))?;
+            Ok(format!("已打开 {date} 的时间线"))
+        }
+
+        AssistantAction::GenerateDailyReport { date, force } => {
+            // 与 generate_report 命令共用防并发标志
+            {
+                let mut s = state_arc.lock().map_err(|e| e.to_string())?;
+                if s.generating_report {
+                    return Err("日报正在生成中，请稍候".to_string());
+                }
+                s.generating_report = true;
+            }
+            let result = super::report::generate_report_inner(
+                date.clone(),
+                Some(force),
+                locale,
+                &app,
+                &state_arc,
+            )
+            .await;
+            if let Ok(mut s) = state_arc.lock() {
+                s.generating_report = false;
+            }
+            match result {
+                Ok(_) => Ok(format!(
+                    "已生成 {date} 的日报。可调用 get_daily_report 读取内容，或让用户到日报页查看。"
+                )),
+                Err(e) => Err(format!("生成日报失败: {e}")),
+            }
+        }
+    }
+}
+
 /// 统一工作助手（Stage 6: 已接入 Agent Orchestrator）
 ///
 /// 接口签名保持不变，内部实现替换为 Agentic 架构：
@@ -744,7 +1021,9 @@ pub async fn chat_work_assistant(
     locale: Option<String>,
     date_from: Option<String>,
     date_to: Option<String>,
+    request_id: Option<String>,
     on_event: tauri::ipc::Channel<crate::agent::StreamEvent>,
+    app: tauri::AppHandle,
     state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<AssistantAnswer, AppError> {
     let trimmed_question = question.trim().to_string();
@@ -786,7 +1065,7 @@ pub async fn chat_work_assistant(
         .collect();
 
     // 从 AppState 中 clone Database + 收集隐私过滤器（Arc 引用计数 +1，可跨 await）
-    let (database, ignored_apps, excluded_domains, web_tools) = {
+    let (database, ignored_apps, excluded_domains, web_tools, avatar_followups) = {
         let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
         let (ignored_apps, excluded_domains) = collect_privacy_filters(&s);
         // 联网工具配置：仅在用户显式开启时传入（隐私默认关）
@@ -803,7 +1082,77 @@ pub async fn chat_work_assistant(
             ignored_apps,
             excluded_domains,
             web_tools,
+            s.config.avatar_followups.clone(),
         )
+    };
+
+    // 停止信号注册（request_id 由前端生成；guard 确保请求结束后清理）
+    let cancel_rx = request_id.as_ref().map(|id| {
+        let (tx, rx) = tokio::sync::watch::channel(false);
+        if let Ok(mut map) = ASSISTANT_CANCEL_SENDERS.lock() {
+            map.insert(id.clone(), tx);
+        }
+        rx
+    });
+    let _cancel_guard = CancelRegistrationGuard {
+        request_id: request_id.clone(),
+    };
+
+    // 助手运行时能力：行动桥 + 确认桥 + 实时上下文提供者 + 语义检索桥
+    let state_arc: Arc<Mutex<AppState>> = state.inner().clone();
+    let context_state = state_arc.clone();
+    let semantic_enabled = {
+        let s = state_arc.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+        s.config.memory_semantic_enabled
+    };
+    let semantic_search = if semantic_enabled {
+        let semantic_state = state_arc.clone();
+        Some(std::sync::Arc::new(move |query: String, limit: usize| {
+            let semantic_state = semantic_state.clone();
+            Box::pin(async move {
+                let hits =
+                    super::semantic_memory::search_semantic_memory_inner(&semantic_state, &query, limit)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                if hits.is_empty() {
+                    return Ok(format!("「{query}」没有检索到相关屏幕记忆。"));
+                }
+                let lines: Vec<String> = hits
+                    .iter()
+                    .map(|h| {
+                        let url = h
+                            .browser_url
+                            .as_deref()
+                            .map(|u| format!("\n  {u}"))
+                            .unwrap_or_default();
+                        format!(
+                            "- [{}] {} — {}{url}\n  摘要: {}",
+                            h.date, h.app_name, h.title, h.excerpt
+                        )
+                    })
+                    .collect();
+                Ok(lines.join("\n"))
+            }) as crate::agent::tools::ActionFuture
+        })
+            as std::sync::Arc<
+                dyn Fn(String, usize) -> crate::agent::tools::ActionFuture + Send + Sync,
+            >)
+    } else {
+        None
+    };
+    let runtime = crate::agent::AssistantRuntime {
+        avatar_followups,
+        actions: Some(build_action_bridge(
+            app.clone(),
+            state_arc.clone(),
+            locale.clone(),
+        )),
+        confirm: Some(build_confirm_bridge()),
+        current_context: Some(std::sync::Arc::new(move || {
+            build_realtime_context_text(&context_state)
+        })),
+        semantic_search,
+        cancel: cancel_rx,
     };
 
     // 流式桥接：Token 可丢；控制事件必须等 Tauri Channel 实际发送成功后再确认。
@@ -819,8 +1168,13 @@ pub async fn chat_work_assistant(
     });
 
     // Stage 6: 完整 Orchestrator 集成
-    // 使用 locale 感知的系统提示词，确保繁体/英文用户得到对应语言的回答
-    let system_prompt = build_assistant_system_prompt(assistant_locale);
+    // 使用 locale 感知的系统提示词，确保繁体/英文用户得到对应语言的回答；
+    // 追加实时上下文（前台窗口 + 今日概况），让模型能回答"我现在在干嘛"类问题。
+    let realtime_context = build_realtime_context_text(&state_arc);
+    let system_prompt = format!(
+        "{}\n\n[实时上下文] {realtime_context}\n（此信息由系统在请求开始时注入；会话中途需要最新状态时调用 get_current_context 工具。）",
+        build_assistant_system_prompt(assistant_locale)
+    );
     let result = crate::agent::Orchestrator::handle(
         &trimmed_question,
         model_config.as_ref(),
@@ -830,6 +1184,7 @@ pub async fn chat_work_assistant(
         &ignored_apps,
         &excluded_domains,
         web_tools,
+        runtime,
         Some(tx),
     )
     .await;

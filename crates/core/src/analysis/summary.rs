@@ -505,10 +505,9 @@ impl SummaryAnalyzer {
             return Err(AppError::Analysis("Gemini API Key 未配置".to_string()));
         }
 
-        let url = format!(
-            "{}/models/{}:generateContent?key={}",
-            self.endpoint, self.model, api_key
-        );
+        // API Key 走 x-goog-api-key 请求头（见 try_gemini_request），
+        // 不再拼进 URL query，避免泄漏到日志/代理记录
+        let url = format!("{}/models/{}:generateContent", self.endpoint, self.model);
 
         let text = format!("{}\n\n{}", ai_system_prompt(self.locale), prompt);
 
@@ -550,6 +549,7 @@ impl SummaryAnalyzer {
         let response = self
             .client
             .post(url)
+            .header("x-goog-api-key", self.api_key.as_deref().unwrap_or(""))
             .json(&json!({
                 "contents": [{ "parts": [{ "text": text }] }],
                 "generationConfig": config

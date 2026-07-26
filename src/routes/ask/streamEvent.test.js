@@ -175,3 +175,57 @@ test('error 缺少错误文本时使用 fallbackError', () => {
   assert.equal(result.message.streaming, false);
   assert.equal(result.terminal, true);
 });
+
+test('stepResult 携带 digest 时写入步骤（无 digest 不加键）', () => {
+  const message = baseMessage({
+    steps: [{ tool: 'query_activities', label: '活动查询', status: 'running' }],
+  });
+
+  const result = reduceStreamEvent(message, {
+    type: 'stepResult',
+    tool: 'query_activities',
+    ok: true,
+    hits: 0,
+    references: [],
+    digest: 'Top应用: Xcode(120分)',
+  });
+
+  assert.equal(result.message.steps[0].digest, 'Top应用: Xcode(120分)');
+  assert.equal(result.terminal, false);
+});
+
+test('confirmRequest 把最近 running 步骤标记为待确认', () => {
+  const message = baseMessage({
+    steps: [{ tool: 'create_todo', label: '新建待办', status: 'running' }],
+  });
+
+  const result = reduceStreamEvent(message, {
+    type: 'confirmRequest',
+    confirmId: 'c-1',
+    tool: 'create_todo',
+    label: '新建待办',
+    summary: '新建待办：整理周报',
+  });
+
+  const step = result.message.steps[0];
+  assert.equal(step.confirmId, 'c-1');
+  assert.equal(step.confirmStatus, 'pending');
+  assert.equal(step.summary, '新建待办：整理周报');
+  assert.equal(step.status, 'running');
+  assert.equal(result.terminal, false);
+});
+
+test('用户停止时 done 不应覆盖已流式出的内容', () => {
+  const message = baseMessage({ content: '已经写出来的部分回答' });
+
+  const result = reduceStreamEvent(message, {
+    type: 'done',
+    answer: '已按你的要求停止。',
+    references: [],
+    toolLabels: [],
+  });
+
+  assert.equal(result.message.content, '已经写出来的部分回答');
+  assert.equal(result.message.stopped, true);
+  assert.equal(result.terminal, true);
+});

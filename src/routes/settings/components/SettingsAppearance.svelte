@@ -249,7 +249,8 @@
       return;
     }
 
-    const previousStyle = config.ui_visual_style || 'b';
+    // 与 Settings.svelte 的归一化默认值保持一致（缺省风格为 'c'）
+    const previousStyle = config.ui_visual_style || 'c';
     uiVisualStyleSaving = true;
     config.ui_visual_style = styleId;
     dispatch('change', { autosaved: true, config });
@@ -540,7 +541,7 @@
     <div class="flex items-center justify-between gap-4">
       <div>
         <div class="settings-text">{t('settingsAppearance.avatarClickThrough')}</div>
-        <div class="settings-muted mt-1 text-[12px]">{t('settingsAppearance.avatarClickThroughDescription')}</div>
+        <div class="settings-muted mt-1 text-xs">{t('settingsAppearance.avatarClickThroughDescription')}</div>
       </div>
       <button
         type="button"
@@ -557,9 +558,9 @@
     <div class="flex items-center justify-between gap-4">
       <div>
         <div class="settings-text">{t('settingsAppearance.breakReminder')}</div>
-        <div class="settings-muted mt-1 text-[12px]">{t('settingsAppearance.breakReminderDescription')}</div>
+        <div class="settings-muted mt-1 text-xs">{t('settingsAppearance.breakReminderDescription')}</div>
         {#if !config.avatar_enabled}
-          <div class="settings-muted mt-1 text-[12px]">{t('settingsAppearance.breakReminderRequiresAvatar')}</div>
+          <div class="settings-muted mt-1 text-xs">{t('settingsAppearance.breakReminderRequiresAvatar')}</div>
         {/if}
       </div>
       <button
@@ -592,7 +593,7 @@
       </div>
     {/if}
 
-    <div class="settings-muted text-[12px] leading-5">
+    <div class="settings-muted text-xs leading-5">
       {t('settingsAppearance.avatarLocalReminderNote')}
     </div>
 
@@ -601,10 +602,10 @@
     <div class="flex items-start justify-between gap-4">
       <div>
         <div class="settings-text">{t('settingsAppearance.avatarProactiveAi')}</div>
-        <div class="settings-muted mt-1 text-[12px]">{t('settingsAppearance.avatarProactiveAiDescription')}</div>
-        <div class="settings-muted mt-1 text-[12px]">{t('settingsAppearance.avatarProactiveAiDataNotice')}</div>
+        <div class="settings-muted mt-1 text-xs">{t('settingsAppearance.avatarProactiveAiDescription')}</div>
+        <div class="settings-muted mt-1 text-xs">{t('settingsAppearance.avatarProactiveAiDataNotice')}</div>
         {#if !config.avatar_enabled}
-          <div class="settings-muted mt-1 text-[12px]">{t('settingsAppearance.avatarProactiveAiRequiresAvatar')}</div>
+          <div class="settings-muted mt-1 text-xs">{t('settingsAppearance.avatarProactiveAiRequiresAvatar')}</div>
         {/if}
       </div>
       <button
@@ -628,7 +629,7 @@
     <div>
       <h3 class="settings-card-title">
         {t('settingsAppearance.uiVisualStyle')}
-        <span class="ml-1.5 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1 py-px text-[8px] font-semibold uppercase tracking-[0.06em] text-amber-700 align-middle dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">Beta</span>
+        <span class="ml-1.5 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1 py-px text-[10px] font-semibold uppercase tracking-[0.06em] text-amber-700 align-middle dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">Beta</span>
       </h3>
       <p class="settings-muted mt-1">{t('settingsAppearance.uiVisualStyleDesc')}</p>
     </div>

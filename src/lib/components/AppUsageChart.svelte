@@ -45,7 +45,7 @@
   // 展开时显示全部，收起时显示前 8
   $: displayApps = expanded ? data : data.slice(0, DEFAULT_COUNT);
   $: hasMore = data.length > DEFAULT_COUNT;
-  $: maxDuration = displayApps.length > 0 ? Math.max(...displayApps.map(a => a.duration)) : 1;
+  $: maxDuration = displayApps.length > 0 ? Math.max(1, ...displayApps.map(a => a.duration || 0)) : 1;
   $: columnShellClass = embedded
     ? 'app-usage-chart__columns app-usage-chart__columns-embedded'
     : 'app-usage-chart__columns rounded-2xl border border-slate-100 bg-white/90 p-4 dark:border-[#30363d]/60 dark:bg-[#21262d]/70';

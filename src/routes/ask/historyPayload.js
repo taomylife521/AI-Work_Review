@@ -65,6 +65,41 @@ export function summarizeStepsForHistory(steps) {
   return `[工具：${parts.join(' | ')}]`;
 }
 
+/** 每轮工具结果摘要的字符预算（防止历史膨胀挤掉真实对话）。 */
+const HISTORY_DIGEST_BUDGET_PER_ROUND = 600;
+
+/**
+ * 把成功步骤携带的 digest（后端 StepResult 附带的结果截断摘要）拼成
+ * 历史附注，让模型在追问时无需重查工具即可引用上一轮数据。
+ * 超出预算的部分丢弃（保序：先到的工具优先保留）。
+ *
+ * @param {Array} steps - 消息上的 steps 数组
+ * @returns {string|null}
+ */
+export function buildStepDigestForHistory(steps) {
+  if (!Array.isArray(steps) || steps.length === 0) return null;
+
+  const lines = [];
+  let used = 0;
+  for (const step of steps) {
+    if (!step || step.status !== 'done' || step.ok !== true) continue;
+    if (typeof step.digest !== 'string' || !step.digest.trim()) continue;
+    const line = `${step.tool}: ${step.digest.trim()}`;
+    if (used + line.length > HISTORY_DIGEST_BUDGET_PER_ROUND) {
+      const remain = HISTORY_DIGEST_BUDGET_PER_ROUND - used;
+      if (remain > 40) {
+        lines.push(`${line.slice(0, remain)}…`);
+      }
+      break;
+    }
+    lines.push(line);
+    used += line.length;
+  }
+
+  if (lines.length === 0) return null;
+  return `[上轮工具数据摘要]\n${lines.join('\n')}`;
+}
+
 /**
  * 把 store 里的 messages 数组转成发给后端 chat_work_assistant 的 history。
  *
@@ -100,14 +135,16 @@ export function buildHistoryPayload(messages) {
 
     const baseContent = String(message.content ?? '');
     const summary = summarizeStepsForHistory(message.steps);
+    const digest = buildStepDigestForHistory(message.steps);
+    const suffixes = [summary, digest].filter(Boolean).join('\n');
     rounds.push([
       { role: 'user', content: String(pendingUser.content ?? '') },
       {
         role: 'assistant',
-        content: summary
+        content: suffixes
           ? baseContent
-            ? `${baseContent}\n\n${summary}`
-            : summary
+            ? `${baseContent}\n\n${suffixes}`
+            : suffixes
           : baseContent,
       },
     ]);

@@ -10,6 +10,15 @@ use tauri::{State};
 
 use super::shared::collect_privacy_filters;
 
+/// 加班时长修正：数据库已按秒级精度计算了"最后工作时段结束后的活动量"。
+/// 仅当未启用工作时段（弹性工时）时，退回到标准工时方案。
+fn apply_flex_overtime_correction(state: &AppState, stats: &mut DailyStats) {
+    if !state.config.work_time_enabled {
+        let standard_seconds = (state.config.standard_work_hours * 3600.0).round() as i64;
+        stats.overtime_duration = (stats.work_time_duration - standard_seconds).max(0);
+    }
+}
+
 fn load_daily_stats_for_overview(state: &AppState, date: &str) -> Result<DailyStats, AppError> {
     let segments = state.config.effective_work_segments();
     let (ignored_apps, excluded_domains) = collect_privacy_filters(state);
@@ -20,12 +29,7 @@ fn load_daily_stats_for_overview(state: &AppState, date: &str) -> Result<DailySt
         &excluded_domains,
     )?;
 
-    // 加班时长：数据库已按秒级精度计算了"最后工作时段结束后的活动量"。
-    // 仅当未启用工作时段（弹性工时）时，退回到标准工时方案。
-    if !state.config.work_time_enabled {
-        let standard_seconds = (state.config.standard_work_hours * 3600.0).round() as i64;
-        stats.overtime_duration = (stats.work_time_duration - standard_seconds).max(0);
-    }
+    apply_flex_overtime_correction(state, &mut stats);
 
     Ok(stats)
 }
@@ -441,12 +445,14 @@ pub(crate) fn get_daily_stats_inner(
     let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
     let segments = s.config.effective_work_segments();
     let (ignored_apps, excluded_domains) = collect_privacy_filters(&s);
-    s.database.get_daily_stats_with_segments_filtered(
+    let mut stats = s.database.get_daily_stats_with_segments_filtered(
         date,
         &segments,
         &ignored_apps,
         &excluded_domains,
-    )
+    )?;
+    apply_flex_overtime_correction(&s, &mut stats);
+    Ok(stats)
 }
 
 /// 获取指定日期的统计
@@ -770,10 +776,10 @@ pub async fn clear_old_activities(
         }
     }
 
-    // 同步清理数据库中对应的旧记录
+    // 同步清理数据库中对应的旧记录（保留今天和昨天，与截图保留策略一致）
     {
         let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-        if let Err(e) = state.database.delete_activities_before_date(&today) {
+        if let Err(e) = state.database.delete_activities_before_date(&yesterday) {
             log::warn!("清理旧活动记录失败: {e}");
         }
     }
@@ -873,15 +879,6 @@ pub async fn delete_activities_by_app(
     log::info!("按应用删除 {app_name}: {deleted} 条记录, {removed} 张截图");
     Ok(serde_json::json!({ "deleted": deleted, "removed_screenshots": removed }))
 }
-
-/// 检查是否在工作时间内
-#[tauri::command]
-pub async fn is_work_time(state: State<'_, Arc<Mutex<AppState>>>) -> Result<bool, AppError> {
-    let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-    let segments = state.config.effective_work_segments();
-    Ok(crate::screen_lock::ScreenLockMonitor::is_work_time_in_segments(&segments))
-}
-
 
 
 #[cfg(test)]

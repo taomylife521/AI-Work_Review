@@ -197,7 +197,7 @@ The core of Work Review is always **local recording**. AI's role is to make reco
 | **Basic Template** | Zero configuration, outputs stable structured results |
 | **AI Enhanced** | Calls your self-configured model service for more natural Q&A and summaries |
 
-Supported providers: Ollama (local) / OpenAI compatible / DeepSeek / Qwen / Zhipu / Kimi / Doubao / MiniMax / SiliconFlow / Gemini / Claude
+Supported providers: Ollama (local) / LM Studio (local) / OpenAI compatible / DeepSeek / Qwen / Zhipu / Kimi / Doubao / MiniMax / SiliconFlow / Gemini / Claude / OpenRouter / Groq / xAI Grok / Mistral / Custom endpoint
 
 ---
 
@@ -273,9 +273,9 @@ Still being actively refined — interaction linkage, state expression, and pres
 </details>
 
 <details>
-<summary>Bot Integration (Telegram / Feishu)</summary>
+<summary>Bot Integration (Telegram / Feishu / DingTalk / WeCom)</summary>
 
-Query records and generate daily reports remotely from Telegram / Feishu via local API + multi-device registration. Supported commands: `/devices`, `/report`, `/generate`, etc. Restricted to personal and own multi-device use only.
+Query records and generate daily reports remotely from Telegram / Feishu / DingTalk / WeCom via local API + multi-device registration. Supported commands: `/devices`, `/report`, `/generate`, etc. Restricted to personal and own multi-device use only.
 
 </details>
 

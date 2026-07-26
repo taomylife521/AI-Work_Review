@@ -25,3 +25,30 @@ test('应提供 MiniMax 作为新的 AI 提供商并同步到文档', async () =
   assert.match(readmeSource, /MiniMax/);
   assert.match(readmeEnSource, /MiniMax/);
 });
+
+test('应提供 OpenRouter/Groq/xAI/Mistral/LM Studio/自定义 六个新提供商并同步文档', async () => {
+  const [configSource, commandSource, readmeSource, readmeEnSource, settingsSource] =
+    await Promise.all([
+      readFile(new URL('../crates/core/src/config.rs', import.meta.url), 'utf8'),
+      readCommandsSource(),
+      readFile(new URL('../README.zh.md', import.meta.url), 'utf8'),
+      readFile(new URL('../README.md', import.meta.url), 'utf8'),
+      readFile(
+        new URL('./routes/settings/components/SettingsAI.svelte', import.meta.url),
+        'utf8'
+      ),
+    ]);
+
+  for (const id of ['openrouter', 'groq', 'xai', 'mistral', 'lmstudio', 'custom']) {
+    assert.match(configSource, new RegExp(`"${id}"`), `config.rs 缺少 ${id} serde rename`);
+    assert.match(commandSource, new RegExp(`"id": "${id}"`), `get_ai_providers 缺少 ${id}`);
+    assert.match(settingsSource, new RegExp(`${id}:`), `SettingsAI providerLabels 缺少 ${id}`);
+  }
+  // 全部走 OpenAI 兼容派发
+  assert.match(configSource, /AiProvider::OpenRouter[\s\S]*?AiProvider::Custom[\s\S]*?\)\s*\}/);
+  assert.match(readmeSource, /OpenRouter/);
+  assert.match(readmeEnSource, /OpenRouter/);
+  // 品牌图标缺失时必须有字母块回退
+  assert.match(settingsSource, /providerIconFailed/);
+  assert.match(settingsSource, /icons\/providers/);
+});

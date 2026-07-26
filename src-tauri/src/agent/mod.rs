@@ -12,4 +12,7 @@ pub mod tools;
 pub use events::{StreamEvent, StreamEventSender};
 pub use model::Message;
 pub use orchestrator::Orchestrator;
-pub use tools::WebToolsConfig;
+pub use tools::{
+    ActionBridge, AssistantAction, AssistantRuntime, ConfirmBridge, ConfirmDecision,
+    CurrentContextFn, WebToolsConfig,
+};

@@ -19,7 +19,7 @@
   async function copyPath(text, labelKey) {
     try {
       await navigator.clipboard.writeText(text);
-      dispatch('toast', { message: t(`nodeGatewayPage.${labelKey}`) + ' ' + t('nodeGatewayPage.mcpServerPathCopied', { label: t(`nodeGatewayPage.${labelKey}`) }), type: 'success' });
+      dispatch('toast', { message: t('nodeGatewayPage.mcpServerPathCopied', { label: t(`nodeGatewayPage.${labelKey}`) }), type: 'success' });
     } catch (e) {
       dispatch('toast', { message: t('nodeGatewayPage.tokenCopyFailed'), type: 'error' });
     }

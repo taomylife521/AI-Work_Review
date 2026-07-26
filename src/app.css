@@ -2,6 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ══════════════════════════════════════════════════════════
+   字号阶梯（新增样式必须落在以下档位,禁止再造任意值）:
+   10px  极小徽标(Beta/计数角标,最小可读下限)
+   11px  微型标签(区块标题/meta 行/状态 chip)
+   xs=12 辅助文字(说明/时间戳/提示)
+   sm=14 正文与控件默认
+   15px  根字号(阅读正文,继承即得,勿显式写)
+   base+ 标题层(lg/xl/2xl 按语义递进)
+   ══════════════════════════════════════════════════════════ */
 :root {
   color-scheme: light;
   font-family: "SF Pro Display", "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Segoe UI Variable Text", "Microsoft YaHei", sans-serif;
@@ -116,8 +125,10 @@
 }
 
 /* 统一修正图标 + 文字控件的视觉中心，避免侧边栏页和提示条出现“看起来没居中” */
+/* 紧凑控件行高:1.15 而非 1——胶囊观感几乎不变,
+   含换行文本的按钮(如阿语长分类标签/窄窗)不再叠行 */
 :where(button, a, label)[class*='items-center'] {
-  line-height: 1;
+  line-height: 1.15;
 }
 
 :where(button, a, label)[class*='items-center'][class*='justify-center'] {
@@ -125,7 +136,7 @@
 }
 
 :where(button, a, label)[class*='items-center'] > :where(span, div) {
-  line-height: 1;
+  line-height: 1.15;
 }
 
 :where(button, a, label)[class*='items-center'] :where(svg, img) {
@@ -401,6 +412,28 @@
   @apply min-w-0;
 }
 
+/* 日期切换组（今天/昨天/日期选择）包进胶囊底座：
+   把三个离散按钮在视觉上归拢成"一个控件"，降低右上角操作区的噪声，
+   让"重新生成"作为唯一主色按钮承担视觉焦点。 */
+.report-hero-actions .page-toolbar-end {
+  background: var(--editorial-surface-subtle);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
+  padding: 0.3rem;
+  width: fit-content;
+  margin-inline-start: auto;
+}
+.dark .report-hero-actions .page-toolbar-end {
+  background: rgba(22, 27, 34, 0.55);
+  border-color: rgba(48, 54, 61, 0.8);
+}
+.report-hero-actions .page-toolbar-end .page-control-btn {
+  border-radius: 999px;
+}
+.report-hero-actions .page-toolbar-end .page-control-input {
+  border-radius: 999px;
+}
+
 .report-hero-meta {
   @apply mt-2 flex flex-col gap-2 text-[13px] text-slate-500 dark:text-[#7d8590];
 }
@@ -425,6 +458,10 @@
   font-size: 0.8rem;
   line-height: 1.5;
   color: #64748b;
+}
+
+.dark .report-hero-mode-note {
+  color: #7d8590;
 }
 
 .report-hero-actions {
@@ -464,6 +501,8 @@
 
   .report-hero-actions .page-toolbar-end {
     @apply justify-start;
+    /* 窄布局下操作区变左对齐，胶囊底座跟随左移 */
+    margin-inline-start: 0;
   }
 }
 
@@ -807,7 +846,7 @@
 }
 
 .sidebar-nav-rail {
-  @apply absolute left-1.5 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-full bg-indigo-500;
+  @apply absolute start-1.5 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-full bg-indigo-500;
 }
 
 .sidebar-bottom {
@@ -864,12 +903,13 @@
   @apply text-sm text-slate-500 dark:text-[#7d8590] leading-6;
 }
 
+/* 卡片标题：主流分组列表的"微型区块标签"形态（macOS 系统设置/Linear 风格） */
 .settings-card-title {
-  @apply text-sm font-semibold text-slate-700 dark:text-[#c9d1d9] mb-1;
+  @apply text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400 dark:text-[#7d8590] mb-2.5;
 }
 
 .settings-card-desc {
-  @apply text-xs text-slate-500 dark:text-[#7d8590] mb-3;
+  @apply text-xs text-slate-500 dark:text-[#7d8590] mb-3 -mt-1;
 }
 
 .settings-card {
@@ -1067,8 +1107,34 @@
   background: rgba(129, 140, 248, 0.24);
 }
 
+/* ══════════════════════════════════════════════════════════
+   行式设置系统（主流分组列表形态）：
+   .settings-section 内的每个 .settings-block 成为一"行"——
+   上下留白 + hairline 分隔线,替代散落的表单块。
+   所有设置 tab 共用这些类,一处重构全局生效。
+   ══════════════════════════════════════════════════════════ */
 .settings-section {
-  @apply space-y-4;
+  @apply space-y-0;
+}
+
+.settings-section > .settings-block {
+  @apply py-3.5;
+}
+
+.settings-section > .settings-block:first-child {
+  @apply pt-1;
+}
+
+.settings-section > .settings-block:last-child {
+  @apply pb-1;
+}
+
+.settings-section > .settings-block + .settings-block {
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.dark .settings-section > .settings-block + .settings-block {
+  border-top-color: rgba(48, 54, 61, 0.7);
 }
 
 .settings-block {
@@ -1079,8 +1145,9 @@
   @apply space-y-2;
 }
 
+/* 行标题：加深对比,与说明文字拉开层级 */
 .settings-text {
-  @apply text-sm font-medium text-slate-700 dark:text-[#adbac7];
+  @apply text-sm font-medium text-slate-800 dark:text-[#e6edf3];
 }
 
 .settings-label {
@@ -1116,7 +1183,7 @@
 }
 
 .settings-actions {
-  @apply flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-[#484f58];
+  @apply flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-[#30363d];
 }
 
 .settings-link-action {
@@ -1220,7 +1287,7 @@
 }
 
 .control-input {
-  @apply w-full min-h-9 px-3 py-2 text-sm rounded-lg bg-slate-50 dark:bg-[#161b22] border border-slate-200 dark:border-[#484f58] text-slate-700 dark:text-[#adbac7] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
+  @apply w-full min-h-9 px-3 py-2 text-sm rounded-lg bg-slate-50 dark:bg-[#161b22] border border-slate-200 dark:border-[#30363d] text-slate-700 dark:text-[#adbac7] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
 }
 
 .control-input-mono {
@@ -1249,10 +1316,16 @@
 }
 
 .switch-thumb {
-  @apply absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform duration-200 ease-out;
+  @apply absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform duration-200 ease-out;
+  inset-inline-start: 0.125rem;
   box-shadow:
     0 1px 2px rgba(15, 23, 42, 0.16),
     0 2px 6px rgba(15, 23, 42, 0.12);
+}
+
+/* RTL：开关滑块沿逻辑方向移动（阿拉伯语界面下开=向左） */
+[dir='rtl'] .switch-thumb.translate-x-5 {
+  --tw-translate-x: -1.25rem;
 }
 
 .switch-track:disabled {
@@ -1373,7 +1446,7 @@
 
 .markdown-body ul,
 .markdown-body ol {
-  padding-left: 1.5em;
+  padding-inline-start: 1.5em;
 }
 
 .markdown-body li {
@@ -1392,6 +1465,10 @@
   overflow: hidden;
 }
 
+.dark .markdown-body table {
+  border-color: #30363d;
+}
+
 /* 表头：去掉 linear-gradient，改为纯色（更现代）*/
 .markdown-body thead {
   background: #f8fafc;
@@ -1403,7 +1480,7 @@
 
 .markdown-body th {
   padding: 0.7rem 1rem;
-  text-align: left;
+  text-align: start;
   font-weight: 600;
   font-size: 0.8rem;
   letter-spacing: 0.02em;
@@ -1421,7 +1498,7 @@
   padding: 0.7rem 1rem;
   border-bottom: 1px solid #e2e8f0;
   color: #334155;
-  text-align: left;
+  text-align: start;
 }
 
 .dark .markdown-body td {
@@ -1584,7 +1661,7 @@
 }
 
 .sidebar-nav-rail {
-  left: 0.55rem;
+  inset-inline-start: 0.55rem;
   width: 3px;
   height: 1.75rem;
   border-radius: 999px;
@@ -1684,6 +1761,116 @@
   gap: 1rem;
 }
 
+/* 阅读布局：xl 屏正文左侧显示粘性段落目录（文档类产品标配） */
+.report-reading-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (min-width: 1280px) {
+  .report-reading-layout {
+    grid-template-columns: 11rem minmax(0, 1fr);
+  }
+}
+
+.report-toc {
+  display: none;
+  position: sticky;
+  top: 0.75rem;
+  padding: 0.85rem 0.9rem;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: var(--editorial-surface-subtle);
+}
+
+@media (min-width: 1280px) {
+  .report-toc {
+    display: block;
+  }
+}
+
+.dark .report-toc {
+  background: rgba(22, 27, 34, 0.55);
+  border-color: rgba(48, 54, 61, 0.8);
+}
+
+.report-toc-title {
+  margin: 0 0 0.55rem;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.dark .report-toc-title {
+  color: #7d8590;
+}
+
+.report-toc ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.report-toc-item {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0.32rem 0.5rem 0.32rem 0.75rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  text-align: start;
+  color: #64748b;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.report-toc-item:hover {
+  color: #0f172a;
+  background: rgba(241, 245, 249, 0.9);
+}
+
+.dark .report-toc-item {
+  color: #7d8590;
+}
+
+.dark .report-toc-item:hover {
+  color: #e6edf3;
+  background: rgba(33, 38, 45, 0.7);
+}
+
+.report-toc-item-active {
+  color: #4338ca;
+  font-weight: 600;
+}
+
+.report-toc-item-active::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 0.85rem;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #6366f1, #8b5cf6);
+}
+
+.dark .report-toc-item-active {
+  color: #a5b4fc;
+}
+
+/* 列表 marker 上色：与 editorial 强调色同一语言 */
+.report-editorial-shell .markdown-body li::marker {
+  color: #818cf8;
+}
+
 .report-sheet {
   position: relative;
   overflow: hidden;
@@ -1704,6 +1891,12 @@
 .report-sheet-meta {
   position: relative;
   z-index: 1;
+  /* 元信息行与正文分层：hairline 下边线形成"文章页眉"感 */
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+}
+.dark .report-sheet-meta {
+  border-bottom-color: rgba(48, 54, 61, 0.8);
 }
 
 .report-sheet-content {
@@ -1711,12 +1904,34 @@
   margin: 0 auto;
 }
 
-/* 统计卡：现代数据洞察风格 —— 左对齐、大数值、hairline border、零阴影 */
+/* 统计卡：现代数据洞察风格 —— 左对齐、大数值、hairline border、零阴影。
+   顶部 2px 四色 accent 条给"设计过"的信号（indigo/emerald/amber/sky），
+   与 editorial 语言里的 blockquote 强调条同源。 */
 .report-stat-card {
+  position: relative;
+  overflow: hidden;
   border-radius: var(--radius-sm);
   border: 1px solid rgba(148, 163, 184, 0.24);
   background: var(--editorial-surface-subtle);
-  padding: 0.85rem 1rem;
+  padding: 0.95rem 1rem 0.85rem;
+}
+.report-stat-card::before {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 2px;
+  background: #6366f1;
+  opacity: 0.85;
+}
+.report-stat-card:nth-child(2)::before {
+  background: #10b981;
+}
+.report-stat-card:nth-child(3)::before {
+  background: #f59e0b;
+}
+.report-stat-card:nth-child(4)::before {
+  background: #0ea5e9;
 }
 .report-stat-label {
   font-size: 0.7rem;
@@ -1726,15 +1941,21 @@
   margin-bottom: 0.3rem;
 }
 .report-stat-value {
-  font-size: 1.4rem;
+  font-size: 1.55rem;
   line-height: 1.2;
-  font-weight: 600;
+  font-weight: 650;
   font-variant-numeric: tabular-nums;
   color: #0f172a;
 }
 .dark .report-stat-card {
   border-color: rgba(48, 54, 61, 0.80);
   background: rgba(22, 27, 34, 0.55);
+}
+.dark .report-stat-card::before {
+  opacity: 0.65;
+}
+.dark .report-stat-label {
+  color: #7d8590;
 }
 .dark .report-stat-value {
   color: #e6edf3;
@@ -1752,14 +1973,31 @@
   font-weight: 700;
 }
 
-/* h2：用大留白分隔段落，不再用 border-top 硬分隔线（更现代）*/
+/* h2：用大留白分隔段落，不再用 border-top 硬分隔线（更现代）。
+   前置小圆角 accent 竖条作为段落锚点——长报告扫读时的视觉停靠点，
+   与 blockquote 的左侧强调条形成同一套语言。 */
 .report-editorial-shell .markdown-body h2 {
+  position: relative;
   font-size: 1.5rem;
   font-weight: 600;
   letter-spacing: -0.005em;
   margin-top: var(--space-section);
   padding-top: 0;
+  padding-inline-start: 0.9rem;
   border-top: none;
+}
+.report-editorial-shell .markdown-body h2::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0.28em;
+  width: 4px;
+  height: 0.92em;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #6366f1, #8b5cf6);
+}
+.dark .report-editorial-shell .markdown-body h2::before {
+  background: linear-gradient(180deg, #818cf8, #a78bfa);
 }
 .report-editorial-shell .markdown-body h2:first-child {
   margin-top: 0;
@@ -1846,7 +2084,9 @@
   color: #94a3b8;
   margin-top: 0.25rem;
 }
-.report-section:hover .report-section-edit-btn {
+.report-section:hover .report-section-edit-btn,
+.report-section:focus-within .report-section-edit-btn,
+.report-section-edit-btn:focus-visible {
   opacity: 1;
 }
 .report-section-edit-btn:hover {
@@ -2928,5 +3168,37 @@
   .about-update-banner {
     justify-content: center;
     text-align: center;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   响应式：窄窗（<700px）侧栏折叠为图标 rail
+   桌面用户也会把窗口缩小并排放置；13.5rem 固定侧栏会挤压主区。
+   选择器带 .app-shell 前缀以压过 Tailwind 任意值类与 ui-style-c 覆盖。
+   ══════════════════════════════════════════════════════════ */
+@media (max-width: 700px) {
+  .app-shell .app-shell-stage {
+    grid-template-columns: 4.25rem minmax(0, 1fr) !important;
+  }
+
+  .app-shell .sidebar-nav-label,
+  .app-shell .sidebar-brand-copy,
+  .app-shell .sidebar-footer-label {
+    display: none;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   无障碍：前庭敏感用户关闭动画（prefers-reduced-motion）
+   覆盖 Tailwind 的 animate-* 与自定义 transition/animation。
+   ══════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

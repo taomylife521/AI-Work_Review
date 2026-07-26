@@ -238,6 +238,7 @@ impl Orchestrator {
         ignored_apps: &[String],
         excluded_domains: &[String],
         web_tools: Option<super::tools::WebToolsConfig>,
+        runtime: super::tools::AssistantRuntime,
         event_tx: Option<StreamEventSender>,
     ) -> Result<OrchestratorResult, AppError> {
         let has_model = model_config
@@ -290,6 +291,7 @@ impl Orchestrator {
                     ignored_apps.to_vec(),
                     excluded_domains.to_vec(),
                     web_tools,
+                    runtime,
                     event_tx.clone(),
                 )
                 .await
@@ -307,11 +309,17 @@ impl Orchestrator {
                     Err(AgentRunError::EventDeliveryFailed(message)) => {
                         Err(event_delivery_error(message))
                     }
-                    Err(AgentRunError::Execution(_e)) => {
-                        // Agent 失败 → 降级到 FastPath（不暴露内部错误细节）
+                    Err(AgentRunError::Execution(e)) => {
+                        // Agent 失败 → 降级到 FastPath。
+                        // 降级必须对用户可见（此前静默换成规则模板，用户以为 AI 在回答）：
+                        // 前置一行说明失败类别，完整错误进日志。
+                        log::warn!("Agent 路径失败，降级到本地统计: {e}");
                         ensure_event_receiver_open(&event_tx)?;
-                        let answer =
-                            fast_answer(question, database, ignored_apps, excluded_domains)?;
+                        let reason = degrade_reason_summary(&e.to_string());
+                        let fast = fast_answer(question, database, ignored_apps, excluded_domains)?;
+                        let answer = format!(
+                            "⚠️ AI 模型调用失败（{reason}），已切换为本地统计模式。可稍后重试或到「设置 → AI 模型」检查配置。\n\n{fast}"
+                        );
                         let tool_labels = vec!["降级查询".to_string()];
                         emit_done(&event_tx, &answer, &[], &tool_labels).await?;
                         Ok(OrchestratorResult {
@@ -336,6 +344,22 @@ impl Orchestrator {
                 })
             }
         }
+    }
+}
+
+/// 把内部错误串归类成一句用户能理解的失败原因（不泄漏细节，细节进日志）。
+fn degrade_reason_summary(error: &str) -> &'static str {
+    let lower = error.to_lowercase();
+    if lower.contains("timeout") || lower.contains("timed out") || error.contains("超时") {
+        "请求超时"
+    } else if lower.contains("401") || lower.contains("unauthorized") || lower.contains("api key") {
+        "鉴权失败，请检查 API Key"
+    } else if lower.contains("429") || lower.contains("rate") {
+        "请求频率受限"
+    } else if lower.contains("connect") || lower.contains("dns") || lower.contains("network") {
+        "网络连接失败"
+    } else {
+        "服务暂不可用"
     }
 }
 
@@ -873,6 +897,7 @@ mod tests {
             &filters,
             &filters,
             None,
+            Default::default(),
             Some(tx),
         );
         let receive = async {
@@ -911,6 +936,7 @@ mod tests {
             &filters,
             &filters,
             None,
+            Default::default(),
             Some(tx),
         );
         let reject = async {
@@ -953,6 +979,7 @@ mod tests {
             &filters,
             &filters,
             None,
+            Default::default(),
             Some(tx),
         )
         .await

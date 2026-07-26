@@ -1,5 +1,6 @@
 //! Auto-extracted from the historical `commands.rs`. Behavior unchanged.
 
+use crate::secrets::SecureSaveExt;
 use crate::config::AvatarFollowupItem;
 use crate::error::AppError;
 #[cfg(target_os = "linux")]
@@ -116,7 +117,7 @@ pub async fn save_avatar_position(
 
     state.config.avatar_x = Some(x);
     state.config.avatar_y = Some(y);
-    state.config.save(&config_path)?;
+    state.config.save_secure(&config_path)?;
 
     Ok(())
 }
@@ -155,7 +156,7 @@ pub async fn persist_avatar_position(
 
     state.config.avatar_x = Some(position.x);
     state.config.avatar_y = Some(position.y);
-    state.config.save(&config_path)?;
+    state.config.save_secure(&config_path)?;
 
     Ok(true)
 }

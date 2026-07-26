@@ -1,3 +1,4 @@
+use crate::secrets::SecureSaveExt;
 use crate::bot_common::{
     build_device_list, handle_cmd, normalize_command, progress_text_for_command, DeviceEndpoint,
     NON_TEXT_REPLY, OUTPUT_DIVIDER,
@@ -8,6 +9,7 @@ use crate::AppState;
 use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 use std::sync::{Arc, Mutex};
+use subtle::ConstantTimeEq;
 use tokio::task::JoinHandle;
 
 #[derive(Deserialize)]
@@ -321,7 +323,8 @@ async fn run(
                                     }
 
                                     let reply = if let Some(text) = text {
-                                        log::info!("TG Bot 收到消息: {text}");
+                                        // 消息原文可能含敏感内容，降为 debug 级别
+                                        log::debug!("TG Bot 收到消息: {text}");
                                         if let Some(progress) = progress_text_for_command(&cmd) {
                                             send_chat_action(
                                                 &client,
@@ -458,6 +461,12 @@ fn normalize_bind_code(value: &str) -> String {
     value.trim().to_ascii_uppercase()
 }
 
+/// 常量时间比较绑定码，防时序侧信道（与飞书/本地 API token 校验基线一致）。
+/// 长度不同直接判不等，但不对内容做提前返回的逐字节比较。
+fn bind_code_matches(provided: &str, expected: &str) -> bool {
+    provided.as_bytes().ct_eq(expected.as_bytes()).into()
+}
+
 fn clear_bind_code(config: &mut AppConfig) {
     config.telegram_bot_bind_code = None;
     config.telegram_bot_bind_code_expires_at = None;
@@ -512,7 +521,7 @@ fn apply_bind_code_to_config(
             clear_bind_code(config);
             BindCodeApplyResult::Expired
         }
-        BindCodeStatus::Ready(expected_code) if expected_code != input_code => {
+        BindCodeStatus::Ready(expected_code) if !bind_code_matches(&input_code, &expected_code) => {
             BindCodeApplyResult::Invalid
         }
         BindCodeStatus::Ready(_) => {
@@ -579,7 +588,7 @@ fn handle_bind_command(
         }
         BindCodeApplyResult::Expired => {
             let config_path = state.config_path.clone();
-            if let Err(e) = next_config.save(&config_path) {
+            if let Err(e) = next_config.save_secure(&config_path) {
                 log::warn!("清理过期 Telegram Bot 绑定码失败: {e}");
             } else {
                 state.config = next_config;
@@ -589,7 +598,7 @@ fn handle_bind_command(
         BindCodeApplyResult::Invalid => BindCommandResult::reply(bind_invalid_reply(chat_id)),
         BindCodeApplyResult::Success => {
             let config_path = state.config_path.clone();
-            match next_config.save(&config_path) {
+            match next_config.save_secure(&config_path) {
                 Ok(_) => {
                     state.config = next_config;
                     BindCommandResult::success(bind_success_reply(chat_id), chat_id)

@@ -2,8 +2,11 @@
 
 use crate::config::{AiProvider, AiProviderConfig, ModelConfig};
 use crate::error::AppError;
+use crate::AppState;
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tauri::State;
 
 /// 模型测试结果
 #[derive(Serialize, Deserialize, Debug)]
@@ -18,46 +21,59 @@ pub(crate) fn is_text_model_available(model_config: &ModelConfig) -> bool {
     !model_config.endpoint.trim().is_empty() && !model_config.model.trim().is_empty()
 }
 
-/// 测试 AI 模型连接
-#[tauri::command]
-pub async fn test_ai_model(provider_config: AiProviderConfig) -> Result<ModelTestResult, AppError> {
-    let start = std::time::Instant::now();
+/// 判断主机名是否为本机/内网地址（Ollama 等本地部署允许走 http）。
+fn is_private_or_local_host(host: &str) -> bool {
+    let host = host.to_ascii_lowercase();
+    if host == "localhost" || host.ends_with(".localhost") {
+        return true;
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return match ip {
+            std::net::IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
+            std::net::IpAddr::V6(v6) => v6.is_loopback(),
+        };
+    }
+    false
+}
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .connect_timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| AppError::Unknown(e.to_string()))?;
-
-    let result = match provider_config.provider {
-        AiProvider::Ollama => test_ollama(&client, &provider_config).await,
-        AiProvider::Gemini => test_gemini(&client, &provider_config).await,
-        AiProvider::Claude => test_claude(&client, &provider_config).await,
-        // OpenAI 及兼容格式的供应商
-        _ => test_openai(&client, &provider_config).await,
+/// 校验模型端点：远程端点必须使用 https，明文 http 仅允许本机/内网地址
+/// （10.x / 192.168.x / 172.16-31.x / 127.0.0.1 / [::1] / localhost），
+/// 防止 API Key 与工作数据经明文链路发往远程服务。
+/// 空端点不校验（视为未配置）；非 http/https 前缀交由请求层报错。
+pub(crate) fn validate_model_endpoint(endpoint: &str) -> Result<(), AppError> {
+    let trimmed = endpoint.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("https://") {
+        return Ok(());
+    }
+    let Some(rest) = lower.strip_prefix("http://") else {
+        return Ok(());
     };
 
-    let elapsed = start.elapsed().as_millis() as u64;
+    // 提取主机名：截到 path/query/fragment 之前，剥离端口；IPv6 形如 [::1]:11434
+    let host_port = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = if let Some(inner) = host_port.strip_prefix('[') {
+        inner.split(']').next().unwrap_or("")
+    } else {
+        host_port.split(':').next().unwrap_or(host_port)
+    };
 
-    match result {
-        Ok(info) => Ok(ModelTestResult {
-            success: true,
-            message: "连接成功！模型可用。".to_string(),
-            response_time_ms: elapsed,
-            model_info: Some(info),
-        }),
-        Err(e) => Ok(ModelTestResult {
-            success: false,
-            message: format!("连接失败: {e}"),
-            response_time_ms: elapsed,
-            model_info: None,
-        }),
+    if is_private_or_local_host(host) {
+        return Ok(());
     }
+    Err(AppError::Config(
+        "远程模型端点必须使用 https（本机/内网地址除外）".to_string(),
+    ))
 }
+
 
 /// 测试模型连接（新版，使用 ModelConfig）
 #[tauri::command]
 pub async fn test_model(model_config: ModelConfig) -> Result<ModelTestResult, AppError> {
+    validate_model_endpoint(&model_config.endpoint)?;
     let start = std::time::Instant::now();
 
     let client = reqwest::Client::builder()
@@ -286,13 +302,15 @@ async fn test_gemini(
 ) -> Result<String, String> {
     let api_key = config.api_key.as_ref().ok_or("未配置 API Key")?;
 
+    // API Key 走请求头而非 URL query，避免泄漏到日志/代理记录
     let url = format!(
-        "{}/models/{}:generateContent?key={}",
-        config.endpoint, config.model, api_key
+        "{}/models/{}:generateContent",
+        config.endpoint, config.model
     );
 
     let response = client
         .post(&url)
+        .header("x-goog-api-key", api_key)
         .json(&serde_json::json!({
             "contents": [{"parts": [{"text": "Hello"}]}],
             "generationConfig": {"maxOutputTokens": 10}
@@ -515,32 +533,6 @@ async fn resolve_ollama_text_model_names(
     Ok(filtered_names)
 }
 
-#[tauri::command]
-pub async fn get_ollama_models(endpoint: String) -> Result<Vec<String>, AppError> {
-    let endpoint = endpoint.trim().trim_end_matches('/').to_string();
-    if endpoint.is_empty() {
-        return Err(AppError::Config("Ollama 地址不能为空".to_string()));
-    }
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()?;
-    let response = client
-        .get(format!("{endpoint}/api/tags"))
-        .send()
-        .await
-        .map_err(|error| AppError::Analysis(format!("无法连接到 Ollama 服务: {error}")))?;
-
-    if !response.status().is_success() {
-        return Err(AppError::Analysis(format!(
-            "Ollama 服务返回错误: {}",
-            response.status()
-        )));
-    }
-
-    let data: serde_json::Value = response.json().await?;
-    resolve_ollama_text_model_names(&client, &endpoint, &data).await
-}
 
 /// 从 OpenAI 兼容提供商获取模型列表
 async fn fetch_openai_compatible_models(
@@ -607,9 +599,11 @@ async fn fetch_gemini_models(
     endpoint: &str,
     api_key: &str,
 ) -> Result<Vec<String>, AppError> {
-    let url = format!("{endpoint}/models?key={api_key}");
+    // API Key 走请求头而非 URL query，避免泄漏到日志/代理记录
+    let url = format!("{endpoint}/models");
     let response = client
         .get(&url)
+        .header("x-goog-api-key", api_key)
         .send()
         .await
         .map_err(|e| AppError::Analysis(format!("无法连接到 Gemini 服务: {e}")))?;
@@ -751,6 +745,106 @@ pub async fn fetch_models(
 }
 
 /// 获取支持的 AI 提供商列表
+/// 测试助手联网搜索配置：按当前服务商发一次最小搜索请求。
+/// 不要求先启用总开关（用户通常想先测通再开启）。
+#[tauri::command]
+pub async fn test_assistant_search(
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<serde_json::Value, AppError> {
+    let (provider, api_key) = {
+        let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+        (
+            s.config.assistant_search_provider.clone(),
+            s.config
+                .assistant_search_api_key
+                .clone()
+                .unwrap_or_default(),
+        )
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(12))
+        .connect_timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|e| AppError::Unknown(format!("创建 HTTP 客户端失败: {e}")))?;
+
+    let started = std::time::Instant::now();
+    let count: usize = match provider.as_str() {
+        "duckduckgo" => {
+            // 免费方案实际请求 Bing：拿到结果页且包含结果标题即视为可用
+            let resp = client
+                .get("https://www.bing.com/search")
+                .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+                .query(&[("q", "connection test"), ("count", "3")])
+                .send()
+                .await
+                .map_err(|e| AppError::Analysis(format!("搜索请求失败: {e}")))?;
+            if !resp.status().is_success() {
+                return Err(AppError::Analysis(format!(
+                    "搜索服务返回 HTTP {}",
+                    resp.status()
+                )));
+            }
+            let html = resp
+                .text()
+                .await
+                .map_err(|e| AppError::Analysis(format!("搜索响应读取失败: {e}")))?;
+            if html.contains("<h2") { 1 } else { 0 }
+        }
+        "bocha" => {
+            if api_key.trim().is_empty() {
+                return Err(AppError::Config("请先填写博查 API Key".to_string()));
+            }
+            let resp: serde_json::Value = client
+                .post("https://api.bochaai.com/v1/web-search")
+                .header("Authorization", format!("Bearer {}", api_key.trim()))
+                .json(&serde_json::json!({ "query": "connection test", "count": 1 }))
+                .send()
+                .await
+                .map_err(|e| AppError::Analysis(format!("搜索请求失败: {e}")))?
+                .json()
+                .await
+                .map_err(|e| AppError::Analysis(format!("搜索结果解析失败: {e}")))?;
+            resp["data"]["webPages"]["value"]
+                .as_array()
+                .map(|a| a.len())
+                .unwrap_or(0)
+        }
+        _ => {
+            if api_key.trim().is_empty() {
+                return Err(AppError::Config("请先填写 Tavily API Key".to_string()));
+            }
+            let resp: serde_json::Value = client
+                .post("https://api.tavily.com/search")
+                .json(&serde_json::json!({
+                    "api_key": api_key.trim(),
+                    "query": "connection test",
+                    "max_results": 1
+                }))
+                .send()
+                .await
+                .map_err(|e| AppError::Analysis(format!("搜索请求失败: {e}")))?
+                .json()
+                .await
+                .map_err(|e| AppError::Analysis(format!("搜索结果解析失败: {e}")))?;
+            if let Some(err) = resp["error"].as_str() {
+                return Err(AppError::Analysis(format!("搜索服务返回错误: {err}")));
+            }
+            resp["results"].as_array().map(|a| a.len()).unwrap_or(0)
+        }
+    };
+
+    if count == 0 {
+        return Err(AppError::Analysis(
+            "搜索请求成功但未返回结果，请检查配置".to_string(),
+        ));
+    }
+    Ok(serde_json::json!({
+        "resultCount": count,
+        "latencyMs": started.elapsed().as_millis() as u64,
+    }))
+}
+
 #[tauri::command]
 pub async fn get_ai_providers() -> Result<Vec<serde_json::Value>, AppError> {
     Ok(vec![
@@ -836,6 +930,60 @@ pub async fn get_ai_providers() -> Result<Vec<serde_json::Value>, AppError> {
             "supports_vision": false,
         }),
         serde_json::json!({
+            "id": "openrouter",
+            "name": "OpenRouter",
+            "description": "多模型聚合网关，一个 Key 调用上百个模型",
+            "default_endpoint": "https://openrouter.ai/api/v1",
+            "default_model": "openrouter/auto",
+            "requires_api_key": true,
+            "supports_vision": false,
+        }),
+        serde_json::json!({
+            "id": "groq",
+            "name": "Groq",
+            "description": "超高速推理，兼容 OpenAI 格式",
+            "default_endpoint": "https://api.groq.com/openai/v1",
+            "default_model": "llama-3.3-70b-versatile",
+            "requires_api_key": true,
+            "supports_vision": false,
+        }),
+        serde_json::json!({
+            "id": "xai",
+            "name": "xAI Grok",
+            "description": "xAI 的 Grok 系列模型，兼容 OpenAI 格式",
+            "default_endpoint": "https://api.x.ai/v1",
+            "default_model": "grok-2-latest",
+            "requires_api_key": true,
+            "supports_vision": false,
+        }),
+        serde_json::json!({
+            "id": "mistral",
+            "name": "Mistral",
+            "description": "Mistral AI 系列模型，兼容 OpenAI 格式",
+            "default_endpoint": "https://api.mistral.ai/v1",
+            "default_model": "mistral-small-latest",
+            "requires_api_key": true,
+            "supports_vision": false,
+        }),
+        serde_json::json!({
+            "id": "lmstudio",
+            "name": "LM Studio (本地)",
+            "description": "本机运行的 LM Studio 服务，数据不出本机",
+            "default_endpoint": "http://localhost:1234/v1",
+            "default_model": "local-model",
+            "requires_api_key": false,
+            "supports_vision": false,
+        }),
+        serde_json::json!({
+            "id": "custom",
+            "name": "自定义接口",
+            "description": "任何 OpenAI 兼容接口，自行填写地址与模型",
+            "default_endpoint": "",
+            "default_model": "",
+            "requires_api_key": false,
+            "supports_vision": false,
+        }),
+        serde_json::json!({
             "id": "gemini",
             "name": "Google Gemini",
             "description": "Google 的 Gemini 系列模型",
@@ -865,6 +1013,23 @@ mod tests {
     #[test]
     fn openai兼容探测请求的输出上限不应低于十六() {
         assert_eq!(openai_connection_test_max_tokens(), 16);
+    }
+
+    #[test]
+    fn 模型端点应强制远程https仅放行本机内网http() {
+        assert!(validate_model_endpoint("https://api.openai.com/v1").is_ok());
+        assert!(validate_model_endpoint("").is_ok());
+        assert!(validate_model_endpoint("http://localhost:11434").is_ok());
+        assert!(validate_model_endpoint("http://127.0.0.1:11434").is_ok());
+        assert!(validate_model_endpoint("http://[::1]:11434").is_ok());
+        assert!(validate_model_endpoint("http://192.168.1.5:11434").is_ok());
+        assert!(validate_model_endpoint("http://10.1.2.3:8080/v1").is_ok());
+        assert!(validate_model_endpoint("http://172.31.0.1/v1").is_ok());
+
+        assert!(validate_model_endpoint("http://api.example.com/v1").is_err());
+        assert!(validate_model_endpoint("http://8.8.8.8/v1").is_err());
+        // 172.32.x 不属于私网段
+        assert!(validate_model_endpoint("http://172.32.0.1/v1").is_err());
     }
 
     #[test]

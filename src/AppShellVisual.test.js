@@ -122,12 +122,14 @@ test('主内容滚动条应从圆角裁剪边界内缩，避免顶部和底部�
 });
 
 test('浮层滚动条应使用轻量内嵌样式，避免下拉菜单出现厚重滚动槽', async () => {
-  const [appCssSource, reportSource] = await Promise.all([
+  // 载体变更：日报预设下拉已改为胶片集合（无浮层），
+  // 轻量浮层滚动样式的在用载体改为助手历史会话抽屉。
+  const [appCssSource, askSource] = await Promise.all([
     readFile(new URL('./app.css', import.meta.url), 'utf8'),
-    readFile(new URL('./routes/report/Report.svelte', import.meta.url), 'utf8'),
+    readFile(new URL('./routes/ask/Ask.svelte', import.meta.url), 'utf8'),
   ]);
 
-  assert.match(reportSource, /app-floating-scroll/);
+  assert.match(askSource, /app-floating-scroll/);
   assert.match(appCssSource, /\.app-floating-scroll\s*\{[^}]*scrollbar-width:\s*thin/);
   assert.match(appCssSource, /\.app-floating-scroll::-webkit-scrollbar\s*\{[^}]*width:\s*0\.5rem/);
   assert.match(appCssSource, /\.app-floating-scroll::-webkit-scrollbar-track\s*\{[^}]*margin-block:\s*0\.35rem/);

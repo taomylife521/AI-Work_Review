@@ -64,7 +64,9 @@ test('概览页面在浏览器预览环境缺少 Tauri event metadata 时不应�
   assert.match(source, /async function safeListen\(eventName, handler\)/);
   assert.match(source, /return await listen\(eventName, handler\);/);
   assert.match(source, /return \(\) => \{\};/);
-  assert.match(source, /unlisten = await safeListen\('screenshot-taken'/);
+  assert.match(source, /await safeListen\('screenshot-taken'/);
+  // 销毁后注册完成的监听器应被立即释放，避免泄漏
+  assert.match(source, /if \(componentDestroyed\)/);
 });
 
 test('概览页面应支持今日、指定日期与本周三种时间视角切换', async () => {

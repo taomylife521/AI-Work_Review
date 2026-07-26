@@ -1,5 +1,6 @@
 <script>
   import { confirmDialog, resolveConfirm } from '$lib/stores/confirm.js';
+  import { trapFocus } from '$lib/utils/focusTrap.js';
 
   const toneMap = {
     info: {
@@ -31,6 +32,7 @@
 {#if dialogState}
   <div class="fixed inset-0 z-[200] flex items-center justify-center px-4 py-6 bg-slate-950/48 backdrop-blur-md animate-fadeIn">
     <div
+      use:trapFocus
       class="w-full max-w-md rounded-3xl border border-slate-200 dark:border-[#30363d] bg-white dark:bg-[#161b22] shadow-2xl shadow-slate-950/24 dark:shadow-black/50 p-6"
       role="dialog"
       aria-modal="true"

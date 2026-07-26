@@ -11,6 +11,52 @@
   $: currentLocale = $locale;
   let aiModes = [];
   let localizedProviders = [];
+  // 三入口分区：模型配置 / 助手联网 / 语义记忆（点击切换，互不打扰）
+  let aiSection = 'model';
+
+  // ══════════ 语义记忆索引管理（查询走助手，管理入口在这里）══════════
+  let semanticStats = { totalChunks: 0, embeddedChunks: 0 };
+  let semanticIndexing = false;
+  let semanticIndexText = '';
+  let semanticError = '';
+  let semanticDestroyed = false;
+  $: semanticPending = Math.max(0, (semanticStats.totalChunks || 0) - (semanticStats.embeddedChunks || 0));
+
+  async function refreshSemanticStats() {
+    if (!config?.memory_semantic_enabled) return;
+    try {
+      semanticStats = await invoke('semantic_memory_status');
+    } catch (e) {
+      console.warn('读取语义记忆状态失败:', e);
+    }
+  }
+
+  async function startSemanticIndexing() {
+    if (semanticIndexing) return;
+    semanticIndexing = true;
+    semanticError = '';
+    try {
+      // 前端驱动的渐进式索引：循环调用直到活动游标追平且无待嵌入块
+      for (let round = 0; round < 500; round += 1) {
+        if (semanticDestroyed) return;
+        const progress = await invoke('index_semantic_memory');
+        semanticStats = progress.stats;
+        semanticIndexText = t('memoryPage.indexProgress', {
+          embedded: progress.stats.embeddedChunks,
+          total: progress.stats.totalChunks,
+        });
+        if (progress.activitiesDone && progress.pendingEmbeddings === 0) {
+          semanticIndexText = t('memoryPage.indexDone', { total: progress.stats.embeddedChunks });
+          break;
+        }
+      }
+    } catch (e) {
+      semanticError = String(e);
+    } finally {
+      semanticIndexing = false;
+      refreshSemanticStats();
+    }
+  }
 
   // 日报生成模式：基础模板 vs AI 增强
   const aiModeConfigs = [
@@ -76,6 +122,36 @@
       'zh-CN': { name: '火山引擎 豆包', description: '字节跳动大模型' },
       en: { name: 'Doubao', description: 'Models from Volcano Engine / ByteDance' },
       'zh-TW': { name: '火山引擎 豆包', description: '字節跳動大模型' },
+    },
+    openrouter: {
+      'zh-CN': { name: 'OpenRouter', description: '多模型聚合网关，一个 Key 调百家模型' },
+      en: { name: 'OpenRouter', description: 'One key for hundreds of models' },
+      'zh-TW': { name: 'OpenRouter', description: '多模型聚合閘道，一個 Key 調百家模型' },
+    },
+    groq: {
+      'zh-CN': { name: 'Groq', description: '超高速推理' },
+      en: { name: 'Groq', description: 'Ultra-fast inference' },
+      'zh-TW': { name: 'Groq', description: '超高速推理' },
+    },
+    xai: {
+      'zh-CN': { name: 'xAI Grok', description: 'xAI 的 Grok 系列模型' },
+      en: { name: 'xAI Grok', description: 'Grok models by xAI' },
+      'zh-TW': { name: 'xAI Grok', description: 'xAI 的 Grok 系列模型' },
+    },
+    mistral: {
+      'zh-CN': { name: 'Mistral', description: 'Mistral AI 系列模型' },
+      en: { name: 'Mistral', description: 'Models by Mistral AI' },
+      'zh-TW': { name: 'Mistral', description: 'Mistral AI 系列模型' },
+    },
+    lmstudio: {
+      'zh-CN': { name: 'LM Studio (本地)', description: '本机运行，数据不出电脑' },
+      en: { name: 'LM Studio (Local)', description: 'Runs locally, data stays on device' },
+      'zh-TW': { name: 'LM Studio（本機）', description: '本機執行，資料不出電腦' },
+    },
+    custom: {
+      'zh-CN': { name: '自定义接口', description: '任何 OpenAI 兼容接口' },
+      en: { name: 'Custom endpoint', description: 'Any OpenAI-compatible API' },
+      'zh-TW': { name: '自訂介面', description: '任何 OpenAI 相容介面' },
     },
     minimax: {
       'zh-CN': { name: '稀宇科技 MiniMax', description: 'MiniMax 文本模型' },
@@ -168,6 +244,80 @@
       api_key: config.text_model.api_key || ''
     };
     configInitialized = true;
+  }
+
+  // 服务商品牌色（卡片网格头像底色，参考各家官方主色的近似值）
+  const PROVIDER_BRAND = {
+    ollama: '#111827',
+    openai: '#10a37f',
+    siliconflow: '#6e4ff6',
+    deepseek: '#4d6bfe',
+    qwen: '#615ced',
+    zhipu: '#2f6bff',
+    moonshot: '#0f172a',
+    doubao: '#3370ff',
+    minimax: '#ff4d6a',
+    gemini: '#4285f4',
+    claude: '#d97757',
+    openrouter: '#6467f2',
+    groq: '#f55036',
+    xai: '#000000',
+    mistral: '#fa520f',
+    lmstudio: '#4338ca',
+    custom: '#64748b',
+  };
+
+  /** 品牌图标加载失败 → 回退到字母块（图标需运行 scripts/fetch-provider-icons.mjs 落盘） */
+  let providerIconFailed = {};
+
+  // ══════════ 联网搜索 / 嵌入模型 连通性测试 ══════════
+  let webTestStatus = null; // null | 'testing' | 'success' | 'error'
+  let webTestMessage = '';
+  let memTestStatus = null;
+  let memTestMessage = '';
+
+  async function testWebSearch() {
+    if (webTestStatus === 'testing') return;
+    webTestStatus = 'testing';
+    webTestMessage = '';
+    try {
+      const result = await invoke('test_assistant_search');
+      webTestStatus = 'success';
+      webTestMessage = t('settingsAI.webAccess.testOk', {
+        count: result?.resultCount ?? 1,
+        ms: result?.latencyMs ?? 0,
+      });
+    } catch (e) {
+      webTestStatus = 'error';
+      webTestMessage = String(e);
+    }
+  }
+
+  async function testEmbedding() {
+    if (memTestStatus === 'testing') return;
+    memTestStatus = 'testing';
+    memTestMessage = '';
+    try {
+      const result = await invoke('test_embedding_model');
+      memTestStatus = 'success';
+      memTestMessage = t('settingsAI.semanticMemory.testOk', {
+        dim: result?.dimension ?? 0,
+        ms: result?.latencyMs ?? 0,
+      });
+    } catch (e) {
+      memTestStatus = 'error';
+      memTestMessage = String(e);
+    }
+  }
+
+  function providerInitial(id) {
+    return String(id || '?').charAt(0).toUpperCase();
+  }
+
+  /** 卡片点击入口：复用 handleProviderChange 的缓存/默认值/状态重置逻辑。 */
+  function selectProvider(providerId) {
+    if ((config.text_model?.provider || 'ollama') === providerId) return;
+    handleProviderChange({ target: { value: providerId } });
   }
 
   function handleProviderChange(e) {
@@ -331,6 +481,7 @@
   }
 
   onMount(async () => {
+    refreshSemanticStats();
     await new Promise(r => setTimeout(r, 200));
 
     const currentHash = getConfigHash();
@@ -351,6 +502,7 @@
   });
 
   onDestroy(() => {
+    semanticDestroyed = true;
     unsubscribe();
   });
 </script>
@@ -386,23 +538,96 @@
   </div>
 </fieldset>
 
-<!-- AI 模型配置 -->
+<!-- AI 能力配置：三入口分区 -->
 {#if isAiMode}
-  <div class="settings-block pt-3 border-t border-slate-200 dark:border-[#30363d]">
-    <!-- 提供商 -->
-    <div>
-      <label for="ai-provider" class="settings-label mb-1.5">{t('settingsAI.provider')}</label>
-      <select
-        id="ai-provider"
-        value={config.text_model?.provider || 'ollama'}
-        on:change={handleProviderChange}
-        class="control-input"
-      >
-        {#each localizedProviders as provider}
-          <option value={provider.id}>{provider.name}</option>
-        {/each}
-      </select>
+  <div class="pt-3 border-t border-slate-200 dark:border-[#30363d]">
+    <div class="mb-3 grid grid-cols-3 gap-2">
+      {#each [
+        { id: 'model', label: t('settingsAI.sectionModel'), on: isTextModelConfigured },
+        { id: 'web', label: t('settingsAI.sectionWeb'), on: Boolean(config.assistant_web_access_enabled) },
+        { id: 'memory', label: t('settingsAI.sectionMemory'), on: Boolean(config.memory_semantic_enabled) },
+      ] as section (section.id)}
+        <button
+          type="button"
+          class="segment-btn rounded-lg border px-3 py-2 text-sm flex items-center justify-center gap-1.5
+            {aiSection === section.id ? 'settings-segment-success' : 'settings-segment-idle'}"
+          on:click={() => (aiSection = section.id)}
+        >
+          <span class="inline-block h-1.5 w-1.5 rounded-full {section.on ? 'bg-emerald-400' : 'bg-slate-300 dark:bg-[#484f58]'}"></span>
+          <span>{section.label}</span>
+        </button>
+      {/each}
     </div>
+
+    {#if aiSection === 'model'}
+    <div class="settings-block">
+    <!-- 提供商：品牌卡片网格（主流 AI 客户端形态） -->
+    <div>
+      <span class="settings-label mb-1.5 block">{t('settingsAI.provider')}</span>
+      <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        {#each localizedProviders as provider (provider.id)}
+          {@const active = (config.text_model?.provider || 'ollama') === provider.id}
+          <button
+            type="button"
+            class="flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-start transition
+              {active
+                ? 'border-indigo-400 bg-indigo-50/70 ring-1 ring-indigo-300/60 dark:border-indigo-500/70 dark:bg-indigo-950/30 dark:ring-indigo-500/40'
+                : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50 dark:border-[#30363d] dark:bg-[#161b22] dark:hover:border-[#484f58] dark:hover:bg-[#21262d]'}"
+            on:click={() => selectProvider(provider.id)}
+          >
+            {#if !providerIconFailed[provider.id]}
+              <img
+                src={`/icons/providers/${provider.id}.svg`}
+                alt=""
+                class="h-8 w-8 shrink-0 rounded-lg bg-white object-contain p-1 ring-1 ring-slate-200/70 dark:ring-[#30363d]"
+                on:error={() => (providerIconFailed = { ...providerIconFailed, [provider.id]: true })}
+              />
+            {:else}
+              <span
+                class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[13px] font-bold text-white"
+                style="background: {PROVIDER_BRAND[provider.id] || '#64748b'}"
+              >
+                {providerInitial(provider.id)}
+              </span>
+            {/if}
+            <span class="min-w-0 flex-1">
+              <span class="block truncate text-[13px] font-medium text-slate-800 dark:text-[#e6edf3]">{provider.name}</span>
+              {#if active}
+                <span class="block text-[10px] leading-tight text-indigo-500 dark:text-indigo-400">{t('settingsAI.providerActive')}</span>
+              {/if}
+            </span>
+          </button>
+        {/each}
+      </div>
+    </div>
+
+    <!-- 连接配置卡：字段分组 + 常驻状态徽标 + 紧凑测试入口 -->
+    <div class="overflow-hidden rounded-xl border border-slate-200 dark:border-[#30363d]">
+      <div class="flex items-center justify-between gap-3 border-b border-slate-200/80 bg-slate-50/70 px-3.5 py-2.5 dark:border-[#30363d]/80 dark:bg-[#161b22]/70">
+        <div class="flex min-w-0 items-center gap-2">
+          <span class="text-[13px] font-semibold text-slate-700 dark:text-[#c9d1d9]">{t('settingsAI.connectionTitle')}</span>
+          {#if textTestStatus === 'success'}
+            <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">✓ {t('settingsAI.statusConnected')}</span>
+          {:else if textTestStatus === 'error'}
+            <span class="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-500 dark:bg-rose-950/40 dark:text-rose-400">✗ {t('settingsAI.statusFailed')}</span>
+          {:else if textTestStatus === 'testing'}
+            <span class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-[#21262d] dark:text-[#7d8590]">
+              <span class="h-2 w-2 animate-spin rounded-full border border-current border-t-transparent"></span>
+              {t('settingsAI.testing')}
+            </span>
+          {:else}
+            <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-400 dark:bg-[#21262d] dark:text-[#636c76]">{t('settingsAI.statusUntested')}</span>
+          {/if}
+        </div>
+        <button
+          on:click={testTextModel}
+          disabled={textTestStatus === 'testing' || !hasTextModelConfig}
+          class="shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition settings-action-secondary disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {t('settingsAI.testConnection')}
+        </button>
+      </div>
+      <div class="settings-block p-3.5">
 
     <!-- API 地址 -->
     <div>
@@ -417,8 +642,8 @@
       />
     </div>
 
-    <!-- API 密钥 -->
-    {#if requiresApiKey}
+    <!-- API 密钥（自定义/LM Studio 也展示：部分自建端点需要 Key，可留空） -->
+    {#if requiresApiKey || config.text_model?.provider === 'custom' || config.text_model?.provider === 'lmstudio'}
       <div>
         <label for="ai-apikey" class="settings-label mb-1.5">{t('settingsAI.apiKey')}</label>
         <div class="relative">
@@ -527,52 +752,41 @@
       {/if}
     </div>
 
-    <!-- 测试连接 -->
-    <button
-      on:click={testTextModel}
-      disabled={textTestStatus === 'testing' || !hasTextModelConfig}
-      class="w-full min-h-10 px-4 py-2 text-sm font-medium rounded-lg leading-none transition-all
-             {textTestStatus === 'success'
-               ? 'settings-action-success'
-               : textTestStatus === 'error'
-                 ? 'settings-action-danger'
-                 : 'settings-action-secondary'}
-             disabled:opacity-40 disabled:cursor-not-allowed"
-    >
-      {#if textTestStatus === 'testing'}
-        <span class="inline-flex items-center gap-1.5">
-          <span class="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></span>
-          {t('settingsAI.testing')}
-        </span>
-      {:else if textTestStatus === 'success'}
-        ✓ {t('settingsAI.testSuccess')}
-      {:else if textTestStatus === 'error'}
-        ✗ {t('settingsAI.testFailed')}
-      {:else}
-        {t('settingsAI.testConnection')}
-      {/if}
-    </button>
-
-    <!-- 测试结果 -->
+    <!-- 测试结果详情 -->
     {#if textTestMessage}
       <div class="px-3 py-2 rounded-lg text-xs {textTestStatus === 'success' ? 'settings-tone-success' : 'settings-tone-danger'}">
         {textTestMessage}
       </div>
     {/if}
 
+      </div>
+    </div>
+
+    </div>
+    {:else if aiSection === 'web'}
     <!-- 助手联网能力：默认关闭；开启后助手可读网页/查天气，配搜索 Key 后可联网搜索 -->
-    <div class="pt-3 border-t border-slate-200 dark:border-[#30363d] space-y-3">
+    <div class="space-y-3">
       <label class="flex items-center justify-between gap-3 cursor-pointer">
         <div class="min-w-0">
-          <span class="settings-text text-sm">{t('settingsAI.webAccess.title')}</span>
+          <span class="settings-text text-sm inline-flex items-center gap-2">
+            {t('settingsAI.webAccess.title')}
+            <span class="rounded-full px-1.5 py-0.5 text-[10px] font-medium {config.assistant_web_access_enabled ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400' : 'bg-slate-100 text-slate-400 dark:bg-[#21262d] dark:text-[#636c76]'}">
+              {config.assistant_web_access_enabled ? t('settingsAI.statusEnabled') : t('settingsAI.statusDisabled')}
+            </span>
+          </span>
           <p class="settings-muted mt-0.5">{t('settingsAI.webAccess.hint')}</p>
         </div>
-        <input
-          type="checkbox"
-          bind:checked={config.assistant_web_access_enabled}
-          on:change={handleChange}
-          class="accent-primary-500 shrink-0"
-        />
+        <button
+          type="button"
+          class="switch-track shrink-0 {config.assistant_web_access_enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-[#484f58]'}"
+          aria-pressed={config.assistant_web_access_enabled}
+          on:click={() => {
+            config.assistant_web_access_enabled = !config.assistant_web_access_enabled;
+            handleChange();
+          }}
+        >
+          <span class="switch-thumb {config.assistant_web_access_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
+        </button>
       </label>
 
       {#if config.assistant_web_access_enabled}
@@ -585,7 +799,7 @@
               on:change={handleChange}
               class="control-input"
             >
-              <option value="duckduckgo">DuckDuckGo（{t('settingsAI.webAccess.providerFree')}）</option>
+              <option value="duckduckgo">{t('settingsAI.webAccess.providerFreeBing')}</option>
               <option value="tavily">Tavily</option>
               <option value="bocha">{t('settingsAI.webAccess.providerBocha')}</option>
             </select>
@@ -604,9 +818,159 @@
             {/if}
           </div>
           <p class="settings-muted">{config.assistant_search_provider === 'duckduckgo' ? t('settingsAI.webAccess.duckDuckGoHint') : t('settingsAI.webAccess.keyHint')}</p>
+
+          <!-- 联网搜索连通性测试 -->
+          <div class="flex items-center gap-2 pt-1">
+            <button
+              type="button"
+              class="rounded-lg px-3 py-1.5 text-xs font-medium transition settings-action-secondary disabled:cursor-not-allowed disabled:opacity-40"
+              on:click={testWebSearch}
+              disabled={webTestStatus === 'testing'}
+            >
+              {#if webTestStatus === 'testing'}
+                <span class="inline-flex items-center gap-1.5"><span class="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"></span>{t('settingsAI.testing')}</span>
+              {:else}
+                {t('settingsAI.webAccess.testSearch')}
+              {/if}
+            </button>
+            {#if webTestMessage}
+              <span class="min-w-0 flex-1 truncate text-xs {webTestStatus === 'success' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500 dark:text-rose-400'}" title={webTestMessage}>{webTestMessage}</span>
+            {/if}
+          </div>
         </div>
       {/if}
     </div>
+    {:else if aiSection === 'memory'}
+    <!-- 语义记忆（屏幕级数字记忆）：默认关闭；本地 Ollama 数据不出机，云端接口明示出网 -->
+    <div class="space-y-3">
+      <!-- 开启前后对比示例 + 模型类型说明 -->
+      <div class="space-y-1.5 rounded-lg bg-slate-50 px-3 py-2.5 dark:bg-[#161b22]/60">
+        <p class="settings-muted"><span class="font-medium text-slate-600 dark:text-[#adbac7]">{t('settingsAI.semanticMemory.offLabel')}</span>{t('settingsAI.semanticMemory.offExample')}</p>
+        <p class="settings-muted"><span class="font-medium text-slate-600 dark:text-[#adbac7]">{t('settingsAI.semanticMemory.onLabel')}</span>{t('settingsAI.semanticMemory.onExample')}</p>
+        <p class="settings-muted">{t('settingsAI.semanticMemory.modelTypeNote')}</p>
+      </div>
+      <label class="flex items-center justify-between gap-3 cursor-pointer">
+        <div class="min-w-0">
+          <span class="settings-text text-sm inline-flex items-center gap-2">
+            {t('settingsAI.semanticMemory.title')}
+            <span class="rounded-full px-1.5 py-0.5 text-[10px] font-medium {config.memory_semantic_enabled ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400' : 'bg-slate-100 text-slate-400 dark:bg-[#21262d] dark:text-[#636c76]'}">
+              {config.memory_semantic_enabled ? t('settingsAI.statusEnabled') : t('settingsAI.statusDisabled')}
+            </span>
+          </span>
+          <p class="settings-muted mt-0.5">{t('settingsAI.semanticMemory.hint')}</p>
+        </div>
+        <button
+          type="button"
+          class="switch-track shrink-0 {config.memory_semantic_enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-[#484f58]'}"
+          aria-pressed={config.memory_semantic_enabled}
+          on:click={() => {
+            config.memory_semantic_enabled = !config.memory_semantic_enabled;
+            handleChange();
+          }}
+        >
+          <span class="switch-thumb {config.memory_semantic_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
+        </button>
+      </label>
+
+      {#if config.memory_semantic_enabled}
+        <div class="space-y-2">
+          <div class="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
+            <label class="settings-muted text-xs" for="embedding-provider">{t('settingsAI.semanticMemory.provider')}</label>
+            <select
+              id="embedding-provider"
+              bind:value={config.embedding_provider}
+              on:change={handleChange}
+              class="control-input"
+            >
+              <option value="ollama">{t('settingsAI.semanticMemory.providerOllama')}</option>
+              <option value="openai">{t('settingsAI.semanticMemory.providerOpenai')}</option>
+            </select>
+
+            <label class="settings-muted text-xs" for="embedding-endpoint">{t('settingsAI.semanticMemory.endpoint')}</label>
+            <input
+              id="embedding-endpoint"
+              type="text"
+              bind:value={config.embedding_endpoint}
+              on:change={handleChange}
+              class="control-input"
+              placeholder={config.embedding_provider === 'ollama' ? 'http://localhost:11434' : 'https://api.siliconflow.cn'}
+              autocomplete="off"
+            />
+
+            <label class="settings-muted text-xs" for="embedding-model">{t('settingsAI.semanticMemory.model')}</label>
+            <input
+              id="embedding-model"
+              type="text"
+              bind:value={config.embedding_model}
+              on:change={handleChange}
+              class="control-input"
+              placeholder={config.embedding_provider === 'ollama' ? 'nomic-embed-text' : 'BAAI/bge-m3'}
+              autocomplete="off"
+            />
+
+            {#if config.embedding_provider === 'openai'}
+            <label class="settings-muted text-xs" for="embedding-key">{t('settingsAI.semanticMemory.apiKey')}</label>
+            <input
+              id="embedding-key"
+              type="password"
+              bind:value={config.embedding_api_key}
+              on:change={handleChange}
+              class="control-input"
+              placeholder="sk-..."
+              autocomplete="off"
+            />
+            {/if}
+          </div>
+          <p class="settings-muted">{config.embedding_provider === 'ollama' ? t('settingsAI.semanticMemory.ollamaHint') : t('settingsAI.semanticMemory.cloudHint')}</p>
+
+          <!-- 嵌入模型连通性测试 -->
+          <div class="flex items-center gap-2 pt-1">
+            <button
+              type="button"
+              class="rounded-lg px-3 py-1.5 text-xs font-medium transition settings-action-secondary disabled:cursor-not-allowed disabled:opacity-40"
+              on:click={testEmbedding}
+              disabled={memTestStatus === 'testing' || !config.embedding_endpoint || !config.embedding_model}
+            >
+              {#if memTestStatus === 'testing'}
+                <span class="inline-flex items-center gap-1.5"><span class="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"></span>{t('settingsAI.testing')}</span>
+              {:else}
+                {t('settingsAI.semanticMemory.testEmbedding')}
+              {/if}
+            </button>
+            {#if memTestMessage}
+              <span class="min-w-0 flex-1 truncate text-xs {memTestStatus === 'success' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500 dark:text-rose-400'}" title={memTestMessage}>{memTestMessage}</span>
+            {/if}
+          </div>
+
+          <!-- 索引管理：查询直接问助手（semantic_search 工具），这里只管建索引 -->
+          <div class="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1 text-xs text-slate-400 dark:text-[#636c76]">
+            <span>{t('memoryPage.indexStatus', { embedded: semanticStats.embeddedChunks ?? 0, total: semanticStats.totalChunks ?? 0 })}</span>
+            <button
+              type="button"
+              class="text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 dark:hover:text-indigo-300 disabled:opacity-50"
+              on:click={startSemanticIndexing}
+              disabled={semanticIndexing}
+            >
+              {#if semanticIndexing}
+                {semanticIndexText || t('memoryPage.indexing')}
+              {:else if semanticPending > 0 || (semanticStats.totalChunks ?? 0) === 0}
+                {t('memoryPage.startIndex')}
+              {:else}
+                {t('memoryPage.incrementalIndex')}
+              {/if}
+            </button>
+            {#if !semanticIndexing && semanticIndexText}
+              <span>{semanticIndexText}</span>
+            {/if}
+          </div>
+          {#if semanticError}
+            <p class="text-xs text-rose-500 dark:text-rose-400 break-words">{semanticError}</p>
+          {/if}
+          <p class="settings-muted">{t('settingsAI.semanticMemory.askHint')}</p>
+        </div>
+      {/if}
+    </div>
+    {/if}
   </div>
 {:else}
   <div class="pt-3 border-t border-slate-200 dark:border-[#30363d]">

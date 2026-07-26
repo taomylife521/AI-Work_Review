@@ -20,6 +20,8 @@
     translateCategoryLabel,
     translateSemanticCategoryLabel,
   } from '$lib/i18n/index.js';
+  import { formatUserError } from '$lib/utils/errorDisplay.js';
+  import { trapFocus } from '$lib/utils/focusTrap.js';
   import { resolveAppIconSrc } from '../lib/utils/appVisuals.js';
   import { formatBrowserUrlForDisplay } from '../lib/utils/browserUrl.js';
   import { semanticCategoryStore } from '../lib/stores/categories.js';
@@ -115,6 +117,7 @@
   let loading = true;
   let error = null;
   let unlisten = null;
+  let componentDestroyed = false;
   let currentTime = new Date();
   let overviewMode = 'today';
   let selectedDateFrom = getLocalDateString();
@@ -124,6 +127,7 @@
   let handleActivityAdded;
   let handleVisibilityChange;
   let overviewRefreshPromise = null;
+  let overviewRefreshKey = '';
   let overviewRequestId = 0;
   let lastCheckDate = currentTime.getDate();
   let appUsageViewMode = 'row';
@@ -544,16 +548,20 @@
   }
 
   async function refreshOverviewStats({ silent = false } = {}) {
-    if (overviewRefreshPromise) {
+    const params = {
+      mode: overviewMode,
+      dateFrom: overviewMode === 'date' ? selectedDateFrom : undefined,
+      dateTo: overviewMode === 'date' ? selectedDateTo : undefined,
+    };
+    const paramsKey = `${params.mode}|${params.dateFrom || ''}|${params.dateTo || ''}`;
+    // 仅当在途请求与当前模式/日期完全一致时才复用，避免切换模式后拿到旧模式数据
+    if (overviewRefreshPromise && overviewRefreshKey === paramsKey) {
       return overviewRefreshPromise;
     }
 
     const requestId = ++overviewRequestId;
-    overviewRefreshPromise = invoke('get_overview_stats', {
-      mode: overviewMode,
-      dateFrom: overviewMode === 'date' ? selectedDateFrom : undefined,
-      dateTo: overviewMode === 'date' ? selectedDateTo : undefined,
-    })
+    overviewRefreshKey = paramsKey;
+    overviewRefreshPromise = invoke('get_overview_stats', params)
       .then((newStats) => {
         if (requestId !== overviewRequestId) {
           return;
@@ -565,15 +573,20 @@
         error = null;
       })
       .catch((e) => {
+        if (requestId !== overviewRequestId) {
+          return;
+        }
         if (silent) {
           console.warn('后台刷新失败:', e);
           return;
         }
-        error = e.toString();
+        error = formatUserError(e, t('common.loadFailedRetry'));
       })
       .finally(() => {
-        overviewRefreshPromise = null;
-        loading = false;
+        if (requestId === overviewRequestId) {
+          overviewRefreshPromise = null;
+          loading = false;
+        }
       });
 
     return overviewRefreshPromise;
@@ -599,7 +612,7 @@
       loading = false;
       
       // 如果缓存有效且非强制刷新，直接返回
-      if (!forceRefresh && cache.isValid(cacheData.overview)) {
+      if (!forceRefresh && cache.isValid(cacheData, 'overview')) {
         return;
       }
 
@@ -622,13 +635,17 @@
     loadHourlyBreakdown();
     loadStats();
     if (!document.hidden) {
-      clockInterval = setInterval(() => { 
-        currentTime = new Date();
+      clockInterval = setInterval(() => {
+        // 界面只展示到分钟：仅分钟变化时才更新状态，避免每秒触发整页响应式重算
+        const now = new Date();
+        if (now.getMinutes() !== currentTime.getMinutes() || now.getHours() !== currentTime.getHours()) {
+          currentTime = now;
+        }
         if (!shouldAutoRefreshOverview()) {
           return;
         }
         // 跨天检测
-        const newDate = currentTime.getDate();
+        const newDate = now.getDate();
         if (newDate !== lastCheckDate) {
           lastCheckDate = newDate;
           loadStats(true);
@@ -651,11 +668,14 @@
         currentTime = new Date();
         lastCheckDate = currentTime.getDate();
         clockInterval = setInterval(() => {
-          currentTime = new Date();
+          const now = new Date();
+          if (now.getMinutes() !== currentTime.getMinutes() || now.getHours() !== currentTime.getHours()) {
+            currentTime = now;
+          }
           if (!shouldAutoRefreshOverview()) {
             return;
           }
-          const newDate = currentTime.getDate();
+          const newDate = now.getDate();
           if (newDate !== lastCheckDate) {
             lastCheckDate = newDate;
             loadStats(true);
@@ -672,11 +692,17 @@
     document.addEventListener('visibilitychange', handleVisibilityChange);
     
     // 监听 Tauri 截屏事件（后备）
-    unlisten = await safeListen('screenshot-taken', () => {
+    const un = await safeListen('screenshot-taken', () => {
       if (!document.hidden && shouldAutoRefreshOverview()) {
         loadStats(true);
       }
     });
+    // 组件可能在 await 期间已销毁，避免监听器泄漏
+    if (componentDestroyed) {
+      if (un) un();
+    } else {
+      unlisten = un;
+    }
     
     // 监听全局 activity-added 事件（实时同步）
     handleActivityAdded = () => {
@@ -696,6 +722,7 @@
   }
 
   onDestroy(() => {
+    componentDestroyed = true;
     if (unlisten) unlisten();
     if (clockInterval) clearInterval(clockInterval);
     if (refreshInterval) clearInterval(refreshInterval);
@@ -704,6 +731,18 @@
     unsubIcons();
   });
 </script>
+
+<svelte:window
+  on:keydown={(e) => {
+    if (e.key !== 'Escape') return;
+    // 弹窗 Escape 统一在 window 层处理（遮罩不再依赖自身聚焦才能响应）
+    if (pendingDeleteSemanticCategory) {
+      cancelDeleteSemanticCategory();
+    } else if (selectedBrowser) {
+      selectedBrowser = null;
+    }
+  }}
+/>
 
 <div class="page-shell" data-locale={currentLocale}>
   <!-- 页面标题 -->
@@ -1004,28 +1043,26 @@
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
   class="fixed inset-0 z-[140] bg-slate-950/52 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn"
-  role="button"
-  tabindex="0"
+  role="presentation"
   on:click|self={() => selectedBrowser = null}
-  on:keydown={(e) => e.key === 'Escape' && (selectedBrowser = null)}
 >
-  <div class="card overview-browser-dialog p-0 max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col" role="dialog" aria-modal="true">
+  <div use:trapFocus class="card overview-browser-dialog p-0 max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col" role="dialog" aria-modal="true">
     <!-- 弹窗头部 -->
       <div class="flex items-center justify-between p-5 border-b border-slate-200 dark:border-[#30363d] bg-gradient-to-r from-slate-50 to-white dark:from-[#21262d] dark:to-[#161b22]">
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-3 min-w-0">
         {#if getAppIconSrc(selectedBrowser.browser_name, selectedBrowser.executable_path)}
-          <img src={getAppIconSrc(selectedBrowser.browser_name, selectedBrowser.executable_path)} alt="" class="w-8 h-8 rounded-lg object-cover" />
+          <img src={getAppIconSrc(selectedBrowser.browser_name, selectedBrowser.executable_path)} alt="" class="w-8 h-8 rounded-lg object-cover shrink-0" />
         {:else}
-          <span class="text-3xl">🌐</span>
+          <span class="text-3xl shrink-0">🌐</span>
         {/if}
-        <div>
-          <h3 class="text-lg font-bold text-slate-900 dark:text-[#e6edf3]">{selectedBrowser.browser_name}</h3>
-          <p class="text-sm text-slate-500 dark:text-[#7d8590]">
+        <div class="min-w-0">
+          <h3 class="text-lg font-bold text-slate-900 dark:text-[#e6edf3] truncate">{selectedBrowser.browser_name}</h3>
+          <p class="text-sm text-slate-500 dark:text-[#7d8590] truncate">
             {formatDuration(selectedBrowser.duration)} · {t('overview.sitesCount', { count: selectedBrowser.domains.length })} · {t('overview.pagesCount', { count: selectedBrowser.domains.reduce((sum, d) => sum + d.urls.length, 0) })}
           </p>
         </div>
       </div>
-      <button class="p-2 hover:bg-slate-100 dark:hover:bg-[#30363d] rounded-lg transition-colors" on:click={() => selectedBrowser = null}>
+      <button class="p-2 hover:bg-slate-100 dark:hover:bg-[#30363d] rounded-lg transition-colors shrink-0" on:click={() => selectedBrowser = null}>
         <svg class="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
         </svg>
@@ -1098,13 +1135,13 @@
                     {#if !cat.is_system}
                       <button
                         on:click|stopPropagation={() => startRenameSemanticCategory(cat)}
-                        class="absolute -top-1.5 left-1/2 -translate-x-1/2 w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs leading-none opacity-0 group-hover:opacity-100 hover:bg-blue-600 transition-opacity shadow-sm dark:shadow-none"
+                        class="absolute -top-1.5 left-1/2 -translate-x-1/2 w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs leading-none opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-blue-600 transition-opacity shadow-sm dark:shadow-none"
                         disabled={semanticCategorySaving}
                         title={t('overview.renameSemanticCategory')}
                       >✎</button>
                       <button
                         on:click|stopPropagation={() => pendingDeleteSemanticCategory = { key: cat.key, name: getSemanticCategoryDisplayName(cat) }}
-                        class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center text-xs leading-none opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-opacity shadow-sm dark:shadow-none"
+                        class="absolute -top-1.5 -end-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center text-xs leading-none opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-red-600 transition-opacity shadow-sm dark:shadow-none"
                         disabled={semanticCategorySaving}
                         title={t('overview.deleteSemanticCategory')}
                       >×</button>
@@ -1258,13 +1295,11 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div
-    class="fixed inset-0 z-[200] bg-slate-950/40 backdrop-blur-sm flex items-center justify-center animate-fadeIn"
-    role="button"
-    tabindex="0"
+    class="fixed inset-0 z-[190] bg-slate-950/40 backdrop-blur-sm flex items-center justify-center animate-fadeIn"
+    role="presentation"
     on:click|self={cancelDeleteSemanticCategory}
-    on:keydown={(e) => e.key === 'Escape' && cancelDeleteSemanticCategory()}
   >
-    <div class="w-full max-w-sm rounded-2xl border border-slate-200 dark:border-[#30363d] bg-white dark:bg-[#161b22] shadow-2xl p-6 mx-4">
+    <div use:trapFocus role="dialog" aria-modal="true" class="w-full max-w-sm rounded-2xl border border-slate-200 dark:border-[#30363d] bg-white dark:bg-[#161b22] shadow-2xl p-6 mx-4">
       <h3 class="text-base font-semibold text-slate-900 dark:text-[#e6edf3]">{t('overview.deleteSemanticCategoryTitle')}</h3>
       <p class="mt-2 text-sm text-slate-700 dark:text-[#7d8590] leading-relaxed">
         {t('overview.deleteSemanticCategoryMessage', { category: pendingDeleteSemanticCategory.name })}

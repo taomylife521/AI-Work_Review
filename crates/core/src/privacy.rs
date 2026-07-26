@@ -140,9 +140,10 @@ impl PrivacyFilter {
 }
 
 /// 判断 app 是否命中忽略名单。匹配前先经过 `normalize_display_app_name` 归一化，
-/// 再做大小写不敏感的子串/包含匹配。归一化是防御性的：即便上游传入的是裸可执行名
-/// （如 `chrome.exe`），也能与配置里以显示名（如 `Google Chrome`）登记的规则对齐。
-/// 对于上游已经归一化好的显示名，归一化是幂等的，行为保持一致。
+/// 再做大小写不敏感的单向子串匹配（应用名包含忽略条目才算命中；不做反向包含，
+/// 避免忽略 "Google Chrome Canary" 时误伤 "Google Chrome"）。归一化是防御性的：
+/// 即便上游传入的是裸可执行名（如 `chrome.exe`），也能与配置里以显示名
+/// （如 `Google Chrome`）登记的规则对齐。忽略名单在收集时已统一为小写。
 pub fn matches_ignored_app(app_name: &str, ignored_apps: &[String]) -> bool {
     let app_lower = crate::categorize::normalize_display_app_name(app_name)
         .to_lowercase()
@@ -154,7 +155,7 @@ pub fn matches_ignored_app(app_name: &str, ignored_apps: &[String]) -> bool {
 
     ignored_apps
         .iter()
-        .any(|ignored| app_lower.contains(ignored) || ignored.contains(&app_lower))
+        .any(|ignored| !ignored.is_empty() && app_lower.contains(ignored))
 }
 
 /// 判断目标 URL/域名是否命中排除域名名单。先提取域名，再做精确后缀匹配或
@@ -325,6 +326,19 @@ mod tests {
             filter.check_privacy("Chrome", "GitHub"),
             PrivacyAction::Record
         );
+    }
+
+    #[test]
+    fn 忽略名单应只做单向小写子串匹配() {
+        let ignored = vec!["google chrome".to_string()];
+        assert!(matches_ignored_app("Google Chrome", &ignored));
+        // 裸可执行名先归一化成显示名后命中
+        assert!(matches_ignored_app("chrome", &ignored));
+        // 不再做反向包含：忽略 Canary 不应误伤 Google Chrome
+        let canary_only = vec!["google chrome canary".to_string()];
+        assert!(!matches_ignored_app("Google Chrome", &canary_only));
+        // 空条目不应导致忽略一切
+        assert!(!matches_ignored_app("VS Code", &[String::new()]));
     }
 
     #[test]

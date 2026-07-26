@@ -499,8 +499,10 @@ fn sanitize_result(result: &mut Value) {
 fn sanitize_value(value: &mut Value) {
     match value {
         Value::Object(obj) => {
-            // 完全删除：截图路径、OCR 提取文本（屏幕内容可能含密码/私信等）
+            // 完全删除：截图路径/URL、可执行文件路径、OCR 提取文本（屏幕内容可能含密码/私信等）
             obj.remove("screenshot_path");
+            obj.remove("screenshot_url");
+            obj.remove("executable_path");
             obj.remove("ocr_text");
             // 截断：窗口标题常包含具体文件名/网页标题，截前 40 字符保留 app 上下文即可
             if let Some(title) = obj.get_mut("window_title") {
@@ -522,6 +524,21 @@ fn sanitize_value(value: &mut Value) {
         }
         _ => {}
     }
+}
+
+/// URL query 参数百分号编码：保留字母数字与 - _ . ~，其余字节转 %XX。
+/// mcp-server 未依赖 urlencoding crate，这里用极简实现覆盖 query 场景。
+fn encode_query_param(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 fn load_daily_stats_for_mcp(
@@ -565,6 +582,9 @@ fn filter_activities_by_privacy(activities: Vec<Activity>, config: &AppConfig) -
             if action == PrivacyAction::Anonymize {
                 activity.window_title = "[内容已脱敏]".to_string();
                 activity.browser_url = None;
+                // 可执行文件路径与远程截图 URL 同样可能暴露脱敏应用的信息，一并清空
+                activity.executable_path = None;
+                activity.screenshot_url = None;
             }
             activity
         })
@@ -682,7 +702,12 @@ fn handle_tool_call(name: &str, args: &Value, state: &Arc<Mutex<AppState>>) -> V
             // 失败时回退本地模板。
             if s.config.ai_mode == work_review_core::config::AiMode::Summary {
                 let locale_code = locale.as_code();
-                let path = format!("/v1/reports/generate?date={date}&locale={locale_code}");
+                // date 来自外部工具入参，必须做 query 编码，防止注入额外参数
+                let path = format!(
+                    "/v1/reports/generate?date={}&locale={}",
+                    encode_query_param(date),
+                    encode_query_param(locale_code)
+                );
                 if let Some(resp) = try_localhost_get(&s.config, &s.localhost_api_token_path, &path)
                 {
                     if let Some(content) = resp.get("content").and_then(|c| c.as_str()) {
@@ -829,6 +854,8 @@ fn handle_tool_call(name: &str, args: &Value, state: &Arc<Mutex<AppState>>) -> V
                 ai_endpoint: Some(s.config.text_model.endpoint.clone()),
                 ai_api_key: s.config.text_model.api_key.clone(),
                 ai_model: Some(s.config.text_model.model.clone()),
+                // MCP 客户端属外部调用方，默认拒绝含 Script 步骤的技能
+                allow_script_skills: false,
             };
 
             let result = s.skills.execute(&skill_id, &ctx);

@@ -58,12 +58,14 @@ async fn upload_s3(
     let date_stamp = now.format("%Y%m%d").to_string();
 
     let payload_hash = hex::encode(Sha256::digest(file_bytes));
+    // Content-Type 按扩展名推导；同时参与 SigV4 签名，签名与实际请求头必须一致
+    let content_type = content_type_for_extension(&object_key);
 
     let canonical_uri = format!("/{}/{}", &config.bucket, url_encode_path(&object_key));
     let canonical_querystring = "";
 
     let canonical_headers = format!(
-        "content-type:image/jpeg\nhost:{host_with_port}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amz_date}\n"
+        "content-type:{content_type}\nhost:{host_with_port}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amz_date}\n"
     );
     let signed_headers = "content-type;host;x-amz-content-sha256;x-amz-date";
 
@@ -89,7 +91,7 @@ async fn upload_s3(
 
     let resp = client
         .put(&url)
-        .header("Content-Type", "image/jpeg")
+        .header("Content-Type", content_type)
         .header("Host", &host_with_port)
         .header("x-amz-content-sha256", &payload_hash)
         .header("x-amz-date", &amz_date)
@@ -102,10 +104,10 @@ async fn upload_s3(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
+        let body_preview = body.chars().take(500).collect::<String>();
         return Err(AppError::Screenshot(format!(
             "S3 PUT 返回 {}: {}",
-            status,
-            &body[..body.len().min(500)]
+            status, body_preview
         )));
     }
 
@@ -130,6 +132,16 @@ fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
     mac.finalize().into_bytes().to_vec()
 }
 
+/// 依据文件扩展名推导 Content-Type（截图上传目前只涉及 jpg/png）。
+fn content_type_for_extension(path: &str) -> &'static str {
+    let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        _ => "application/octet-stream",
+    }
+}
+
 fn url_encode_path(path: &str) -> String {
     path.split('/')
         .map(|segment| {
@@ -151,12 +163,57 @@ fn url_encode_path(path: &str) -> String {
 
 // --- WebDAV ---
 
+/// 判断主机名是否为本机/内网地址（NAS 等本地部署允许走 http）。
+fn is_private_or_local_host(host: &str) -> bool {
+    let host = host.to_ascii_lowercase();
+    if host == "localhost" || host.ends_with(".localhost") {
+        return true;
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return match ip {
+            std::net::IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
+            std::net::IpAddr::V6(v6) => v6.is_loopback(),
+        };
+    }
+    false
+}
+
+/// WebDAV 端点安全校验：远程端点必须使用 https，明文 http 仅允许本机/内网地址
+/// （与模型端点策略一致），防止截图与凭据经明文链路发往远程服务器。
+fn ensure_webdav_endpoint_allowed(url: &str) -> Result<()> {
+    let lower = url.trim().to_ascii_lowercase();
+    if lower.starts_with("https://") {
+        return Ok(());
+    }
+    let Some(rest) = lower.strip_prefix("http://") else {
+        return Err(AppError::Config(
+            "WebDAV 地址必须以 http:// 或 https:// 开头".to_string(),
+        ));
+    };
+
+    // 提取主机名：截到 path/query/fragment 之前，剥离端口；IPv6 形如 [::1]:5005
+    let host_port = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = if let Some(inner) = host_port.strip_prefix('[') {
+        inner.split(']').next().unwrap_or("")
+    } else {
+        host_port.split(':').next().unwrap_or(host_port)
+    };
+
+    if is_private_or_local_host(host) {
+        return Ok(());
+    }
+    Err(AppError::Config(
+        "远程 WebDAV 端点必须使用 https（本机/内网地址除外）".to_string(),
+    ))
+}
+
 async fn upload_webdav(
     client: &Client,
     config: &WebDavConfig,
     file_bytes: &[u8],
     relative_path: &str,
 ) -> Result<String> {
+    ensure_webdav_endpoint_allowed(&config.url)?;
     let base = config.url.trim_end_matches('/');
     let object_path = remote_object_path(&config.path_prefix, relative_path);
 
@@ -182,10 +239,10 @@ async fn upload_webdav(
     let status = resp.status().as_u16();
     if !resp.status().is_success() && status != 201 && status != 204 {
         let body = resp.text().await.unwrap_or_default();
+        let body_preview = body.chars().take(500).collect::<String>();
         return Err(AppError::Screenshot(format!(
             "WebDAV PUT 返回 {}: {}",
-            status,
-            &body[..body.len().min(500)]
+            status, body_preview
         )));
     }
 
@@ -255,7 +312,40 @@ fn public_url_or_fallback(base_url: Option<&str>, object_path: &str, fallback: &
 
 #[cfg(test)]
 mod tests {
-    use super::{public_url_or_fallback, remote_object_path};
+    use super::{
+        content_type_for_extension, ensure_webdav_endpoint_allowed, public_url_or_fallback,
+        remote_object_path,
+    };
+
+    #[test]
+    fn 内容类型应按扩展名推导() {
+        assert_eq!(content_type_for_extension("a/b/shot.jpg"), "image/jpeg");
+        assert_eq!(content_type_for_extension("shot.JPEG"), "image/jpeg");
+        assert_eq!(content_type_for_extension("shot.png"), "image/png");
+        assert_eq!(
+            content_type_for_extension("shot.webp"),
+            "application/octet-stream"
+        );
+        assert_eq!(
+            content_type_for_extension("noext"),
+            "application/octet-stream"
+        );
+    }
+
+    #[test]
+    fn webdav端点应拒绝远程明文http仅放行本机内网() {
+        assert!(ensure_webdav_endpoint_allowed("https://dav.example.com/dav").is_ok());
+        assert!(ensure_webdav_endpoint_allowed("http://localhost:5005/dav").is_ok());
+        assert!(ensure_webdav_endpoint_allowed("http://127.0.0.1/dav").is_ok());
+        assert!(ensure_webdav_endpoint_allowed("http://[::1]:5005/dav").is_ok());
+        assert!(ensure_webdav_endpoint_allowed("http://192.168.1.20:5005/dav").is_ok());
+        assert!(ensure_webdav_endpoint_allowed("http://10.0.0.8/dav").is_ok());
+        assert!(ensure_webdav_endpoint_allowed("http://172.16.0.2/dav").is_ok());
+
+        assert!(ensure_webdav_endpoint_allowed("http://dav.example.com/dav").is_err());
+        assert!(ensure_webdav_endpoint_allowed("http://8.8.8.8/dav").is_err());
+        assert!(ensure_webdav_endpoint_allowed("ftp://dav.example.com").is_err());
+    }
 
     #[test]
     fn 远程对象路径应包含路径前缀并统一分隔符() {

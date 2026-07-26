@@ -33,11 +33,13 @@ mod privacy;
 mod remote_upload;
 mod screen_lock;
 mod screenshot;
+mod secrets;
 mod storage;
 mod telegram_bot;
 mod wecom_bot;
 mod work_intelligence;
 
+use crate::secrets::SecureSaveExt;
 use config::{config_backup_path, AppConfig, AvatarFollowupItem, ConfigLoadStatus};
 use database::Database;
 use once_cell::sync::OnceCell;
@@ -2231,16 +2233,21 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
         let input_idle = input_idle_seconds >= idle_threshold_minutes * 60;
 
         let was_input_idle = is_currently_idle;
-        // 每 30 秒打印一次空闲状态日志（避免刷屏）
-        if last_idle_log_time.elapsed() >= Duration::from_secs(30) {
-            if input_idle != is_currently_idle {
-                if input_idle {
+        // 每 30 秒打印一次空闲状态日志（避免刷屏）；状态切换本身每轮都要处理
+        let should_log_idle = last_idle_log_time.elapsed() >= Duration::from_secs(30);
+        if input_idle != is_currently_idle {
+            if input_idle {
+                if should_log_idle {
                     log::info!("⏸️  键鼠超时，等待截图确认空闲状态...");
-                } else {
-                    log::info!("▶️  检测到用户活动，恢复正常记录");
-                    idle_detector.reset();
                 }
+            } else {
+                if should_log_idle {
+                    log::info!("▶️  检测到用户活动，恢复正常记录");
+                }
+                idle_detector.reset();
             }
+        }
+        if should_log_idle {
             last_idle_log_time = std::time::Instant::now();
         }
         is_currently_idle = input_idle;
@@ -2691,24 +2698,35 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                             };
 
                             if should_ocr {
-                                let ocr_service = ocr::OcrService::new(&data_dir_clone);
-                                if let Ok(Some(ocr_result)) =
-                                    ocr_service.extract_text(&ocr_input_path)
-                                {
-                                    if !ocr_result.text.is_empty() {
-                                        let filtered_text =
-                                            ocr::filter_sensitive_text(&ocr_result.text);
-                                        if let Ok(state_guard) = state_clone.lock() {
-                                            let _ = state_guard.database.update_activity_ocr(
-                                                latest_id,
-                                                Some(filtered_text),
-                                            );
-                                            log::info!(
-                                                "OCR 完成(合并): 活动 {} 识别到 {} 个字符",
-                                                latest_id,
-                                                ocr_result.text.len()
-                                            );
+                                // OCR 是阻塞调用，放入 spawn_blocking 避免阻塞异步运行时
+                                let data_dir_for_ocr = data_dir_clone.clone();
+                                let ocr_source_path = ocr_input_path.clone();
+                                let ocr_outcome = tokio::task::spawn_blocking(move || {
+                                    let ocr_service = ocr::OcrService::new(&data_dir_for_ocr);
+                                    ocr_service.extract_text(&ocr_source_path)
+                                })
+                                .await;
+                                match ocr_outcome {
+                                    Ok(Ok(Some(ocr_result))) => {
+                                        if !ocr_result.text.is_empty() {
+                                            let filtered_text =
+                                                ocr::filter_sensitive_text(&ocr_result.text);
+                                            if let Ok(state_guard) = state_clone.lock() {
+                                                let _ = state_guard.database.update_activity_ocr(
+                                                    latest_id,
+                                                    Some(filtered_text),
+                                                );
+                                                log::info!(
+                                                    "OCR 完成(合并): 活动 {} 识别到 {} 个字符",
+                                                    latest_id,
+                                                    ocr_result.text.len()
+                                                );
+                                            }
                                         }
+                                    }
+                                    Ok(_) => {}
+                                    Err(e) => {
+                                        log::warn!("OCR 后台任务执行失败(合并): {e}");
                                     }
                                 }
                             }
@@ -2870,28 +2888,43 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                                             tokio::time::sleep(tokio::time::Duration::from_secs(1))
                                                 .await;
 
-                                            let ocr_service = ocr::OcrService::new(&data_dir_clone);
+                                            // OCR 是阻塞调用，放入 spawn_blocking 避免阻塞异步运行时
+                                            let data_dir_for_ocr = data_dir_clone.clone();
+                                            let ocr_source_path = ocr_input_path.clone();
+                                            let ocr_outcome =
+                                                tokio::task::spawn_blocking(move || {
+                                                    let ocr_service =
+                                                        ocr::OcrService::new(&data_dir_for_ocr);
+                                                    ocr_service.extract_text(&ocr_source_path)
+                                                })
+                                                .await;
 
-                                            if let Ok(Some(ocr_result)) =
-                                                ocr_service.extract_text(&ocr_input_path)
-                                            {
-                                                if !ocr_result.text.is_empty() {
-                                                    let filtered_text = ocr::filter_sensitive_text(
-                                                        &ocr_result.text,
-                                                    );
-                                                    if let Ok(state_guard) = state_clone.lock() {
-                                                        let _ = state_guard
-                                                            .database
-                                                            .update_activity_ocr(
-                                                                activity_id,
-                                                                Some(filtered_text),
+                                            match ocr_outcome {
+                                                Ok(Ok(Some(ocr_result))) => {
+                                                    if !ocr_result.text.is_empty() {
+                                                        let filtered_text =
+                                                            ocr::filter_sensitive_text(
+                                                                &ocr_result.text,
                                                             );
-                                                        log::info!(
+                                                        if let Ok(state_guard) = state_clone.lock()
+                                                        {
+                                                            let _ = state_guard
+                                                                .database
+                                                                .update_activity_ocr(
+                                                                    activity_id,
+                                                                    Some(filtered_text),
+                                                                );
+                                                            log::info!(
                                                         "OCR 完成(新建): 活动 {} 识别到 {} 个字符",
                                                         activity_id,
                                                         ocr_result.text.len()
                                                     );
+                                                        }
                                                     }
+                                                }
+                                                Ok(_) => {}
+                                                Err(e) => {
+                                                    log::warn!("OCR 后台任务执行失败(新建): {e}");
                                                 }
                                             }
 
@@ -3382,11 +3415,14 @@ async fn main() {
     #[allow(unused_mut)]
     let mut config = load_result.config;
 
+    // 密钥保险柜：占位符注水为真实值;旧明文顺带迁移进系统钥匙串
+    secrets::hydrate_config(&mut config);
+
     // 迁移旧版 excluded_apps → app_rules
     if config.privacy.migrate_legacy_excluded_apps() {
         log::info!("已迁移旧版 excluded_apps 到 app_rules");
         if config_load_status.allows_automatic_save() {
-            if let Err(e) = config.save(&config_path) {
+            if let Err(e) = config.save_secure(&config_path) {
                 log::warn!("保存迁移后的配置失败: {e}");
             }
         }
@@ -3422,7 +3458,7 @@ async fn main() {
         }
         config.last_app_version = Some(current_version);
         if config_load_status.allows_automatic_save() {
-            if let Err(e) = config.save(&config_path) {
+            if let Err(e) = config.save_secure(&config_path) {
                 log::warn!("保存版本信息失败: {e}");
             }
         }
@@ -3453,7 +3489,7 @@ async fn main() {
             if config.macos_screen_capture_permission_prompted != already_prompted
                 && config_load_status.allows_automatic_save()
             {
-                if let Err(e) = config.save(&config_path) {
+                if let Err(e) = config.save_secure(&config_path) {
                     log::warn!("保存 macOS 录屏权限提示状态失败: {e}");
                 }
             }
@@ -3900,8 +3936,6 @@ async fn main() {
             commands::save_update_settings,
             commands::should_check_updates,
             commands::update_last_check_time,
-            commands::start_recording,
-            commands::stop_recording,
             commands::pause_recording,
             commands::resume_recording,
             commands::get_recording_state,
@@ -3923,18 +3957,13 @@ async fn main() {
             commands::get_screenshot_thumbnail,
             commands::get_screenshot_full,
             commands::test_remote_storage,
-            commands::take_screenshot,
-            commands::test_ai_model,
             commands::test_model,
             commands::get_ai_providers,
-            commands::get_ollama_models,
             commands::fetch_models,
             commands::get_running_apps,
             commands::get_recent_apps,
-            commands::get_app_category_overview,
             commands::set_app_category_rule,
             commands::set_domain_semantic_rule,
-            commands::reclassify_app_history,
             commands::get_categories,
             commands::save_custom_category,
             commands::delete_custom_category,
@@ -3944,30 +3973,27 @@ async fn main() {
             commands::get_storage_stats,
             commands::get_hourly_summaries,
             commands::get_activity,
-            commands::search_memory,
-            commands::ask_memory,
             commands::chat_work_assistant,
-            commands::get_work_sessions,
-            commands::recognize_work_intents,
-            commands::get_insights,
-            commands::feedback_insight,
+            commands::cancel_assistant_request,
+            commands::confirm_assistant_action,
+            commands::list_assistant_conversations,
+            commands::create_assistant_conversation,
+            commands::get_assistant_messages,
+            commands::append_assistant_message,
+            commands::delete_assistant_conversation,
+            commands::index_semantic_memory,
+            commands::semantic_memory_status,
+            commands::test_embedding_model,
+            commands::test_assistant_search,
             commands::synthesize_insights,
-            commands::generate_weekly_review,
-            commands::extract_todo_items,
             commands::clear_old_activities,
             set_app_locale,
             commands::delete_activity,
             commands::delete_activities_by_date,
             commands::delete_activities_by_range,
             commands::delete_activities_by_app,
-            commands::get_ocr_log,
-            commands::is_screen_locked,
             commands::check_permissions,
             commands::open_permission_settings,
-            commands::is_work_time,
-            commands::check_ocr_available,
-            commands::run_ocr,
-            commands::get_ocr_install_guide,
             commands::set_dock_visibility,
             commands::get_app_icon,
             commands::save_background_image,

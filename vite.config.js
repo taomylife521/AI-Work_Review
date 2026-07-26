@@ -1,22 +1,9 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import path from 'path';
-import fs from 'fs';
-
-function excludeLive2dSdk() {
-  return {
-    name: 'exclude-live2d-sdk',
-    closeBundle() {
-      const sdkDir = path.resolve(__dirname, 'dist/js/CubismSdkForWeb-5-r.5');
-      if (fs.existsSync(sdkDir)) {
-        fs.rmSync(sdkDir, { recursive: true, force: true });
-      }
-    },
-  };
-}
 
 export default defineConfig({
-  plugins: [svelte(), excludeLive2dSdk()],
+  plugins: [svelte()],
   clearScreen: false,
   server: {
     host: '127.0.0.1',

@@ -185,10 +185,20 @@ pub async fn handle_dingtalk_callback(
         .send()
         .await
     {
-        Ok(_) => DingtalkResponse::json(
+        Ok(resp) if resp.status().is_success() => DingtalkResponse::json(
             200,
             &status_payload("ok", "replied", Some("已通过 sessionWebhook 回复")),
         ),
+        Ok(resp) => {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            let body_preview = body.chars().take(500).collect::<String>();
+            log::warn!("钉钉 sessionWebhook 回复失败 (HTTP {status}): {body_preview}");
+            DingtalkResponse::error(
+                500,
+                format!("failed to send reply via sessionWebhook: HTTP {status}"),
+            )
+        }
         Err(e) => {
             DingtalkResponse::error(500, format!("failed to send reply via sessionWebhook: {e}"))
         }

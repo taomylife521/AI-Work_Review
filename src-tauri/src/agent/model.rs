@@ -9,7 +9,52 @@ use crate::config::{AiProvider, ModelConfig};
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
+
+/// 非流式共享 HTTP 客户端（整体 60s / 连接 10s 超时）。
+/// 进程内复用连接池，避免每次模型调用都重建客户端与 TLS 连接。
+static CHAT_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+/// 流式共享 HTTP 客户端：只限连接超时，读取由逐块 idle + 总时长双护栏控制。
+static STREAM_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn chat_client() -> Result<&'static reqwest::Client, AppError> {
+    if let Some(client) = CHAT_CLIENT.get() {
+        return Ok(client);
+    }
+    let built = reqwest::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .connect_timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| AppError::Unknown(e.to_string()))?;
+    Ok(CHAT_CLIENT.get_or_init(|| built))
+}
+
+fn stream_client() -> Result<&'static reqwest::Client, AppError> {
+    if let Some(client) = STREAM_CLIENT.get() {
+        return Ok(client);
+    }
+    let built = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| AppError::Unknown(e.to_string()))?;
+    Ok(STREAM_CLIENT.get_or_init(|| built))
+}
+
+/// 非流式请求发送：命中 429/5xx 时等待 2 秒重试一次（流式路径不重试）。
+async fn send_with_retry(request: reqwest::RequestBuilder) -> Result<reqwest::Response, AppError> {
+    let retry = request.try_clone();
+    let response = request.send().await?;
+    let status = response.status();
+    if status.as_u16() == 429 || status.is_server_error() {
+        if let Some(retry_request) = retry {
+            log::warn!("模型请求返回 {status}，2 秒后重试一次");
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            return Ok(retry_request.send().await?);
+        }
+    }
+    Ok(response)
+}
 
 // ══════════════════════════════════════════════════════════
 // 第一部分：统一的消息格式
@@ -127,11 +172,7 @@ pub async fn chat_with_tools(
     messages: &[Message],
     tools: &[Value],
 ) -> Result<LlmResponse, AppError> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(60))
-        .connect_timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| AppError::Unknown(e.to_string()))?;
+    let client = chat_client()?;
 
     // 构造完整的 messages 数组：system + 用户对话历史
     let mut full_messages = vec![json!({
@@ -144,10 +185,10 @@ pub async fn chat_with_tools(
 
     // 根据提供商分发
     match model_config.provider {
-        AiProvider::Ollama => chat_ollama(&client, model_config, &full_messages, tools).await,
-        AiProvider::Claude => chat_claude(&client, model_config, &full_messages, tools).await,
-        AiProvider::Gemini => chat_gemini(&client, model_config, &full_messages, tools).await,
-        _ => chat_openai_compatible(&client, model_config, &full_messages, tools).await,
+        AiProvider::Ollama => chat_ollama(client, model_config, &full_messages, tools).await,
+        AiProvider::Claude => chat_claude(client, model_config, &full_messages, tools).await,
+        AiProvider::Gemini => chat_gemini(client, model_config, &full_messages, tools).await,
+        _ => chat_openai_compatible(client, model_config, &full_messages, tools).await,
     }
 }
 
@@ -190,7 +231,7 @@ async fn chat_openai_compatible(
         }
     }
 
-    let response = request.send().await?;
+    let response = send_with_retry(request).await?;
     if !response.status().is_success() {
         let error_text = response.text().await.unwrap_or_default();
         return Err(AppError::Analysis(format!("LLM 调用失败: {error_text}")));
@@ -225,7 +266,7 @@ async fn chat_ollama(
         body["tools"] = json!(tools);
     }
 
-    let response = client.post(&url).json(&body).send().await?;
+    let response = send_with_retry(client.post(&url).json(&body)).await?;
     if !response.status().is_success() {
         return Err(AppError::Analysis(format!(
             "Ollama 调用失败: {}",
@@ -345,14 +386,15 @@ async fn chat_claude(
         body["tools"] = json!(claude_tools);
     }
 
-    let response = client
-        .post(&url)
-        .header("anthropic-version", "2023-06-01")
-        .header("content-type", "application/json")
-        .header("x-api-key", api_key)
-        .json(&body)
-        .send()
-        .await?;
+    let response = send_with_retry(
+        client
+            .post(&url)
+            .header("anthropic-version", "2023-06-01")
+            .header("content-type", "application/json")
+            .header("x-api-key", api_key)
+            .json(&body),
+    )
+    .await?;
 
     if !response.status().is_success() {
         let error_text = response.text().await.unwrap_or_default();
@@ -475,12 +517,13 @@ async fn chat_gemini(
 
     let body = build_gemini_request_body(messages, tools);
 
-    let response = client
-        .post(&url)
-        .header("x-goog-api-key", api_key)
-        .json(&body)
-        .send()
-        .await?;
+    let response = send_with_retry(
+        client
+            .post(&url)
+            .header("x-goog-api-key", api_key)
+            .json(&body),
+    )
+    .await?;
     if !response.status().is_success() {
         let error_text = response.text().await.unwrap_or_default();
         return Err(AppError::Analysis(format!(
@@ -673,10 +716,7 @@ pub async fn chat_with_tools_streaming(
     on_text: OnTextDelta<'_>,
 ) -> Result<LlmResponse, AppError> {
     // 流式客户端：只限制连接超时，读取超时由逐块 idle 超时控制。
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| AppError::Unknown(e.to_string()))?;
+    let client = stream_client()?;
 
     let mut full_messages = vec![json!({
         "role": "system",
@@ -688,16 +728,16 @@ pub async fn chat_with_tools_streaming(
 
     let streamed = match model_config.provider {
         AiProvider::Ollama => {
-            chat_ollama_streaming(&client, model_config, &full_messages, tools, on_text).await
+            chat_ollama_streaming(client, model_config, &full_messages, tools, on_text).await
         }
         AiProvider::Claude => {
-            chat_claude_streaming(&client, model_config, &full_messages, tools, on_text).await
+            chat_claude_streaming(client, model_config, &full_messages, tools, on_text).await
         }
         AiProvider::Gemini => {
-            chat_gemini_streaming(&client, model_config, &full_messages, tools, on_text).await
+            chat_gemini_streaming(client, model_config, &full_messages, tools, on_text).await
         }
         _ => {
-            chat_openai_compatible_streaming(&client, model_config, &full_messages, tools, on_text)
+            chat_openai_compatible_streaming(client, model_config, &full_messages, tools, on_text)
                 .await
         }
     };

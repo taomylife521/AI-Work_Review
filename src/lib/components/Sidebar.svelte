@@ -128,7 +128,7 @@
               <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-slate-300 dark:bg-[#484f58]"></span>
             {/if}
           </span>
-          <span class="text-[12px] font-semibold tracking-[0.08em] text-slate-500 dark:text-[#7d8590]">
+          <span class="text-xs font-semibold tracking-[0.08em] text-slate-500 dark:text-[#7d8590]">
             {translate('sidebar.recordingStatus')}
           </span>
         </div>
@@ -157,6 +157,10 @@
                   ? 'sidebar-nav-item-active'
                   : 'sidebar-nav-item-idle'}">
 
+              {#if activeStates[item.path]}
+                <!-- 当前页指示条：三套 ui-style 各有专属样式（app.css .sidebar-nav-rail） -->
+                <span class="sidebar-nav-rail" aria-hidden="true"></span>
+              {/if}
               <div class="sidebar-nav-main">
                 <!-- SVG 图标 -->
                 <div class="sidebar-nav-icon {activeStates[item.path] ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400 group-hover:text-slate-500 dark:group-hover:text-slate-400'}">

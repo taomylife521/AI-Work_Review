@@ -493,12 +493,58 @@ pub async fn set_report_block_preference(
     Ok(())
 }
 
+/// 校验规范化后的导出目录路径组件是否安全（纯函数，便于测试）：
+/// - 任何组件不得以 '.' 开头（.ssh/.config/.config/autostart 等隐藏目录一并覆盖）
+/// - 拒绝 Library/LaunchAgents、Library/LaunchDaemons 等自启动敏感目录
+fn ensure_export_dir_components_safe(canonical: &Path) -> Result<(), AppError> {
+    let components: Vec<String> = canonical
+        .components()
+        .filter_map(|c| match c {
+            std::path::Component::Normal(name) => Some(name.to_string_lossy().to_string()),
+            _ => None,
+        })
+        .collect();
+
+    if components.iter().any(|name| name.starts_with('.')) {
+        return Err(AppError::Config(
+            "导出目录不能位于以 . 开头的隐藏目录内（如 .ssh、.config）".to_string(),
+        ));
+    }
+
+    for pair in components.windows(2) {
+        let parent = pair[0].to_ascii_lowercase();
+        let child = pair[1].to_ascii_lowercase();
+        if parent == "library" && (child == "launchagents" || child == "launchdaemons") {
+            return Err(AppError::Config(
+                "导出目录位于系统自启动目录，已拒绝写入".to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// 校验日报导出目录：必须是已存在的真实目录，且不落在隐藏目录 / 自启动等敏感位置。
+/// 导出目录可由本地 API 请求方或前端传入，写入前必须校验，防止向 .ssh、
+/// LaunchAgents 等位置写文件。返回规范化（已解析符号链接）后的路径。
+pub(crate) fn validate_export_dir(dir: &Path) -> Result<PathBuf, AppError> {
+    let canonical = dir.canonicalize().map_err(|_| {
+        AppError::Config("导出目录不存在或无法访问，请先创建该目录".to_string())
+    })?;
+    if !canonical.is_dir() {
+        return Err(AppError::Config("导出路径必须是已存在的目录".to_string()));
+    }
+    ensure_export_dir_components_safe(&canonical)?;
+    Ok(canonical)
+}
+
 pub(crate) fn export_report_markdown_inner(
     date: String,
     content: Option<String>,
     export_dir: Option<String>,
+    locale: Option<String>,
     state: &Arc<Mutex<AppState>>,
 ) -> Result<String, AppError> {
+    let report_locale = AppLocale::from_option(locale.as_deref());
     let (export_dir, saved_content) = {
         let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
         let requested_export_dir = export_dir
@@ -525,16 +571,17 @@ pub(crate) fn export_report_markdown_inner(
         } else {
             state
                 .database
-                .get_report(&date, Some("zh-CN"))?
+                .get_report(&date, Some(report_locale.as_code()))?
                 .ok_or_else(|| AppError::Config("未找到可导出的日报".to_string()))?
                 .content
         };
         (export_dir, saved_content)
     };
 
-    let export_dir_path = Path::new(&export_dir);
-    export_daily_report_markdown(export_dir_path, &date, &saved_content)?;
-    Ok(build_daily_report_export_path(export_dir_path, &date)
+    // 目录来自请求方/配置，写入前校验（要求已存在，拒绝隐藏/敏感目录）
+    let export_dir_path = validate_export_dir(Path::new(&export_dir))?;
+    export_daily_report_markdown(&export_dir_path, &date, &saved_content)?;
+    Ok(build_daily_report_export_path(&export_dir_path, &date)
         .to_string_lossy()
         .to_string())
 }
@@ -544,9 +591,10 @@ pub async fn export_report_markdown(
     date: String,
     content: Option<String>,
     export_dir: Option<String>,
+    locale: Option<String>,
     state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<String, AppError> {
-    export_report_markdown_inner(date, content, export_dir, state.inner())
+    export_report_markdown_inner(date, content, export_dir, locale, state.inner())
 }
 
 /// 验证 ISO `YYYY-MM-DD` 日期字符串
@@ -554,6 +602,31 @@ fn ensure_iso_date(value: &str, field: &str) -> Result<(), AppError> {
     chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
         .map(|_| ())
         .map_err(|_| AppError::Config(format!("{field} 日期格式应为 YYYY-MM-DD")))
+}
+
+/// 合并导出 Markdown 的脚手架文案（标题、字段名、冒号），按界面语言输出：
+/// [标题, 日期范围, 导出时间, 日报数量, 语言, 冒号]
+fn range_export_scaffold_labels(locale: AppLocale) -> [&'static str; 6] {
+    match locale {
+        AppLocale::ZhCn => ["工作日报合并导出", "日期范围", "导出时间", "日报数量", "语言", "："],
+        AppLocale::ZhTw => ["工作日報合併導出", "日期範圍", "導出時間", "日報數量", "語言", "："],
+        AppLocale::En => [
+            "Merged Daily Reports Export",
+            "Date range",
+            "Exported at",
+            "Report count",
+            "Language",
+            ": ",
+        ],
+        AppLocale::Ar => [
+            "تصدير التقارير اليومية المدمجة",
+            "نطاق التاريخ",
+            "وقت التصدير",
+            "عدد التقارير",
+            "اللغة",
+            ": ",
+        ],
+    }
 }
 
 /// 将范围内的日报合并成一个 Markdown 文件
@@ -583,18 +656,19 @@ pub(crate) fn export_reports_range_inner(
         return Err(AppError::Config("起始日期不能晚于结束日期".to_string()));
     }
 
-    let locale_code = locale
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("zh-CN")
-        .to_string();
+    let report_locale = AppLocale::from_option(
+        locale
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty()),
+    );
+    let locale_code = report_locale.as_code();
 
     let reports = {
         let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
         state
             .database
-            .get_reports_in_range(start, end, Some(&locale_code))?
+            .get_reports_in_range(start, end, Some(locale_code))?
     };
 
     if reports.is_empty() {
@@ -603,15 +677,18 @@ pub(crate) fn export_reports_range_inner(
         )));
     }
 
+    // 脚手架文案随界面语言切换，避免非中文用户导出中文标题/字段名
+    let [title, range_label, exported_at_label, count_label, language_label, colon] =
+        range_export_scaffold_labels(report_locale);
     let mut markdown = String::new();
-    markdown.push_str("# 工作日报合并导出\n\n");
-    markdown.push_str(&format!("- 日期范围：{start} ~ {end}\n"));
+    markdown.push_str(&format!("# {title}\n\n"));
+    markdown.push_str(&format!("- {range_label}{colon}{start} ~ {end}\n"));
     markdown.push_str(&format!(
-        "- 导出时间：{}\n",
+        "- {exported_at_label}{colon}{}\n",
         chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
     ));
-    markdown.push_str(&format!("- 日报数量：{}\n", reports.len()));
-    markdown.push_str(&format!("- 语言：{locale_code}\n\n"));
+    markdown.push_str(&format!("- {count_label}{colon}{}\n", reports.len()));
+    markdown.push_str(&format!("- {language_label}{colon}{locale_code}\n\n"));
     markdown.push_str("---\n\n");
 
     for report in &reports {
@@ -732,6 +809,41 @@ mod tests {
 
         let _ = std::fs::remove_file(&output_path);
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn 导出目录组件校验应拦截隐藏目录与自启动目录() {
+        use super::ensure_export_dir_components_safe;
+
+        assert!(ensure_export_dir_components_safe(Path::new("/Users/demo/Documents/reports"))
+            .is_ok());
+        assert!(ensure_export_dir_components_safe(Path::new("/Users/demo/.ssh")).is_err());
+        assert!(
+            ensure_export_dir_components_safe(Path::new("/home/demo/.config/autostart")).is_err()
+        );
+        assert!(ensure_export_dir_components_safe(Path::new(
+            "/Users/demo/Library/LaunchAgents"
+        ))
+        .is_err());
+        assert!(ensure_export_dir_components_safe(Path::new(
+            "/Users/demo/Library/LaunchDaemons/sub"
+        ))
+        .is_err());
+        // Library 下的普通目录不受影响
+        assert!(ensure_export_dir_components_safe(Path::new(
+            "/Users/demo/Library/CloudStorage/reports"
+        ))
+        .is_ok());
+    }
+
+    #[test]
+    fn 导出目录必须已存在() {
+        use super::validate_export_dir;
+
+        assert!(validate_export_dir(Path::new(
+            "/nonexistent-work-review-export-dir-a1b2c3"
+        ))
+        .is_err());
     }
 
 }

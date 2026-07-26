@@ -36,12 +36,15 @@ test('Ask 将异常占位消息标记为失败，避免进入下一轮历史', (
   );
 });
 
-test('Ask 使用请求级 sending，卸载释放旧请求且旧 finally 不会释放新请求', () => {
+test('Ask 使用请求级 sending，后台请求跨页面存活且旧 finally 不会释放新请求', () => {
   assert.match(askSource, /let activeSendingRequestId = null/);
   assert.match(askSource, /assistantStore\.beginSending\(assistantMessageId\)/);
-  assert.match(
+  // 行为变更（切页面不取消生成）：onDestroy 不得清 sending——
+  // 请求在后台继续，全局 store 保留"生成中"标记，切回助手页可见进行中状态；
+  // 状态收尾由 submitQuestion 的 finally（120s 超时兜底）负责，且按请求 ID 隔离。
+  assert.doesNotMatch(
     askSource,
-    /onDestroy\(\(\) => \{[\s\S]*assistantStore\.finishSending\(activeSendingRequestId\)/,
+    /onDestroy\(\(\) => \{[^}]*assistantStore\.finishSending/,
   );
   assert.match(
     askSource,

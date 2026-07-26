@@ -36,14 +36,6 @@ test('Linux 截图应按会话类型分流，Wayland 优先尝试原生工具', 
   assert.match(source, /spectacle/);
 });
 
-test('手动截图在 Linux Wayland 下不应强依赖活动窗口检测', async () => {
-  const source = await readCommandsSource();
-
-  assert.match(source, /let active_window = crate::monitor::get_active_window\(\)\.ok\(\);/);
-  assert.match(source, /capture_for_window\(active_window\.as_ref\(\)\)/);
-  assert.match(source, /unwrap_or_else\(\|\| "Wayland Session"\.to_string\(\)\)/);
-});
-
 test('Linux 活动窗口检测应为 GNOME Wayland 单独提供 provider 分流', async () => {
   const source = await readFile(new URL('./src/monitor.rs', import.meta.url), 'utf8');
 

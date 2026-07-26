@@ -4,14 +4,69 @@ use crate::bot_common::{
 };
 use crate::config::AppConfig;
 use reqwest::Client;
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use subtle::ConstantTimeEq;
+
+/// 飞书事件签名允许的时间窗口：±5 分钟（与钉钉/企微一致），防重放。
+const FEISHU_SIGN_WINDOW_SECS: i64 = 300;
 
 /// 常量时间比较 verification_token，防止时序侧信道。
 fn token_matches(provided: &str, expected: &str) -> bool {
     provided.as_bytes().ct_eq(expected.as_bytes()).into()
+}
+
+/// 校验飞书事件签名：X-Lark-Signature = sha256hex(timestamp + nonce + encrypt_key + body)，
+/// 配套请求头 X-Lark-Request-Timestamp（秒级）与 X-Lark-Request-Nonce。
+/// 仅在配置了 feishu_encrypt_key 时强制校验（向后兼容旧配置）。
+/// 注：本实现只做签名与时间戳校验，不解密 encrypt 字段的加密事件体——
+/// 若飞书平台侧同时开启了事件加密，需保持明文事件订阅方式。
+fn verify_feishu_signature(
+    headers: &HashMap<String, String>,
+    body: &str,
+    encrypt_key: &str,
+) -> Result<(), &'static str> {
+    use sha2::{Digest, Sha256};
+
+    let timestamp = headers
+        .get("x-lark-request-timestamp")
+        .map(String::as_str)
+        .unwrap_or("");
+    let nonce = headers
+        .get("x-lark-request-nonce")
+        .map(String::as_str)
+        .unwrap_or("");
+    let signature = headers
+        .get("x-lark-signature")
+        .map(String::as_str)
+        .unwrap_or("");
+    if timestamp.is_empty() || nonce.is_empty() || signature.is_empty() {
+        return Err("缺少飞书签名请求头");
+    }
+
+    // 时间戳新鲜度校验，拒绝超过窗口的重放请求
+    let ts: i64 = timestamp.parse().map_err(|_| "飞书时间戳格式非法")?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| "系统时间异常")?
+        .as_secs() as i64;
+    if (now - ts).abs() > FEISHU_SIGN_WINDOW_SECS {
+        return Err("飞书时间戳超出允许窗口");
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(timestamp.as_bytes());
+    hasher.update(nonce.as_bytes());
+    hasher.update(encrypt_key.as_bytes());
+    hasher.update(body.as_bytes());
+    let computed = hex::encode(hasher.finalize());
+    if token_matches(signature, &computed) {
+        Ok(())
+    } else {
+        Err("飞书签名不匹配")
+    }
 }
 
 pub struct FeishuResponse {
@@ -32,14 +87,14 @@ impl FeishuResponse {
     }
 }
 
-// Token cache: (token, expires_at)
-static TOKEN_CACHE: Mutex<Option<(String, Instant)>> = Mutex::new(None);
+// Token cache: (app_id, token, expires_at)
+static TOKEN_CACHE: Mutex<Option<(String, String, Instant)>> = Mutex::new(None);
 
 async fn get_tenant_token(client: &Client, app_id: &str, app_secret: &str) -> Option<String> {
     {
         let cache = TOKEN_CACHE.lock().ok()?;
-        if let Some((token, expires)) = cache.as_ref() {
-            if expires > &Instant::now() {
+        if let Some((cached_app_id, token, expires)) = cache.as_ref() {
+            if cached_app_id == app_id && expires > &Instant::now() {
                 return Some(token.clone());
             }
         }
@@ -57,6 +112,7 @@ async fn get_tenant_token(client: &Client, app_id: &str, app_secret: &str) -> Op
     let cache_ttl = expire.saturating_sub(60);
     if let Ok(mut cache) = TOKEN_CACHE.lock() {
         *cache = Some((
+            app_id.to_string(),
             token.clone(),
             Instant::now() + Duration::from_secs(cache_ttl.max(60)),
         ));
@@ -67,7 +123,7 @@ async fn get_tenant_token(client: &Client, app_id: &str, app_secret: &str) -> Op
 async fn reply_message(client: &Client, token: &str, message_id: &str, text: &str) -> Option<()> {
     let url = format!("https://open.feishu.cn/open-apis/im/v1/messages/{message_id}/reply");
     let content = serde_json::json!({"text": text}).to_string();
-    client
+    let resp = client
         .post(&url)
         .header("Authorization", format!("Bearer {token}"))
         .json(&serde_json::json!({"content_type": "text", "content": content}))
@@ -75,14 +131,35 @@ async fn reply_message(client: &Client, token: &str, message_id: &str, text: &st
         .send()
         .await
         .ok()?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        let body_preview = body.chars().take(500).collect::<String>();
+        log::warn!("飞书回复消息失败 (HTTP {status}): {body_preview}");
+        return None;
+    }
     Some(())
 }
 
 pub async fn handle_feishu_webhook(
+    headers: &HashMap<String, String>,
     body: &str,
     config: &AppConfig,
     data_dir: &Path,
 ) -> FeishuResponse {
+    // 配置了 encrypt_key 时，先对原始请求体做签名 + 时间戳校验（防伪造/重放）
+    if let Some(encrypt_key) = config
+        .feishu_encrypt_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|k| !k.is_empty())
+    {
+        if let Err(reason) = verify_feishu_signature(headers, body, encrypt_key) {
+            log::warn!("飞书事件签名校验失败: {reason}");
+            return FeishuResponse::error(403, reason);
+        }
+    }
+
     let event: serde_json::Value = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(e) => return FeishuResponse::error(400, format!("JSON parse error: {e}")),
@@ -247,5 +324,45 @@ mod tests {
         assert_eq!(normalize_command("/help"), "help");
         assert_eq!(normalize_command("/reports@work_review_bot"), "reports");
         assert_eq!(normalize_command("帮助"), "帮助");
+    }
+
+    #[test]
+    fn 飞书签名校验应验证签名与时间戳() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .to_string();
+        let nonce = "rand-nonce-123";
+        let key = "test-encrypt-key";
+        let body = "{\"foo\":\"bar\"}";
+
+        let expected = {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(now.as_bytes());
+            hasher.update(nonce.as_bytes());
+            hasher.update(key.as_bytes());
+            hasher.update(body.as_bytes());
+            hex::encode(hasher.finalize())
+        };
+
+        let mut headers = HashMap::new();
+        headers.insert("x-lark-request-timestamp".to_string(), now.clone());
+        headers.insert("x-lark-request-nonce".to_string(), nonce.to_string());
+        headers.insert("x-lark-signature".to_string(), expected.clone());
+        assert!(verify_feishu_signature(&headers, body, key).is_ok());
+
+        // 签名不匹配
+        headers.insert("x-lark-signature".to_string(), "deadbeef".to_string());
+        assert!(verify_feishu_signature(&headers, body, key).is_err());
+
+        // 时间戳过期（超出 300 秒窗口）
+        headers.insert("x-lark-signature".to_string(), expected);
+        headers.insert("x-lark-request-timestamp".to_string(), "1000".to_string());
+        assert!(verify_feishu_signature(&headers, body, key).is_err());
+
+        // 缺少签名头
+        assert!(verify_feishu_signature(&HashMap::new(), body, key).is_err());
     }
 }

@@ -12,6 +12,8 @@ const DEFAULT_STATE = {
   hasUserSelectedModel: false,
   sending: false,
   sendingRequestId: null,
+  // 当前会话在 SQLite 中的 id（P3 持久化）；null = 尚未落库的新对话
+  conversationId: null,
 };
 
 function genId() {
@@ -54,6 +56,8 @@ function loadState() {
       hasUserSelectedModel: Boolean(parsed?.hasUserSelectedModel),
       sending: false,
       sendingRequestId: null,
+      conversationId:
+        typeof parsed?.conversationId === 'number' ? parsed.conversationId : null,
     };
   } catch (error) {
     console.warn('加载助手会话缓存失败:', error);
@@ -113,6 +117,20 @@ function createAssistantStore() {
         messages: Array.isArray(messages)
           ? messages.slice(-40).map((message) => normalizeMessage(message))
           : [],
+      })),
+    // P3：绑定/切换 SQLite 会话（同时替换内存消息）
+    setConversation: (conversationId, messages) =>
+      update((state) => ({
+        ...state,
+        conversationId: typeof conversationId === 'number' ? conversationId : null,
+        messages: Array.isArray(messages)
+          ? messages.map((message) => normalizeMessage(message))
+          : [],
+      })),
+    setConversationId: (conversationId) =>
+      update((state) => ({
+        ...state,
+        conversationId: typeof conversationId === 'number' ? conversationId : null,
       })),
     beginSending: (requestId) =>
       update((state) => ({
