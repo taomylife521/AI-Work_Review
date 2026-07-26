@@ -18,6 +18,12 @@ on:
       - 'package-lock.json'
   workflow_dispatch:
 
+# rustsec/audit-check 需要创建 check-run;默认 GITHUB_TOKEN 只读会报
+# "Resource not accessible by integration"。
+permissions:
+  contents: read
+  checks: write
+
 jobs:
   cargo-audit:
     name: cargo audit（Rust CVE）
@@ -38,5 +44,9 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: npm audit（高危及以上视为失败）
-        run: npm audit --audit-level=high
+      - name: npm audit（仅运行时依赖,高危及以上视为失败）
+        # 门禁只看会进最终产物的运行时依赖;vite/svelte 等构建工具链
+        # (devDependencies) 的漏洞不随应用分发,单独展示不作为失败条件。
+        run: npm audit --omit=dev --audit-level=high
+      - name: npm audit（含构建工具链,仅报告不拦截）
+        run: npm audit || true
