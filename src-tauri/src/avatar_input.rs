@@ -1034,7 +1034,7 @@ pub fn spawn_avatar_input_bridge(app: AppHandle) {
 
             // 智能穿透命中测试：每 4 轮（~64ms）
             tick = tick.wrapping_add(1);
-            if smart_click_through_polling_enabled && tick % 4 == 0 {
+            if smart_click_through_polling_enabled && tick.is_multiple_of(4) {
                 apply_smart_click_through(&app);
             }
 

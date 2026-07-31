@@ -815,7 +815,7 @@ fn build_realtime_context_text(state_arc: &Arc<Mutex<AppState>>) -> String {
                     *app_totals.entry(a.app_name.clone()).or_insert(0) += a.duration;
                 }
                 let mut ranked: Vec<(String, i64)> = app_totals.into_iter().collect();
-                ranked.sort_by(|a, b| b.1.cmp(&a.1));
+                ranked.sort_by_key(|item| std::cmp::Reverse(item.1));
                 let top: Vec<String> = ranked
                     .iter()
                     .take(3)

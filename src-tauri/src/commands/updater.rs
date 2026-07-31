@@ -552,11 +552,10 @@ pub async fn download_and_install_github_update(
                 move |chunk_length, total_bytes| {
                     downloaded_bytes += chunk_length as u64;
                     let percent = total_bytes.and_then(|total| {
-                        if total == 0 {
-                            None
-                        } else {
-                            Some(((downloaded_bytes * 100) / total).min(100))
-                        }
+                        downloaded_bytes
+                            .saturating_mul(100)
+                            .checked_div(total)
+                            .map(|percent| percent.min(100))
                     });
 
                     let message = if let Some(percent) = percent {

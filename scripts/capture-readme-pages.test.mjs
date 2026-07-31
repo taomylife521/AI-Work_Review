@@ -49,14 +49,18 @@ test('截图模拟统计应保持总投入、应用、分类与网站口径一�
   assert.doesNotThrow(validateCaptureFixtures);
 });
 
-test('截图配置应使用与 Rust RemoteStorageConfig 一致的字段名', async () => {
-  const source = await readFile(new URL('./capture-readme-pages.mjs', import.meta.url), 'utf8');
-  const remoteStorage = source.match(/remote_storage:\s*\{[\s\S]*?\n  \},\n  privacy:/)?.[0] ?? '';
+test('截图配置应使用与 Rust RemoteStorageConfig 一致的字段名并兼容跨平台换行', async () => {
+  const lfSource = (await readFile(new URL('./capture-readme-pages.mjs', import.meta.url), 'utf8'))
+    .replaceAll('\r\n', '\n');
 
-  assert.match(remoteStorage, /access_key:\s*''/);
-  assert.match(remoteStorage, /secret_key:\s*''/);
-  assert.match(remoteStorage, /region:\s*'us-east-1'/);
-  assert.doesNotMatch(remoteStorage, /access_key_id|secret_access_key|enabled:/);
+  for (const source of [lfSource, lfSource.replaceAll('\n', '\r\n')]) {
+    const remoteStorage = source.match(/remote_storage:\s*\{[\s\S]*?\r?\n  \},\r?\n  privacy:/)?.[0] ?? '';
+
+    assert.match(remoteStorage, /access_key:\s*''/);
+    assert.match(remoteStorage, /secret_key:\s*''/);
+    assert.match(remoteStorage, /region:\s*'us-east-1'/);
+    assert.doesNotMatch(remoteStorage, /access_key_id|secret_access_key|enabled:/);
+  }
 });
 
 test('截图地址应规范化，并仅放行配置地址的同源请求', () => {

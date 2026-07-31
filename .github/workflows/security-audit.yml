@@ -5,6 +5,7 @@ on:
   schedule:
     - cron: '0 3 * * 1' # 每周一 03:00 UTC
   push:
+    branches: [main, master]
     paths:
       - '**/Cargo.toml'
       - '**/Cargo.lock'
@@ -33,6 +34,9 @@ jobs:
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # screenshots 0.8 的 Linux-only 代码生成依赖解析依赖自带的
+          # Wayland/XCB XML，不接触用户输入；上游尚无可升级版本。
+          ignore: RUSTSEC-2026-0194,RUSTSEC-2026-0195
 
   npm-audit:
     name: npm audit（前端依赖）

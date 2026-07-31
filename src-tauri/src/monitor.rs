@@ -1029,13 +1029,11 @@ fn decode_mozlz4_bytes(data: &[u8]) -> std::result::Result<Vec<u8>, String> {
         }
         match_len += 4;
 
-        let mut match_index = out.len() - offset;
-        for _ in 0..match_len {
+        for match_index in (out.len() - offset..).take(match_len) {
             let value = *out
                 .get(match_index)
                 .ok_or_else(|| "mozlz4 匹配引用越界".to_string())?;
             out.push(value);
-            match_index += 1;
         }
     }
 

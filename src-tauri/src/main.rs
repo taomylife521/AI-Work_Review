@@ -1783,7 +1783,7 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
         let input_idle = idle_detector.is_input_idle();
         // 工作目标庆祝：每 ~60 轮检查一次（约 1-2 分钟）
         goal_check_counter = goal_check_counter.wrapping_add(1);
-        if goal_check_counter % 60 == 0 && avatar_enabled {
+        if goal_check_counter.is_multiple_of(60) && avatar_enabled {
             let (goal_minutes, goal_notify) = {
                 let s = state.lock().unwrap_or_else(|e| e.into_inner());
                 (
@@ -2329,8 +2329,8 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                 "📊 应用切换: {} [{}] → {} [{}]",
                 last_app_name.as_deref().unwrap_or("无"),
                 previous_window_title.as_deref().unwrap_or(""),
-                &active_window.app_name,
-                &active_window.window_title,
+                active_window.app_name,
+                active_window.window_title,
             );
         }
 
@@ -3775,7 +3775,7 @@ async fn entity_classify_task(state: Arc<Mutex<AppState>>) {
                     })
             })
             .collect();
-        domain_candidates.sort_by(|a, b| b.1.cmp(&a.1));
+        domain_candidates.sort_by_key(|item| std::cmp::Reverse(item.1));
         for (domain, _) in domain_candidates {
             if entities.len() >= BATCH_LIMIT {
                 break;
@@ -4602,13 +4602,12 @@ async fn main() {
             tauri::RunEvent::Reopen {
                 has_visible_windows,
                 ..
-            } => {
-                if !has_visible_windows {
+            }
+                if !has_visible_windows => {
                     if let Err(e) = reveal_main_window(&_app_handle.clone(), None) {
                         log::warn!("Dock 恢复主窗口失败: {e}");
                     }
                 }
-            }
             _ => {}
         });
 }

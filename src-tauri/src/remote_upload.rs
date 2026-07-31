@@ -99,7 +99,7 @@ async fn upload_s3(
     let endpoint = config.endpoint.trim_end_matches('/');
     let object_key = remote_object_path(&config.path_prefix, relative_path);
 
-    let url = format!("{}/{}/{}", endpoint, &config.bucket, &object_key);
+    let url = format!("{}/{}/{}", endpoint, config.bucket, object_key);
     let parsed =
         reqwest::Url::parse(&url).map_err(|e| AppError::Config(format!("S3 URL 解析失败: {e}")))?;
     let host = parsed
@@ -119,7 +119,7 @@ async fn upload_s3(
     // Content-Type 按扩展名推导；同时参与 SigV4 签名，签名与实际请求头必须一致
     let content_type = content_type_for_extension(&object_key);
 
-    let canonical_uri = format!("/{}/{}", &config.bucket, url_encode_path(&object_key));
+    let canonical_uri = format!("/{}/{}", config.bucket, url_encode_path(&object_key));
     let canonical_querystring = "";
 
     let canonical_headers = format!(
@@ -284,7 +284,7 @@ async fn upload_webdav(
     )
     .await?;
 
-    let put_url = format!("{}/{}", base, &object_path);
+    let put_url = format!("{}/{}", base, object_path);
     let request = client
         .put(&put_url)
         .basic_auth(&config.username, Some(&config.password))
@@ -330,7 +330,7 @@ async fn ensure_webdav_directories(
         }
         current.push_str(part);
 
-        let cache_key = format!("{}/{}", base_url, &current);
+        let cache_key = format!("{}/{}", base_url, current);
         {
             let ensured = ensured_webdav_dirs()
                 .lock()
@@ -340,7 +340,7 @@ async fn ensure_webdav_directories(
             }
         }
 
-        let mkcol_url = format!("{}/{}/", base_url, &current);
+        let mkcol_url = format!("{}/{}/", base_url, current);
         let mkcol_method = reqwest::Method::from_bytes(b"MKCOL")
             .map_err(|e| AppError::Screenshot(format!("MKCOL method: {e}")))?;
 

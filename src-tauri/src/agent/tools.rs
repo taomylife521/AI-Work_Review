@@ -646,7 +646,7 @@ fn aggregate_stats_execute(ctx: &ToolContext, args: Value) -> Result<String, Str
     match metric {
         "by_app" => {
             let mut sorted: Vec<_> = app_durations.into_iter().collect();
-            sorted.sort_by(|a, b| b.1.cmp(&a.1));
+            sorted.sort_by_key(|item| std::cmp::Reverse(item.1));
             sorted.truncate(limit);
 
             let mut lines = vec![format!("应用使用时长排名 ({date_from} ~ {date_to})：")];
@@ -659,7 +659,7 @@ fn aggregate_stats_execute(ctx: &ToolContext, args: Value) -> Result<String, Str
         }
         "by_category" => {
             let mut sorted: Vec<_> = category_durations.into_iter().collect();
-            sorted.sort_by(|a, b| b.1.cmp(&a.1));
+            sorted.sort_by_key(|item| std::cmp::Reverse(item.1));
 
             let mut lines = vec![format!("分类使用时长 ({date_from} ~ {date_to})：")];
             for (cat_key, dur) in &sorted {
@@ -685,7 +685,7 @@ fn aggregate_stats_execute(ctx: &ToolContext, args: Value) -> Result<String, Str
             top_apps.truncate(3);
 
             let mut sorted_cats: Vec<_> = category_durations.into_iter().collect();
-            sorted_cats.sort_by(|a, b| b.1.cmp(&a.1));
+            sorted_cats.sort_by_key(|item| std::cmp::Reverse(item.1));
 
             let mut lines = vec![format!("时间总览 ({date_from} ~ {date_to})：")];
             lines.push(format!("  总活动时长: {}", format_duration_compact(total)));
@@ -763,7 +763,7 @@ fn category_search_execute(ctx: &ToolContext, args: Value) -> Result<String, Str
 
     let total_dur: i64 = app_entries.values().map(|(d, _)| *d).sum();
     let mut sorted: Vec<_> = app_entries.into_iter().collect();
-    sorted.sort_by(|a, b| b.1 .0.cmp(&a.1 .0));
+    sorted.sort_by_key(|item| std::cmp::Reverse(item.1 .0));
     sorted.truncate(limit);
 
     let range = match (date_from, date_to) {
@@ -1180,7 +1180,7 @@ fn query_activities_execute(ctx: &ToolContext, args: Value) -> Result<String, St
     }
 
     let mut sorted: Vec<_> = app_map.into_iter().collect();
-    sorted.sort_by(|a, b| b.1 .0.cmp(&a.1 .0));
+    sorted.sort_by_key(|item| std::cmp::Reverse(item.1 .0));
 
     let mut lines = vec![format!(
         "{} 共记录 {} 条活动，总时长 {}（Top {} 应用）：",

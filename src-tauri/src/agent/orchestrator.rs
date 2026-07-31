@@ -524,10 +524,10 @@ pub fn fast_answer(
 
     let total: i64 = activities.iter().map(|a| a.duration).sum();
     let mut sorted_cats: Vec<_> = category_durations.into_iter().collect();
-    sorted_cats.sort_by(|a, b| b.1.cmp(&a.1));
+    sorted_cats.sort_by_key(|item| std::cmp::Reverse(item.1));
 
     let mut sorted_apps: Vec<_> = app_durations.into_iter().collect();
-    sorted_apps.sort_by(|a, b| b.1.cmp(&a.1));
+    sorted_apps.sort_by_key(|item| std::cmp::Reverse(item.1));
     sorted_apps.truncate(5);
 
     // 格式化时长
