@@ -27,24 +27,12 @@ test('Release workflow 应在构建前执行测试并使用 npm ci', () => {
   assert.ok(rustIndex < buildIndex, 'Rust 测试必须先于构建执行');
 });
 
-test('macOS release 必须使用稳定签名并拒绝 ad-hoc 产物', () => {
+test('macOS release 应保持 ad-hoc 签名且不导入自签证书', () => {
   const source = readFileSync(new URL('./.github/workflows/release.yml', import.meta.url), 'utf8');
-  const setupSource = readFileSync(new URL('./scripts/setup-codesign.sh', import.meta.url), 'utf8');
 
-  assert.match(source, /name:\s*Import stable macOS code signing certificate/);
-  assert.match(source, /brew --prefix openssl@3/);
-  assert.match(source, /pkcs12[\s\\]*-export[\s\\]*-legacy/);
-  assert.match(source, /security add-trusted-cert -r trustRoot -p codeSign/);
-  assert.match(source, /security find-identity -v -p codesigning/);
-  assert.match(source, /APPLE_SIGNING_IDENTITY=\$identity_hash/);
-  assert.match(source, /MACOS_CODESIGN_AUTHORITY=\$CERT_NAME/);
-  assert.match(source, /name:\s*Verify stable macOS code signature/);
-  assert.match(source, /Signature=adhoc/);
-  assert.doesNotMatch(source, /export APPLE_SIGNING_IDENTITY="-"/);
-
-  assert.match(setupSource, /security add-trusted-cert -r trustRoot -p codeSign/);
-  assert.match(setupSource, /security find-identity -v -p codesigning/);
-  assert.match(setupSource, /PKCS12_ARGS=\(-legacy\)/);
+  assert.match(source, /export APPLE_SIGNING_IDENTITY="-"/);
+  assert.doesNotMatch(source, /MACOS_CODESIGN_P12|security import|add-trusted-cert/);
+  assert.doesNotMatch(source, /Verify stable macOS code signature/);
 });
 
 test('Release workflow 应构建并上传 Linux RPM 产物', () => {
