@@ -1,7 +1,10 @@
+#![allow(clippy::type_complexity)] // SQL 投影元组与查询列一一对应。
+
 use crate::error::{AppError, Result};
 use chrono::{Local, MappedLocalTime, NaiveDateTime, TimeZone};
 use rusqlite::{params, Connection, Row};
 use serde::{Deserialize, Serialize};
+use std::cmp::Reverse;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -23,6 +26,35 @@ fn safe_local_timestamp(ndt: NaiveDateTime) -> i64 {
                 .unwrap_or_else(|| ndt.and_utc().timestamp())
         }
     }
+}
+
+fn local_day_bounds(date: chrono::NaiveDate) -> Result<(i64, i64)> {
+    let next_date = date
+        .succ_opt()
+        .ok_or_else(|| AppError::Config("日期超出可统计范围".to_string()))?;
+    let start = safe_local_timestamp(date.and_hms_opt(0, 0, 0).unwrap());
+    let end = safe_local_timestamp(next_date.and_hms_opt(0, 0, 0).unwrap());
+    Ok((start, end))
+}
+
+fn local_hour_bounds(date: chrono::NaiveDate, hour: u32) -> Result<(i64, i64)> {
+    let hour = hour.min(23);
+    let start = safe_local_timestamp(date.and_hms_opt(hour, 0, 0).unwrap());
+    let end_naive = if hour == 23 {
+        date.succ_opt()
+            .and_then(|next| next.and_hms_opt(0, 0, 0))
+    } else {
+        date.and_hms_opt(hour + 1, 0, 0)
+    }
+    .ok_or_else(|| AppError::Config("小时超出可统计范围".to_string()))?;
+    Ok((start, safe_local_timestamp(end_naive)))
+}
+
+pub fn local_hour_end_timestamp(date: &str, hour: i32) -> Option<i64> {
+    let date = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()?;
+    local_hour_bounds(date, hour.clamp(0, 23) as u32)
+        .ok()
+        .map(|(_, end)| end)
 }
 
 fn category_counts_toward_work_time(category: &str) -> bool {
@@ -236,6 +268,9 @@ pub struct DailyStats {
     pub browser_duration: i64,
     pub url_usage: Vec<UrlUsage>,
     pub domain_usage: Vec<DomainUsage>,
+    /// 隐私过滤后的真实唯一域名总数；首页可仅展示其中一部分。
+    #[serde(default)]
+    pub domain_total_count: usize,
     /// 按浏览器分组的使用统计
     pub browser_usage: Vec<BrowserUsage>,
     /// 工作时间内的活动时长（新增）
@@ -247,6 +282,23 @@ pub struct DailyStats {
     /// 24 小时活跃度分布
     #[serde(default)]
     pub hourly_activity_distribution: Vec<HourlyActivityBucket>,
+}
+
+pub fn apply_flex_overtime_correction(
+    stats: &mut DailyStats,
+    work_time_enabled: bool,
+    standard_work_hours: f64,
+) {
+    if !work_time_enabled {
+        stats.work_time_duration = stats
+            .category_usage
+            .iter()
+            .filter(|item| category_counts_toward_work_time(&item.category))
+            .map(|item| item.duration)
+            .sum();
+        let standard_seconds = (standard_work_hours * 3600.0).round() as i64;
+        stats.overtime_duration = (stats.work_time_duration - standard_seconds).max(0);
+    }
 }
 
 /// 域名使用统计（按域名分组）
@@ -435,25 +487,7 @@ fn calculate_overlap_duration(
     (overlap_end - overlap_start).max(0)
 }
 
-fn calculate_work_time_overlap_duration(
-    interval_end: i64,
-    duration: i64,
-    day_start: i64,
-    day_end: i64,
-    work_start: i64,
-    work_end: i64,
-) -> i64 {
-    if work_start == work_end {
-        0
-    } else if work_end > work_start {
-        calculate_overlap_duration(interval_end, duration, work_start, work_end)
-    } else {
-        calculate_overlap_duration(interval_end, duration, day_start, work_end)
-            + calculate_overlap_duration(interval_end, duration, work_start, day_end)
-    }
-}
-
-/// 多段工作时间重叠计算
+/// 多段工作时间重叠计算。同一时间即使落入多个配置段，也只能计一次。
 fn calculate_work_time_segments_overlap(
     interval_end: i64,
     duration: i64,
@@ -461,12 +495,38 @@ fn calculate_work_time_segments_overlap(
     day_end: i64,
     segments: &[(i64, i64)],
 ) -> i64 {
-    segments
-        .iter()
-        .map(|&(ws, we)| {
-            calculate_work_time_overlap_duration(interval_end, duration, day_start, day_end, ws, we)
-        })
-        .sum()
+    if duration <= 0 || day_end <= day_start {
+        return 0;
+    }
+
+    let activity_start = interval_end.saturating_sub(duration).max(day_start);
+    let activity_end = interval_end.min(day_end);
+    if activity_end <= activity_start {
+        return 0;
+    }
+
+    let mut overlaps = Vec::new();
+    let mut collect_overlap = |range_start: i64, range_end: i64| {
+        let start = activity_start.max(range_start);
+        let end = activity_end.min(range_end);
+        if end > start {
+            overlaps.push((start, end));
+        }
+    };
+
+    for &(work_start, work_end) in segments {
+        if work_start == work_end {
+            continue;
+        }
+        if work_end > work_start {
+            collect_overlap(work_start, work_end);
+        } else {
+            collect_overlap(day_start, work_end);
+            collect_overlap(work_start, day_end);
+        }
+    }
+
+    calculate_covered_duration(overlaps)
 }
 
 /// 下一个「本地时区整点」边界。
@@ -557,7 +617,7 @@ fn score_memory_match(query: &str, fields: &[&str]) -> i64 {
 }
 
 fn truncate_excerpt(value: &str, max_chars: usize) -> String {
-    let text = value.trim().replace('\n', " ").replace('\r', " ");
+    let text = value.trim().replace(['\n', '\r'], " ");
     let mut iter = text.chars();
     let excerpt: String = iter.by_ref().take(max_chars).collect();
     if iter.next().is_some() {
@@ -658,6 +718,15 @@ impl Database {
             [],
         )?;
 
+        // 反向复合索引：get_last_activity_by_app 等「按 app_name + 时间范围」的热路径
+        // （监控循环每次采样都会调用）无法使用上面 (timestamp, app_name) 的前导列,
+        // 会退化为范围扫描;get_recent_app_usage / get_app_category_overview 的
+        // 相关子查询同样依赖此索引。
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_activities_app_timestamp ON activities (app_name, timestamp)",
+            [],
+        )?;
+
         conn.execute(
             "CREATE TABLE IF NOT EXISTS daily_reports (
                 date TEXT PRIMARY KEY,
@@ -738,6 +807,19 @@ impl Database {
         );
         // 迁移：添加 screenshot_url 列（远程存储 URL）
         let _ = conn.execute("ALTER TABLE activities ADD COLUMN screenshot_url TEXT", []);
+
+        // AI 实体分类缓存：后台任务对未知应用/域名做一次性归类,此后采集直接查表,
+        // 无需用户手动加规则。entity_key 形如 "app:xxx" / "domain:yyy"。
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS entity_category_cache (
+                entity_key TEXT PRIMARY KEY,
+                base_category TEXT NOT NULL,
+                semantic_category TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'ai',
+                created_at INTEGER NOT NULL
+            )",
+            [],
+        )?;
 
         // === AI 工作记忆（自进化洞察） ===
         conn.execute(
@@ -1171,6 +1253,188 @@ impl Database {
         Ok(())
     }
 
+    /// 查找「本地有截图但远程 URL 缺失」的近期活动（远程存储补传用），
+    /// 返回 (id, screenshot_path)，按时间倒序。
+    /// 仅看 since_timestamp 之后的记录：更早的缺口多半是远程存储当时未启用、
+    /// 或本地文件已被保留策略清理，反复捞出来重试没有意义。
+    pub fn get_activities_missing_screenshot_url(
+        &self,
+        since_timestamp: i64,
+        limit: u32,
+    ) -> Result<Vec<(i64, String)>> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+
+        let mut stmt = conn.prepare(
+            "SELECT id, screenshot_path FROM activities
+             WHERE timestamp >= ?1
+               AND screenshot_path != ''
+               AND (screenshot_url IS NULL OR screenshot_url = '')
+             ORDER BY timestamp DESC
+             LIMIT ?2",
+        )?;
+        let rows: Vec<(i64, String)> = stmt
+            .query_map(params![since_timestamp, limit], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    /// 读取全部 AI 实体分类缓存（启动时载入内存查询表）。
+    pub fn load_entity_category_cache(&self) -> Result<Vec<(String, String, String)>> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT entity_key, base_category, semantic_category FROM entity_category_cache",
+        )?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    /// 写入/覆盖一条实体分类缓存。
+    pub fn upsert_entity_category(
+        &self,
+        entity_key: &str,
+        base_category: &str,
+        semantic_category: &str,
+    ) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        conn.execute(
+            "INSERT OR REPLACE INTO entity_category_cache
+             (entity_key, base_category, semantic_category, source, created_at)
+             VALUES (?1, ?2, ?3, 'ai', ?4)",
+            params![
+                entity_key,
+                base_category,
+                semantic_category,
+                chrono::Local::now().timestamp()
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// 收集近期仍归为 "other" 的应用候选（按累计时长降序,过滤琐碎实体）。
+    pub fn get_unclassified_app_candidates(
+        &self,
+        since_ts: i64,
+        min_total_duration: i64,
+        limit: u32,
+    ) -> Result<Vec<String>> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT app_name, SUM(duration) AS total FROM activities
+             WHERE timestamp >= ?1 AND category = 'other' AND app_name != ''
+             GROUP BY app_name HAVING total >= ?2
+             ORDER BY total DESC LIMIT ?3",
+        )?;
+        let rows = stmt
+            .query_map(params![since_ts, min_total_duration, limit], |row| {
+                row.get::<_, String>(0)
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    /// 近期浏览器活动的 (browser_url, 累计时长)，供上层聚合到域名后挑选归类候选。
+    pub fn get_browser_url_durations(&self, since_ts: i64) -> Result<Vec<(String, i64)>> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT browser_url, SUM(duration) FROM activities
+             WHERE timestamp >= ?1 AND category = 'browser'
+               AND browser_url IS NOT NULL AND browser_url != ''
+             GROUP BY browser_url",
+        )?;
+        let rows = stmt
+            .query_map(params![since_ts], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    /// 近期浏览器活动的 (id, browser_url)，供 AI 归类后按域名回溯修正。
+    pub fn get_browser_activity_urls(&self, since_ts: i64) -> Result<Vec<(i64, String)>> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT id, browser_url FROM activities
+             WHERE timestamp >= ?1 AND category = 'browser'
+               AND browser_url IS NOT NULL AND browser_url != ''",
+        )?;
+        let rows = stmt
+            .query_map(params![since_ts], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    /// AI 归类后回溯修正：按应用名更新近期仍为 "other" 的记录,返回更新行数。
+    pub fn reclassify_app_activities(
+        &self,
+        app_name: &str,
+        base_category: &str,
+        semantic_category: &str,
+        since_ts: i64,
+    ) -> Result<usize> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        // 学习键为小写,应用名原始大小写不定,按 LOWER 匹配
+        let count = conn.execute(
+            "UPDATE activities SET category = ?1, semantic_category = ?2
+             WHERE LOWER(app_name) = ?3 AND timestamp >= ?4 AND category = 'other'",
+            params![
+                base_category,
+                semantic_category,
+                app_name.to_lowercase(),
+                since_ts
+            ],
+        )?;
+        Ok(count)
+    }
+
+    /// AI 归类后回溯修正：按 id 列表更新（域名场景,上层已按域名筛出 id）。
+    pub fn reclassify_activities_by_ids(
+        &self,
+        ids: &[i64],
+        base_category: &str,
+        semantic_category: &str,
+    ) -> Result<usize> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        // id 为内部 i64,直接拼接数字占位安全
+        let id_list = ids
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let count = conn.execute(
+            &format!(
+                "UPDATE activities SET category = ?1, semantic_category = ?2 WHERE id IN ({id_list})"
+            ),
+            params![base_category, semantic_category],
+        )?;
+        Ok(count)
+    }
+
     /// 将指定分类下的历史活动记录重新归类到目标分类，返回更新的行数
     pub fn reassign_activity_category(&self, from: &str, to: &str) -> Result<usize> {
         let conn = self.conn.lock().map_err(|e| {
@@ -1200,116 +1464,6 @@ impl Database {
             rusqlite::params![upper_ts],
         )?;
         Ok(count)
-    }
-
-    /// 对于浏览器，按 URL 合并记录
-    /// 将重复记录的 duration 累加到保留记录后再删除重复项
-    /// 返回删除的记录数和截图路径
-    pub fn cleanup_duplicate_activities(&self, date: &str) -> Result<(usize, Vec<String>)> {
-        let conn = self.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
-
-        let tx = conn.unchecked_transaction()?;
-
-        // 获取当天的时间戳范围
-        let date_parsed = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
-            .map_err(|e| AppError::Config(e.to_string()))?;
-
-        let start_ts = safe_local_timestamp(date_parsed.and_hms_opt(0, 0, 0).unwrap());
-        let end_ts = start_ts + 86400;
-
-        // 获取当天所有活动
-        let mut stmt = conn.prepare(
-            "SELECT id, app_name, browser_url, window_title, duration FROM activities
-             WHERE timestamp >= ?1 AND timestamp < ?2",
-        )?;
-
-        let activities: Vec<(i64, String, Option<String>, Option<String>, i64)> = stmt
-            .query_map(params![start_ts, end_ts], |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                ))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        // Group by same key as get_timeline: (app_name, browser_url OR window_title)
-        use std::collections::HashMap;
-        // key -> Vec<(id, duration)>
-        let mut groups: HashMap<String, Vec<(i64, i64)>> = HashMap::new();
-
-        for (id, app_name, browser_url, window_title, duration) in activities {
-            let key = if let Some(ref url) = browser_url {
-                if !url.is_empty() {
-                    format!("url:{app_name}|{}", url.trim_end_matches('/'))
-                } else {
-                    let title = window_title.as_deref().unwrap_or("");
-                    format!("app:{app_name}|{title}")
-                }
-            } else {
-                let title = window_title.as_deref().unwrap_or("");
-                format!("app:{app_name}|{title}")
-            };
-
-            groups.entry(key).or_default().push((id, duration));
-        }
-
-        let mut total_deleted = 0usize;
-        let mut all_paths = Vec::new();
-
-        for (_key, mut entries) in groups {
-            // 只有一条记录的组无需清理
-            if entries.len() <= 1 {
-                continue;
-            }
-
-            // 按 duration 降序排列，保留最长的那条
-            entries.sort_by(|a, b| b.1.cmp(&a.1));
-            let keep_id = entries[0].0;
-
-            // 计算需要累加的 duration（其余记录的总时长）
-            let extra_duration: i64 = entries[1..].iter().map(|(_, d)| *d).sum();
-            let ids_to_delete: Vec<i64> = entries[1..].iter().map(|(id, _)| *id).collect();
-
-            // 先将额外的 duration 累加到保留记录
-            if extra_duration > 0 {
-                conn.execute(
-                    "UPDATE activities SET duration = duration + ?1 WHERE id = ?2",
-                    params![extra_duration, keep_id],
-                )?;
-            }
-
-            // 获取要删除的记录的截图路径
-            for del_id in &ids_to_delete {
-                let path: String = conn
-                    .query_row(
-                        "SELECT screenshot_path FROM activities WHERE id = ?1",
-                        params![del_id],
-                        |row| row.get(0),
-                    )
-                    .unwrap_or_default();
-                if !path.is_empty() {
-                    all_paths.push(path);
-                }
-            }
-
-            // 删除重复记录
-            for del_id in &ids_to_delete {
-                conn.execute("DELETE FROM activities WHERE id = ?1", params![del_id])?;
-                total_deleted += 1;
-            }
-        }
-
-        log::info!("清理重复记录: 删除 {total_deleted} 条，时长已合并到保留记录");
-
-        tx.commit()?;
-
-        Ok((total_deleted, all_paths))
     }
 
     /// Unix 时间戳 → 本地时区日期字符串（YYYY-MM-DD）
@@ -1370,8 +1524,7 @@ impl Database {
 
         let date_parsed = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
             .map_err(|e| AppError::Config(e.to_string()))?;
-        let start_ts = safe_local_timestamp(date_parsed.and_hms_opt(0, 0, 0).unwrap());
-        let end_ts = start_ts + 86400;
+        let (start_ts, end_ts) = local_day_bounds(date_parsed)?;
 
         let mut stmt = conn.prepare(
             "SELECT screenshot_path FROM activities WHERE timestamp >= ?1 AND timestamp < ?2",
@@ -1528,8 +1681,7 @@ impl Database {
         let date_parsed = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
             .map_err(|e| AppError::Config(e.to_string()))?;
 
-        let start_ts = safe_local_timestamp(date_parsed.and_hms_opt(0, 0, 0).unwrap());
-        let end_ts = start_ts + 86400;
+        let (start_ts, end_ts) = local_day_bounds(date_parsed)?;
 
         // 计算所有工作段时间戳
         let segment_ts: Vec<(i64, i64)> = segments
@@ -1557,6 +1709,7 @@ impl Database {
                     browser_url,
                     executable_path,
                     semantic_category,
+                    screenshot_path,
                     screenshot_url
              FROM activities
              WHERE timestamp > ?1 AND (timestamp - duration) < ?2
@@ -1574,7 +1727,8 @@ impl Database {
                 row.get::<_, Option<String>>(6)?,
                 row.get::<_, Option<String>>(7)?,
                 row.get::<_, Option<String>>(8)?,
-                row.get::<_, Option<String>>(9)?,
+                row.get::<_, String>(9)?,
+                row.get::<_, Option<String>>(10)?,
             ))
         })?;
 
@@ -1582,11 +1736,11 @@ impl Database {
         let mut work_time_duration: i64 = 0;
         let mut after_hours_duration: i64 = 0;
         // 最后一个工作时段的结束时间戳，用于计算下班后加班时长。
-        // 跨午夜段（如 22:00→次日06:00）的 we 会小于 ws，若直接取 max 会得到清晨时刻，
-        // 导致班内活动被误判为"下班后加班"。对这类段的结束时间按次日（+86400）参与比较。
+        // 跨午夜段（如 22:00→次日06:00）的结束时间属于次日；对当前自然日而言，
+        // 该工作段一直覆盖到日界线，因此以 end_ts 参与比较，避免班内活动被误判为加班。
         let last_segment_end_ts = segment_ts
             .iter()
-            .map(|&(ws, we)| if we < ws { we + 86400 } else { we })
+            .map(|&(ws, we)| if we < ws { end_ts } else { we })
             .max()
             .unwrap_or(end_ts);
         let mut app_usage_map: std::collections::HashMap<
@@ -1626,6 +1780,7 @@ impl Database {
             browser_url,
             executable_path,
             semantic_category,
+            screenshot_path,
             screenshot_url,
         ) in activity_rows
         {
@@ -1682,7 +1837,13 @@ impl Database {
                 continue;
             }
 
-            if timestamp >= start_ts && timestamp < end_ts {
+            if timestamp >= start_ts
+                && timestamp < end_ts
+                && (!screenshot_path.trim().is_empty()
+                    || screenshot_url
+                        .as_deref()
+                        .is_some_and(|url| !url.trim().is_empty()))
+            {
                 screenshot_count += 1;
             }
 
@@ -1696,12 +1857,16 @@ impl Database {
                     end_ts,
                     &segment_ts,
                 );
-            }
 
-            // 计算下班后（最后工作时段结束后）的活动时长，即加班时长
-            if timestamp > last_segment_end_ts {
-                after_hours_duration +=
-                    calculate_overlap_duration(timestamp, duration, last_segment_end_ts, end_ts);
+                // 加班也是工作时长，娱乐活动不能进入“含加班”口径。
+                if timestamp > last_segment_end_ts {
+                    after_hours_duration += calculate_overlap_duration(
+                        timestamp,
+                        duration,
+                        last_segment_end_ts,
+                        end_ts,
+                    );
+                }
             }
 
             let interval_start = timestamp.saturating_sub(duration);
@@ -1805,13 +1970,13 @@ impl Database {
                 screenshot_url,
             })
             .collect();
-        app_usage.sort_by(|a, b| b.duration.cmp(&a.duration));
+        app_usage.sort_by_key(|b| Reverse(b.duration));
 
         let mut category_usage: Vec<CategoryUsage> = category_usage_map
             .into_iter()
             .map(|(category, duration)| CategoryUsage { category, duration })
             .collect();
-        category_usage.sort_by(|a, b| b.duration.cmp(&a.duration));
+        category_usage.sort_by_key(|b| Reverse(b.duration));
 
         let hourly_activity_distribution: Vec<HourlyActivityBucket> = hourly_ranges
             .iter()
@@ -1857,7 +2022,9 @@ impl Database {
                                 })
                                 .collect();
                             url_details.sort_by(|a, b| {
-                                b.duration.cmp(&a.duration).then_with(|| a.url.cmp(&b.url))
+                                b.duration
+                                    .cmp(&a.duration)
+                                    .then_with(|| a.url.cmp(&b.url))
                             });
                             let domain_duration: i64 = url_details.iter().map(|u| u.duration).sum();
                             DomainUsage {
@@ -1870,7 +2037,7 @@ impl Database {
                         .collect(),
                     None => Vec::new(),
                 };
-                domains.sort_by(|a, b| b.duration.cmp(&a.duration));
+                domains.sort_by_key(|b| Reverse(b.duration));
 
                 BrowserUsage {
                     browser_name: browser_name.clone(),
@@ -1882,7 +2049,7 @@ impl Database {
                 }
             })
             .collect();
-        browser_usage.sort_by(|a, b| b.duration.cmp(&a.duration));
+        browser_usage.sort_by_key(|b| Reverse(b.duration));
 
         let mut url_usage_rows: Vec<(String, i64)> = url_duration_map.into_iter().collect();
         url_usage_rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
@@ -1895,6 +2062,23 @@ impl Database {
             *domain_total_map.entry(domain).or_insert(0) += duration;
         }
 
+        // 域名 URL 明细：必须用「截断前」的完整列表构建,否则每个域名的"页数"
+        // (domain.urls.len)会被全局 top-10 截断压制——所有域名页数之和 ≤10,
+        // 概览"常驻网站"的页数因此严重偏小(这是页数显示不对的根因)。
+        // 时长聚合(domain_total_map)本就在截断前完成,不受影响。
+        let mut domain_url_detail_map: std::collections::HashMap<String, Vec<UrlDetail>> =
+            std::collections::HashMap::new();
+        for (url, duration) in &url_usage_rows {
+            domain_url_detail_map
+                .entry(crate::categorize::browser_page_domain_label(url))
+                .or_default()
+                .push(UrlDetail {
+                    url: url.clone(),
+                    duration: *duration,
+                });
+        }
+
+        // url_usage 仍取全局 top-10(用于"最常访问 URL"展示),与页数明细解耦
         url_usage_rows.truncate(10);
         let url_usage: Vec<UrlUsage> = url_usage_rows
             .into_iter()
@@ -1904,19 +2088,6 @@ impl Database {
                 duration,
             })
             .collect();
-
-        // 从截断后的 URL 列表构建 URL 明细
-        let mut domain_url_detail_map: std::collections::HashMap<String, Vec<UrlDetail>> =
-            std::collections::HashMap::new();
-        for u in &url_usage {
-            domain_url_detail_map
-                .entry(u.domain.clone())
-                .or_default()
-                .push(UrlDetail {
-                    url: u.url.clone(),
-                    duration: u.duration,
-                });
-        }
         let mut domain_usage: Vec<DomainUsage> = domain_total_map
             .into_iter()
             .map(|(domain, duration)| {
@@ -1929,8 +2100,8 @@ impl Database {
                 }
             })
             .collect();
-        domain_usage.sort_by(|a, b| b.duration.cmp(&a.duration));
-        domain_usage.truncate(10);
+        domain_usage.sort_by_key(|b| Reverse(b.duration));
+        let domain_total_count = domain_usage.len();
 
         Ok(DailyStats {
             total_duration,
@@ -1940,6 +2111,7 @@ impl Database {
             browser_duration,
             url_usage,
             domain_usage,
+            domain_total_count,
             browser_usage,
             work_time_duration,
             overtime_duration: after_hours_duration,
@@ -1983,8 +2155,7 @@ impl Database {
 
         let date_parsed = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
             .map_err(|e| AppError::Config(e.to_string()))?;
-        let start_ts = safe_local_timestamp(date_parsed.and_hms_opt(0, 0, 0).unwrap());
-        let end_ts = start_ts + 86400;
+        let (start_ts, end_ts) = local_day_bounds(date_parsed)?;
 
         let limit_val = limit.unwrap_or(1000);
         let offset_val = offset.unwrap_or(0);
@@ -2087,6 +2258,17 @@ impl Database {
         date_from: &str,
         date_to: &str,
     ) -> Result<Vec<HourlyAppBucket>> {
+        self.get_hourly_app_breakdown_range_filtered(date_from, date_to, &[], &[])
+    }
+
+    /// 获取日期范围内每小时×应用的时长分布，并在活动行进入小时聚合前应用隐私过滤。
+    pub fn get_hourly_app_breakdown_range_filtered(
+        &self,
+        date_from: &str,
+        date_to: &str,
+        ignored_apps: &[String],
+        excluded_domains: &[String],
+    ) -> Result<Vec<HourlyAppBucket>> {
         let mut start_date = chrono::NaiveDate::parse_from_str(date_from, "%Y-%m-%d")
             .map_err(|e| AppError::Config(e.to_string()))?;
         let mut end_date = chrono::NaiveDate::parse_from_str(date_to, "%Y-%m-%d")
@@ -2094,8 +2276,8 @@ impl Database {
         if start_date > end_date {
             std::mem::swap(&mut start_date, &mut end_date);
         }
-        let start_ts = safe_local_timestamp(start_date.and_hms_opt(0, 0, 0).unwrap());
-        let end_ts = safe_local_timestamp(end_date.and_hms_opt(0, 0, 0).unwrap()) + 86400;
+        let start_ts = local_day_bounds(start_date)?.0;
+        let end_ts = local_day_bounds(end_date)?.1;
         let conn = self.conn.lock().map_err(|e| {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
@@ -2105,15 +2287,28 @@ impl Database {
                 id,
                 timestamp,
                 app_name,
+                window_title,
+                ocr_text,
                 category,
                 duration,
-                screenshot_url
+                screenshot_url,
+                browser_url
              FROM activities
              WHERE timestamp > ?1 AND (timestamp - duration) < ?2 AND duration > 0
              ORDER BY timestamp ASC",
         )?;
 
-        let raw: Vec<(i64, i64, String, String, i64, Option<String>)> = stmt
+        let raw: Vec<(
+            i64,
+            i64,
+            String,
+            String,
+            Option<String>,
+            String,
+            i64,
+            Option<String>,
+            Option<String>,
+        )> = stmt
             .query_map(params![start_ts, end_ts], |row| {
                 Ok((
                     row.get(0)?,
@@ -2122,6 +2317,9 @@ impl Database {
                     row.get(3)?,
                     row.get(4)?,
                     row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
                 ))
             })?
             .filter_map(|r| r.ok())
@@ -2151,7 +2349,58 @@ impl Database {
             ),
         > = std::collections::HashMap::new();
 
-        for (row_id, timestamp, app_name, category, duration, screenshot_url) in raw {
+        for (
+            row_id,
+            timestamp,
+            app_name,
+            window_title,
+            ocr_text,
+            category,
+            duration,
+            screenshot_url,
+            browser_url,
+        ) in raw
+        {
+            if matches_ignored_app_for_stats(&app_name, ignored_apps) {
+                continue;
+            }
+
+            if crate::categorize::is_browser_app(&app_name) {
+                let normalized_browser_url = browser_url
+                    .as_deref()
+                    .map(normalize_url)
+                    .filter(|url| !url.is_empty());
+
+                let page_hint = normalized_browser_url
+                    .as_deref()
+                    .filter(|url| !crate::categorize::is_merged_domain(url))
+                    .map(|url| url.to_string())
+                    .or_else(|| crate::categorize::infer_browser_page_hint(&window_title))
+                    .or_else(|| {
+                        ocr_text
+                            .as_deref()
+                            .and_then(crate::categorize::infer_browser_page_hint_from_text)
+                    });
+
+                let (domain, page_hint) = match page_hint {
+                    Some(page_hint) => (
+                        crate::categorize::browser_page_domain_label(&page_hint),
+                        page_hint,
+                    ),
+                    None => (
+                        UNRESOLVED_BROWSER_DOMAIN_LABEL.to_string(),
+                        normalized_browser_url
+                            .unwrap_or_else(|| UNRESOLVED_BROWSER_URL_LABEL.to_string()),
+                    ),
+                };
+
+                if matches_excluded_domain_for_stats(&domain, excluded_domains)
+                    || matches_excluded_domain_for_stats(&page_hint, excluded_domains)
+                {
+                    continue;
+                }
+            }
+
             let interval_start = timestamp.saturating_sub(duration);
             let overlap_start = interval_start.max(start_ts);
             let overlap_end = timestamp.min(end_ts);
@@ -2516,8 +2765,7 @@ impl Database {
         let date_parsed = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
             .map_err(|e| AppError::Config(e.to_string()))?;
         let h = (hour as u32).min(23);
-        let start_ts = safe_local_timestamp(date_parsed.and_hms_opt(h, 0, 0).unwrap());
-        let end_ts = start_ts + 3600; // 1小时
+        let (start_ts, end_ts) = local_hour_bounds(date_parsed, h)?;
 
         let sql = format!(
             "SELECT {ACTIVITY_SELECT_COLUMNS}
@@ -2794,7 +3042,7 @@ impl Database {
 
         let target = crate::categorize::normalize_display_app_name(app_name).to_lowercase();
         // 用 LIKE 做初步过滤，减少加载量；精确匹配仍在 Rust 侧完成
-        let like_pattern = format!("%{}%", app_name);
+        let like_pattern = format!("%{app_name}%");
         let sql = format!(
             "SELECT {ACTIVITY_SELECT_COLUMNS}
              FROM activities
@@ -2832,7 +3080,7 @@ impl Database {
         );
         let mut stmt = conn.prepare(&sql)?;
 
-        let like_pattern = format!("%{}%", &target);
+        let like_pattern = format!("%{}%", target);
         let activities = stmt
             .query_map([&like_pattern], activity_from_row)?
             .filter_map(|row| row.ok())
@@ -2883,7 +3131,7 @@ impl Database {
         let tokens: Vec<String> = query
             .split_whitespace()
             .map(|t| t.trim().trim_matches(is_punct))
-            .filter(|t| t.len() >= 1 && !t.is_empty())
+            .filter(|t| !t.is_empty() && !t.is_empty())
             .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
             .collect();
 
@@ -3111,7 +3359,7 @@ impl Database {
                     source_id: Some(id),
                     date: date.clone(),
                     timestamp: created_at,
-                    title: format!("{date} {:02}:00 小时摘要", hour),
+                    title: format!("{date} {hour:02}:00 小时摘要"),
                     excerpt: pick_excerpt(&[summary.clone(), main_apps.clone()]),
                     app_name: None,
                     browser_url: None,
@@ -3670,7 +3918,7 @@ impl Database {
                 source_id: Some(id),
                 date: date.clone(),
                 timestamp: created_at,
-                title: format!("{date} {:02}:00 小时摘要", hour),
+                title: format!("{date} {hour:02}:00 小时摘要"),
                 excerpt: pick_excerpt(&[summary.clone(), main_apps.clone()]),
                 app_name: None,
                 browser_url: None,
@@ -3739,7 +3987,11 @@ impl Database {
 
 #[cfg(test)]
 mod tests {
-    use super::{safe_local_timestamp, Activity, Database};
+    use super::{
+        apply_flex_overtime_correction, local_day_bounds, local_hour_bounds,
+        local_hour_end_timestamp, safe_local_timestamp, Activity, Database,
+    };
+    use chrono::{TimeZone, Timelike};
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -3755,6 +4007,54 @@ mod tests {
         let date = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").expect("解析日期失败");
         let ndt = date.and_hms_opt(hour, minute, 0).expect("构造本地时间失败");
         safe_local_timestamp(ndt)
+    }
+
+    #[test]
+    fn 补传查询应只返回近期缺远程url且有本地截图的记录() {
+        let db_path = temp_db_path("backfill");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let now = chrono::Local::now().timestamp();
+
+        let mut base = Activity {
+            id: None,
+            timestamp: now - 10,
+            app_name: "Code".to_string(),
+            window_title: "缺URL".to_string(),
+            screenshot_path: "screenshots/a.jpg".to_string(),
+            ocr_text: None,
+            category: "development".to_string(),
+            duration: 10,
+            browser_url: None,
+            executable_path: None,
+            semantic_category: None,
+            semantic_confidence: None,
+            screenshot_url: None,
+        };
+        db.insert_activity(&base).expect("插入缺URL记录失败");
+
+        base.window_title = "已有URL".to_string();
+        base.screenshot_path = "screenshots/b.jpg".to_string();
+        base.screenshot_url = Some("https://cdn.example.com/b.jpg".to_string());
+        db.insert_activity(&base).expect("插入已有URL记录失败");
+
+        base.window_title = "无截图".to_string();
+        base.screenshot_path = String::new();
+        base.screenshot_url = None;
+        db.insert_activity(&base).expect("插入无截图记录失败");
+
+        base.window_title = "过旧".to_string();
+        base.screenshot_path = "screenshots/c.jpg".to_string();
+        base.timestamp = now - 100_000;
+        db.insert_activity(&base).expect("插入过旧记录失败");
+
+        let pending = db
+            .get_activities_missing_screenshot_url(now - 3600, 10)
+            .expect("查询补传记录失败");
+
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].1, "screenshots/a.jpg");
+
+        let _ = std::fs::remove_file(db_path);
     }
 
     #[test]
@@ -4448,6 +4748,41 @@ mod tests {
     }
 
     #[test]
+    fn 每日统计应保留完整域名并记录真实域名总数() {
+        let db_path = temp_db_path("daily-stats-full-domains");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let date = "2026-03-27";
+
+        for index in 0..12 {
+            db.insert_activity(&Activity {
+                id: None,
+                timestamp: local_ts(date, 10, index + 1),
+                app_name: "Chrome".to_string(),
+                window_title: format!("site-{index}"),
+                screenshot_path: format!("site-{index}.jpg"),
+                ocr_text: None,
+                category: "browser".to_string(),
+                duration: 60,
+                browser_url: Some(format!("https://site-{index}.example/page")),
+                executable_path: None,
+                semantic_category: None,
+                semantic_confidence: None,
+                screenshot_url: None,
+            })
+            .expect("插入测试数据失败");
+        }
+
+        let stats = db
+            .get_daily_stats_with_work_time(date, 9, 18, 0, 0)
+            .expect("读取今日统计失败");
+
+        assert_eq!(stats.domain_usage.len(), 12);
+        assert_eq!(stats.domain_total_count, 12);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
     fn 自定义分类不应在时间分配里被归并到其他() {
         let db_path = temp_db_path("custom-category-not-other");
         let db = Database::new(&db_path).expect("创建测试数据库失败");
@@ -4559,6 +4894,186 @@ mod tests {
         assert_eq!(buckets[10].apps.len(), 1);
         assert_eq!(buckets[10].apps[0].app_name, "Cursor");
         assert_eq!(buckets[10].apps[0].duration, 20 * 60);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 每小时应用明细应在聚合前应用应用与域名隐私过滤() {
+        let db_path = temp_db_path("hourly-app-breakdown-privacy");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let date = "2026-03-27";
+
+        for activity in [
+            Activity {
+                id: None,
+                timestamp: local_ts(date, 10, 10),
+                app_name: "Chrome".to_string(),
+                window_title: "allowed".to_string(),
+                screenshot_path: "allowed.jpg".to_string(),
+                ocr_text: None,
+                category: "browser".to_string(),
+                duration: 10 * 60,
+                browser_url: Some("https://allowed.example/doc".to_string()),
+                executable_path: None,
+                semantic_category: None,
+                semantic_confidence: None,
+                screenshot_url: None,
+            },
+            Activity {
+                id: None,
+                timestamp: local_ts(date, 10, 20),
+                app_name: "Chrome".to_string(),
+                window_title: "private".to_string(),
+                screenshot_path: "private.jpg".to_string(),
+                ocr_text: None,
+                category: "browser".to_string(),
+                duration: 10 * 60,
+                browser_url: Some("https://private.example/secret".to_string()),
+                executable_path: None,
+                semantic_category: None,
+                semantic_confidence: None,
+                screenshot_url: None,
+            },
+            Activity {
+                id: None,
+                timestamp: local_ts(date, 10, 30),
+                app_name: "SecretApp".to_string(),
+                window_title: "ignored".to_string(),
+                screenshot_path: "ignored.jpg".to_string(),
+                ocr_text: None,
+                category: "communication".to_string(),
+                duration: 10 * 60,
+                browser_url: None,
+                executable_path: None,
+                semantic_category: None,
+                semantic_confidence: None,
+                screenshot_url: None,
+            },
+            Activity {
+                id: None,
+                timestamp: local_ts(date, 10, 40),
+                app_name: "Code".to_string(),
+                window_title: "main.rs".to_string(),
+                screenshot_path: "code.jpg".to_string(),
+                ocr_text: None,
+                category: "development".to_string(),
+                duration: 10 * 60,
+                browser_url: None,
+                executable_path: None,
+                semantic_category: None,
+                semantic_confidence: None,
+                screenshot_url: None,
+            },
+        ] {
+            db.insert_activity(&activity).expect("插入测试数据失败");
+        }
+
+        let buckets = db
+            .get_hourly_app_breakdown_range_filtered(
+                date,
+                date,
+                &["secretapp".to_string()],
+                &["private.example".to_string()],
+            )
+            .expect("读取隐私过滤后的每小时应用明细失败");
+
+        assert_eq!(buckets[10].total_duration, 20 * 60);
+        assert_eq!(buckets[10].apps.len(), 2);
+        assert_eq!(
+            buckets[10]
+                .apps
+                .iter()
+                .find(|app| app.app_name == "Google Chrome")
+                .map(|app| app.duration),
+            Some(10 * 60)
+        );
+        assert_eq!(
+            buckets[10]
+                .apps
+                .iter()
+                .find(|app| app.app_name == "VS Code")
+                .map(|app| app.duration),
+            Some(10 * 60)
+        );
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 每小时应用明细应复用主统计的浏览器页面提示隐私过滤() {
+        let db_path = temp_db_path("hourly-app-breakdown-browser-page-hint-privacy");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let date = "2026-03-27";
+
+        for activity in [
+            Activity {
+                id: None,
+                timestamp: local_ts(date, 10, 10),
+                app_name: "Chrome".to_string(),
+                window_title: "https://allowed.example/doc - Chrome".to_string(),
+                screenshot_path: "allowed.jpg".to_string(),
+                ocr_text: None,
+                category: "browser".to_string(),
+                duration: 10 * 60,
+                browser_url: Some("https://allowed.example/doc".to_string()),
+                executable_path: None,
+                semantic_category: None,
+                semantic_confidence: None,
+                screenshot_url: None,
+            },
+            Activity {
+                id: None,
+                timestamp: local_ts(date, 10, 20),
+                app_name: "Chrome".to_string(),
+                window_title: "https://private.example/from-title - Chrome".to_string(),
+                screenshot_path: "private-title.jpg".to_string(),
+                ocr_text: None,
+                category: "browser".to_string(),
+                duration: 10 * 60,
+                browser_url: None,
+                executable_path: None,
+                semantic_category: None,
+                semantic_confidence: None,
+                screenshot_url: None,
+            },
+            Activity {
+                id: None,
+                timestamp: local_ts(date, 10, 30),
+                app_name: "Chrome".to_string(),
+                window_title: "页面加载中".to_string(),
+                screenshot_path: "private-ocr.jpg".to_string(),
+                ocr_text: Some("当前页面 https://private.example/from-ocr".to_string()),
+                category: "browser".to_string(),
+                duration: 10 * 60,
+                browser_url: Some("linux.dolatest".to_string()),
+                executable_path: None,
+                semantic_category: None,
+                semantic_confidence: None,
+                screenshot_url: None,
+            },
+        ] {
+            db.insert_activity(&activity).expect("插入测试数据失败");
+        }
+
+        let excluded_domains = ["private.example".to_string()];
+        let stats = db
+            .get_daily_stats_with_segments_filtered(date, &[], &[], &excluded_domains)
+            .expect("读取隐私过滤后的主统计失败");
+        let buckets = db
+            .get_hourly_app_breakdown_range_filtered(
+                date,
+                date,
+                &[],
+                &excluded_domains,
+            )
+            .expect("读取隐私过滤后的每小时应用明细失败");
+
+        assert_eq!(stats.total_duration, 10 * 60);
+        assert_eq!(buckets[10].total_duration, stats.total_duration);
+        assert_eq!(buckets[10].apps.len(), 1);
+        assert_eq!(buckets[10].apps[0].app_name, "Google Chrome");
+        assert_eq!(buckets[10].apps[0].duration, 10 * 60);
 
         let _ = std::fs::remove_file(db_path);
     }
@@ -4760,6 +5275,124 @@ mod tests {
         assert_eq!(stats.work_time_duration, 10 * 60);
 
         let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 重叠工作段截图计数与加班分类应保持同一口径() {
+        let db_path = temp_db_path("daily-stats-overlapping-work-segments");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let date = "2026-03-27";
+
+        for activity in [
+            Activity {
+                id: None,
+                timestamp: local_ts(date, 11, 0),
+                app_name: "Code".to_string(),
+                window_title: "main.rs".to_string(),
+                screenshot_path: "code.jpg".to_string(),
+                ocr_text: None,
+                category: "development".to_string(),
+                duration: 60 * 60,
+                browser_url: None,
+                executable_path: None,
+                semantic_category: None,
+                semantic_confidence: None,
+                screenshot_url: None,
+            },
+            Activity {
+                id: None,
+                timestamp: local_ts(date, 18, 30),
+                app_name: "Video".to_string(),
+                window_title: "休息".to_string(),
+                screenshot_path: String::new(),
+                ocr_text: None,
+                category: "entertainment".to_string(),
+                duration: 30 * 60,
+                browser_url: None,
+                executable_path: None,
+                semantic_category: None,
+                semantic_confidence: None,
+                screenshot_url: None,
+            },
+            Activity {
+                id: None,
+                timestamp: local_ts(date, 19, 0),
+                app_name: "Code".to_string(),
+                window_title: "review.rs".to_string(),
+                screenshot_path: String::new(),
+                ocr_text: None,
+                category: "development".to_string(),
+                duration: 30 * 60,
+                browser_url: None,
+                executable_path: None,
+                semantic_category: None,
+                semantic_confidence: None,
+                screenshot_url: Some("https://cdn.example.com/review.jpg".to_string()),
+            },
+        ] {
+            db.insert_activity(&activity).expect("插入测试数据失败");
+        }
+
+        let stats = db
+            .get_daily_stats_with_segments(
+                date,
+                &[
+                    crate::config::WorkTimeSegment {
+                        start_hour: 9,
+                        start_minute: 0,
+                        end_hour: 12,
+                        end_minute: 0,
+                    },
+                    crate::config::WorkTimeSegment {
+                        start_hour: 10,
+                        start_minute: 0,
+                        end_hour: 13,
+                        end_minute: 0,
+                    },
+                ],
+            )
+            .expect("读取今日统计失败");
+
+        assert_eq!(stats.total_duration, 2 * 60 * 60);
+        assert_eq!(stats.work_time_duration, 60 * 60);
+        assert_eq!(stats.overtime_duration, 30 * 60);
+        assert_eq!(stats.screenshot_count, 2);
+
+        let mut flex_stats = stats.clone();
+        apply_flex_overtime_correction(&mut flex_stats, false, 0.5);
+        assert_eq!(flex_stats.work_time_duration, 90 * 60);
+        assert_eq!(flex_stats.overtime_duration, 60 * 60);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 本地自然日边界应落在相邻两天的零点() {
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 3, 8).unwrap();
+        let next_date = date.succ_opt().unwrap();
+        let (start, end) = local_day_bounds(date).expect("计算自然日边界失败");
+        let start_local = chrono::Local.timestamp_opt(start, 0).single().unwrap();
+        let end_local = chrono::Local.timestamp_opt(end, 0).single().unwrap();
+
+        assert_eq!(start_local.date_naive(), date);
+        assert_eq!(end_local.date_naive(), next_date);
+        assert_eq!(start_local.time().num_seconds_from_midnight(), 0);
+        assert_eq!(end_local.time().num_seconds_from_midnight(), 0);
+    }
+
+    #[test]
+    fn 本地小时边界应结束于下一个当地整点() {
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 1).unwrap();
+        let (start, end) = local_hour_bounds(date, 1).expect("计算小时边界失败");
+        let start_local = chrono::Local.timestamp_opt(start, 0).single().unwrap();
+        let end_local = chrono::Local.timestamp_opt(end, 0).single().unwrap();
+
+        assert_eq!(start_local.date_naive(), date);
+        assert_eq!(start_local.hour(), 1);
+        assert_eq!(end_local.date_naive(), date);
+        assert_eq!(end_local.hour(), 2);
+        assert!(end > start);
+        assert_eq!(local_hour_end_timestamp("2026-11-01", 1), Some(end));
     }
 
     #[test]

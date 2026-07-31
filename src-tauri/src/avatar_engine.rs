@@ -18,6 +18,8 @@ const AVATAR_WINDOW_BASE_WIDTH: f64 = 276.0;
 const AVATAR_WINDOW_BASE_HEIGHT: f64 = 248.0;
 const AVATAR_WINDOW_EXPANDED_BASE_WIDTH: f64 = 380.0;
 const AVATAR_WINDOW_EXPANDED_BASE_HEIGHT: f64 = 440.0;
+/// 隐藏桌宠本体时的窗口基准高度：仅保留顶部通知区（86px）+ 边距（#137 诉求二）
+const AVATAR_WINDOW_BODY_HIDDEN_BASE_HEIGHT: f64 = 110.0;
 #[cfg(test)]
 const AVATAR_WINDOW_WIDTH: f64 = AVATAR_WINDOW_BASE_WIDTH * AVATAR_SCALE_DEFAULT;
 #[cfg(test)]
@@ -44,6 +46,9 @@ pub struct AvatarStatePayload {
     pub avatar_opacity: f64,
     pub avatar_preset: String,
     pub avatar_persona: String,
+    /// 桌宠本体是否隐藏（仅保留通知）。前端据此条件渲染 AvatarCanvas（#137 诉求二）
+    #[serde(default)]
+    pub avatar_body_hidden: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -130,6 +135,7 @@ pub fn default_avatar_state() -> AvatarStatePayload {
         avatar_opacity: AVATAR_OPACITY_DEFAULT,
         avatar_preset: AVATAR_PRESET_DEFAULT.to_string(),
         avatar_persona: "assistant".to_string(),
+        avatar_body_hidden: false,
     }
 }
 
@@ -189,6 +195,7 @@ pub fn derive_avatar_state_with_rules(
             avatar_opacity: AVATAR_OPACITY_DEFAULT,
             avatar_preset: AVATAR_PRESET_DEFAULT.to_string(),
             avatar_persona: "assistant".to_string(),
+        avatar_body_hidden: false,
         };
     }
 
@@ -203,6 +210,7 @@ pub fn derive_avatar_state_with_rules(
             avatar_opacity: AVATAR_OPACITY_DEFAULT,
             avatar_preset: AVATAR_PRESET_DEFAULT.to_string(),
             avatar_persona: "assistant".to_string(),
+        avatar_body_hidden: false,
         };
     }
 
@@ -383,6 +391,7 @@ pub fn apply_avatar_visual_settings(
     opacity: f64,
     preset: &str,
     persona: &str,
+    body_hidden: bool,
 ) -> AvatarStatePayload {
     payload.avatar_opacity = opacity;
     payload.avatar_preset = if preset.trim().is_empty() {
@@ -394,6 +403,7 @@ pub fn apply_avatar_visual_settings(
         "companion" | "coach" => persona.trim().to_string(),
         _ => "assistant".to_string(),
     };
+    payload.avatar_body_hidden = body_hidden;
     payload
 }
 
@@ -403,10 +413,11 @@ pub fn sync_avatar_window(
     scale: f64,
     saved_position: Option<(i32, i32)>,
     expanded: bool,
+    body_hidden: bool,
 ) -> tauri::Result<()> {
     if enabled {
         let had_existing_window = app.get_webview_window(AVATAR_WINDOW_LABEL).is_some();
-        ensure_avatar_window(app, scale)?;
+        ensure_avatar_window(app, scale, body_hidden)?;
         if let Some(window) = app.get_webview_window(AVATAR_WINDOW_LABEL) {
             let normalized_scale = normalize_avatar_scale(scale);
             let current_position = if had_existing_window {
@@ -419,8 +430,8 @@ pub fn sync_avatar_window(
             };
             let effective_position =
                 remembered_avatar_position(had_existing_window, current_position, saved_position);
-            let (x, y) = default_avatar_position(app, normalized_scale, effective_position);
-            resize_avatar_window(&window, normalized_scale, expanded);
+            let (x, y) = default_avatar_position(app, normalized_scale, effective_position, body_hidden);
+            resize_avatar_window(&window, normalized_scale, expanded, body_hidden);
             let _ = window.set_always_on_top(true);
             let _ = window.set_visible_on_all_workspaces(true);
             let _ = window.set_skip_taskbar(true);
@@ -490,16 +501,22 @@ pub fn apply_avatar_window_expansion(
     app: &AppHandle,
     scale: f64,
     expanded: bool,
+    body_hidden: bool,
 ) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window(AVATAR_WINDOW_LABEL) {
         let normalized_scale = normalize_avatar_scale(scale);
-        resize_avatar_window(&window, normalized_scale, expanded);
-        clamp_window_within_current_monitor(&window, normalized_scale, expanded);
+        resize_avatar_window(&window, normalized_scale, expanded, body_hidden);
+        clamp_window_within_current_monitor(&window, normalized_scale, expanded, body_hidden);
     }
     Ok(())
 }
 
-fn clamp_window_within_current_monitor(window: &WebviewWindow, scale: f64, expanded: bool) {
+fn clamp_window_within_current_monitor(
+    window: &WebviewWindow,
+    scale: f64,
+    expanded: bool,
+    body_hidden: bool,
+) {
     let monitor = match window.current_monitor() {
         Ok(Some(monitor)) => monitor,
         _ => return,
@@ -515,7 +532,7 @@ fn clamp_window_within_current_monitor(window: &WebviewWindow, scale: f64, expan
         width: work_area.size.width as i32,
         height: work_area.size.height as i32,
     };
-    let (window_width, window_height) = avatar_window_size(scale, expanded);
+    let (window_width, window_height) = avatar_window_size(scale, expanded, body_hidden);
     let (clamped_x, clamped_y) =
         clamp_avatar_position_with_size(bounds, current.x, current.y, window_width, window_height);
     if (clamped_x, clamped_y) != (current.x, current.y) {
@@ -549,12 +566,12 @@ pub fn emit_avatar_input(app: &AppHandle, payload: &AvatarInputPayload) {
     let _ = app.emit_to(AVATAR_WINDOW_LABEL, AVATAR_INPUT_EVENT, payload);
 }
 
-fn ensure_avatar_window(app: &AppHandle, scale: f64) -> tauri::Result<()> {
+fn ensure_avatar_window(app: &AppHandle, scale: f64, body_hidden: bool) -> tauri::Result<()> {
     if app.get_webview_window(AVATAR_WINDOW_LABEL).is_some() {
         return Ok(());
     }
 
-    let (window_width, window_height) = avatar_window_size(scale, false);
+    let (window_width, window_height) = avatar_window_size(scale, false, body_hidden);
 
     let window = WebviewWindowBuilder::new(app, AVATAR_WINDOW_LABEL, WebviewUrl::default())
         .title("Work Review Avatar")
@@ -583,8 +600,8 @@ fn ensure_avatar_window(app: &AppHandle, scale: f64) -> tauri::Result<()> {
     Ok(())
 }
 
-fn resize_avatar_window(window: &WebviewWindow, scale: f64, expanded: bool) {
-    let (window_width, window_height) = avatar_window_size(scale, expanded);
+fn resize_avatar_window(window: &WebviewWindow, scale: f64, expanded: bool, body_hidden: bool) {
+    let (window_width, window_height) = avatar_window_size(scale, expanded, body_hidden);
     let _ = window.set_size(Size::Logical(LogicalSize::new(window_width, window_height)));
     let _ = window.set_min_size(Some(Size::Logical(LogicalSize::new(
         window_width,
@@ -600,12 +617,13 @@ fn default_avatar_position(
     app: &AppHandle,
     scale: f64,
     saved_position: Option<(i32, i32)>,
+    body_hidden: bool,
 ) -> (i32, i32) {
     // 多屏适配：已保存位置时，优先用该位置所在的显示器来 clamp，
     // 避免副屏坐标被主屏的工作区边界强行拉回（issue #120）。
     if let Some((saved_x, saved_y)) = saved_position {
         if let Some(bounds) = monitor_bounds_for_point(app, saved_x, saved_y) {
-            return resolve_avatar_position(bounds, None, saved_position, scale);
+            return resolve_avatar_position(bounds, None, saved_position, scale, body_hidden);
         }
     }
 
@@ -621,12 +639,12 @@ fn default_avatar_position(
                 _ => None,
             };
 
-            return compute_avatar_position(monitor, anchor, saved_position, scale);
+            return compute_avatar_position(monitor, anchor, saved_position, scale, body_hidden);
         }
     }
 
     if let Ok(Some(monitor)) = app.primary_monitor() {
-        return compute_avatar_position(monitor, None, saved_position, scale);
+        return compute_avatar_position(monitor, None, saved_position, scale, body_hidden);
     }
 
     saved_position.unwrap_or((40, 40))
@@ -663,6 +681,7 @@ fn compute_avatar_position(
     anchor: Option<Rect>,
     saved_position: Option<(i32, i32)>,
     scale: f64,
+    body_hidden: bool,
 ) -> (i32, i32) {
     let work_area = monitor.work_area();
     let bounds = Rect {
@@ -672,7 +691,7 @@ fn compute_avatar_position(
         height: work_area.size.height as i32,
     };
 
-    resolve_avatar_position(bounds, anchor, saved_position, scale)
+    resolve_avatar_position(bounds, anchor, saved_position, scale, body_hidden)
 }
 
 fn resolve_avatar_position(
@@ -680,8 +699,9 @@ fn resolve_avatar_position(
     anchor: Option<Rect>,
     saved_position: Option<(i32, i32)>,
     scale: f64,
+    body_hidden: bool,
 ) -> (i32, i32) {
-    let (window_width, window_height) = avatar_window_size(scale, false);
+    let (window_width, window_height) = avatar_window_size(scale, false, body_hidden);
 
     if let Some((saved_x, saved_y)) = saved_position {
         return clamp_avatar_position_with_size(
@@ -736,7 +756,7 @@ fn clamp_avatar_position_with_size(
     )
 }
 
-fn avatar_window_size(scale: f64, expanded: bool) -> (f64, f64) {
+fn avatar_window_size(scale: f64, expanded: bool, body_hidden: bool) -> (f64, f64) {
     let normalized_scale = normalize_avatar_scale(scale);
     let (base_width, base_height) = if expanded {
         (
@@ -746,9 +766,16 @@ fn avatar_window_size(scale: f64, expanded: bool) -> (f64, f64) {
     } else {
         (AVATAR_WINDOW_BASE_WIDTH, AVATAR_WINDOW_BASE_HEIGHT)
     };
+    // 隐藏本体时窗口高度收缩到仅容纳通知区（顶部气泡/卡片 + 边距），
+    // 宽度保持不变以容纳完整气泡（#137 诉求二）
+    let effective_height = if body_hidden {
+        AVATAR_WINDOW_BODY_HIDDEN_BASE_HEIGHT
+    } else {
+        base_height
+    };
     (
         ((base_width * normalized_scale) * 10.0).round() / 10.0,
-        ((base_height * normalized_scale) * 10.0).round() / 10.0,
+        ((effective_height * normalized_scale) * 10.0).round() / 10.0,
     )
 }
 
@@ -789,6 +816,7 @@ fn avatar_state(
         avatar_opacity: AVATAR_OPACITY_DEFAULT,
         avatar_preset: AVATAR_PRESET_DEFAULT.to_string(),
         avatar_persona: "assistant".to_string(),
+        avatar_body_hidden: false,
     }
 }
 
@@ -979,9 +1007,9 @@ mod tests {
 
     #[test]
     fn 桌宠窗口尺寸应随缩放变化() {
-        let (small_w, small_h) = avatar_window_size(0.7, false);
-        let (default_w, default_h) = avatar_window_size(0.9, false);
-        let (large_w, large_h) = avatar_window_size(1.3, false);
+        let (small_w, small_h) = avatar_window_size(0.7, false, false);
+        let (default_w, default_h) = avatar_window_size(0.9, false, false);
+        let (large_w, large_h) = avatar_window_size(1.3, false, false);
 
         assert!(small_w < default_w);
         assert!(small_h < default_h);
@@ -992,8 +1020,8 @@ mod tests {
 
     #[test]
     fn 桌宠窗口在展开模式下应比紧凑模式更宽更高() {
-        let (compact_w, compact_h) = avatar_window_size(0.9, false);
-        let (expanded_w, expanded_h) = avatar_window_size(0.9, true);
+        let (compact_w, compact_h) = avatar_window_size(0.9, false, false);
+        let (expanded_w, expanded_h) = avatar_window_size(0.9, true, false);
 
         assert!(expanded_w > compact_w);
         assert!(expanded_h > compact_h);
@@ -1049,7 +1077,7 @@ mod tests {
             height: 600,
         };
 
-        let (x, y) = resolve_avatar_position(bounds, Some(anchor), Some((120, 240)), 0.9);
+        let (x, y) = resolve_avatar_position(bounds, Some(anchor), Some((120, 240)), 0.9, false);
 
         assert_eq!((x, y), (120, 240));
     }
@@ -1063,7 +1091,7 @@ mod tests {
             height: 720,
         };
 
-        let (x, y) = resolve_avatar_position(bounds, None, Some((1600, 900)), 0.9);
+        let (x, y) = resolve_avatar_position(bounds, None, Some((1600, 900)), 0.9, false);
 
         assert_eq!(
             (x, y),
@@ -1096,11 +1124,11 @@ mod tests {
             width: 1280,
             height: 720,
         };
-        let (compact_w, compact_h) = avatar_window_size(0.9, false);
+        let (compact_w, compact_h) = avatar_window_size(0.9, false, false);
         let compact_x = 1280 - compact_w as i32;
         let compact_y = 720 - compact_h as i32;
 
-        let (expanded_w, expanded_h) = avatar_window_size(0.9, true);
+        let (expanded_w, expanded_h) = avatar_window_size(0.9, true, false);
         let (x, y) =
             clamp_avatar_position_with_size(bounds, compact_x, compact_y, expanded_w, expanded_h);
 
@@ -1117,7 +1145,7 @@ mod tests {
             width: 1280,
             height: 720,
         };
-        let (compact_w, compact_h) = avatar_window_size(0.9, false);
+        let (compact_w, compact_h) = avatar_window_size(0.9, false, false);
 
         let (x, y) = clamp_avatar_position_with_size(bounds, 120, 200, compact_w, compact_h);
 
@@ -1135,7 +1163,7 @@ mod tests {
             height: 1080,
         };
         let saved = (2200, 800);
-        let (compact_w, compact_h) = avatar_window_size(0.9, false);
+        let (compact_w, compact_h) = avatar_window_size(0.9, false, false);
 
         let (x, y) =
             clamp_avatar_position_with_size(secondary_bounds, saved.0, saved.1, compact_w, compact_h);
@@ -1159,7 +1187,7 @@ mod tests {
             width: 1440,
             height: 900,
         };
-        let (compact_w, compact_h) = avatar_window_size(0.9, false);
+        let (compact_w, compact_h) = avatar_window_size(0.9, false, false);
         let saved = (2200, 800);
 
         let (x, y) =
@@ -1182,9 +1210,9 @@ mod tests {
         };
         let orphan_saved = (5000, 5000);
 
-        let (x, y) = resolve_avatar_position(fallback_bounds, None, Some(orphan_saved), 0.9);
+        let (x, y) = resolve_avatar_position(fallback_bounds, None, Some(orphan_saved), 0.9, false);
 
-        let (w, h) = avatar_window_size(0.9, false);
+        let (w, h) = avatar_window_size(0.9, false, false);
         assert_eq!((x, y), (fallback_bounds.x + fallback_bounds.width - w as i32, fallback_bounds.y + fallback_bounds.height - h as i32));
     }
 }

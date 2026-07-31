@@ -173,15 +173,18 @@ You can control the recording scope as needed:
 ### Smart Organization
 
 - Work assistant based on local records, with basic template, AI-enhanced modes, and dynamic opening prompts after a model is configured
+- Overview with answer-first insights: one-sentence summary, KPI cards with week-over-week deltas, and a "today rhythm" visual card (category composition bar + per-day investment chart)
+- Top websites aggregated by domain with browser sources, page counts, duration, inline expansion, and editable semantic categorization
 - Duration statistics, category filtering, trend comparison, natural-language time ranges, and hourly activity across Today, Week, Date, and Range views
 - Fragments grouped into continuous work sessions
-- Extracts potential follow-up to-dos from pages, window titles, and context
+- Built-in categorization knowledge base (~140 domains + 70 apps) with AI auto-learning that backfills history
 
 ### Daily Reports and Review
 
-- Structured daily reports, historical review, Markdown export, and auto-export
-- Report blocks for hourly activity, time distribution, app usage, website visits, and more
-- Paragraph-level pin/hide/restore controls, with cached AI section ordering
+- Structured daily reports with TL;DR insight line, reference KPIs, and proof data panel
+- Export dropdown (Markdown / range merge / copy full text) and generation settings drawer (presets / system prompt override / paragraph management)
+- Skeleton screen during generation and prominent yesterday-report banner
+- Historical review, auto-export, paragraph-level pin/hide/restore controls, with cached AI section ordering
 - AI-enhanced prompt attachments and custom model settings
 - Website semantic categorization: changing a domain category automatically backfills history
 - Multi-segment work time: e.g. morning + afternoon, break time excluded

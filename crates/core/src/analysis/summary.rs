@@ -310,6 +310,7 @@ pub struct SummaryAnalyzer {
 }
 
 impl SummaryAnalyzer {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         provider: AiProvider,
         endpoint: &str,
@@ -592,7 +593,7 @@ impl SummaryAnalyzer {
                 .split(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
                 .filter(|word| {
                     let len = word.chars().count();
-                    len >= 2 && len <= 30
+                    (2..=30).contains(&len)
                 })
                 .take(3)
                 .collect::<Vec<_>>();
@@ -609,8 +610,7 @@ impl SummaryAnalyzer {
                     .split(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
                     .filter(|word| {
                         let len = word.chars().count();
-                        len >= 2
-                            && len <= 20
+                        (2..=20).contains(&len)
                             && word.chars().all(|c| c.is_alphabetic() || c >= '\u{4e00}')
                     })
                     .take(5)
@@ -945,7 +945,7 @@ Close with one sentence about the day's work state."#,
                         timeline,
                     ),
                 };
-                format!("{}\n\n{}", trimmed, injected)
+                format!("{trimmed}\n\n{injected}")
             }
         } else {
             base_prompt
@@ -1185,6 +1185,7 @@ mod tests {
             browser_duration: 0,
             url_usage: vec![],
             domain_usage: vec![],
+            domain_total_count: 0,
             browser_usage: vec![],
             work_time_duration: 5400,
             overtime_duration: 0,

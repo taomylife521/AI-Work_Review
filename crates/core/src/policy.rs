@@ -192,7 +192,7 @@ impl PolicyEnforcer {
                 } else {
                     (
                         PolicyDecision::Deny,
-                        Some(format!("MCP 客户端无 {:?} 权限", permission)),
+                        Some(format!("MCP 客户端无 {permission:?} 权限")),
                     )
                 }
             }
@@ -203,7 +203,7 @@ impl PolicyEnforcer {
                     } else {
                         (
                             PolicyDecision::Deny,
-                            Some(format!("技能 {} 无 {:?} 权限", skill_id, permission)),
+                            Some(format!("技能 {skill_id} 无 {permission:?} 权限")),
                         )
                     }
                 } else {
@@ -217,7 +217,7 @@ impl PolicyEnforcer {
                         | Permission::ReadDeviceStatus => (PolicyDecision::Allow, None),
                         _ => (
                             PolicyDecision::Deny,
-                            Some(format!("技能 {} 未注册 {:?} 权限", skill_id, permission)),
+                            Some(format!("技能 {skill_id} 未注册 {permission:?} 权限")),
                         ),
                     }
                 }
@@ -229,7 +229,7 @@ impl PolicyEnforcer {
                 } else {
                     (
                         PolicyDecision::Deny,
-                        Some(format!("Localhost API 无 {:?} 权限", permission)),
+                        Some(format!("Localhost API 无 {permission:?} 权限")),
                     )
                 }
             }

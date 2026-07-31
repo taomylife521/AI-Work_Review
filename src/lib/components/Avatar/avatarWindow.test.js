@@ -183,12 +183,13 @@ test('桌宠窗口应监听原生输入事件，并将键鼠活跃状态喂给�
   assert.match(inputSource, /GetCursorPos/);
 });
 
-test('Windows 上应禁用智能穿透自动命中轮询，避免启动期高频窗口 API 调用', () => {
+test('所有平台均启用智能穿透命中轮询，修复 Windows 穿透模式下通知按钮无法点击（#137）', () => {
   const inputSource = readFileSync(new URL('../../../../src-tauri/src/avatar_input.rs', import.meta.url), 'utf8');
 
   assert.match(inputSource, /smart_click_through_polling_enabled_for_platform/);
-  assert.match(inputSource, /smart_click_through_polling_enabled_for_platform\(cfg!\(target_os = "windows"\)\)/);
-  assert.match(inputSource, /fn smart_click_through_polling_enabled_for_platform\(is_windows: bool\) -> bool \{\s*!is_windows\s*\}/);
+  // 不再有 !is_windows 的平台特判；统一启用轮询
+  assert.doesNotMatch(inputSource, /fn smart_click_through_polling_enabled_for_platform\(is_windows: bool\) -> bool \{\s*!is_windows\s*\}/);
+  assert.match(inputSource, /fn smart_click_through_polling_enabled_for_platform\(\) -> bool \{\s*true\s*\}/);
 });
 
 test('桌宠键盘模式应按原版 BongoCat 键区分组选择不同高亮层', () => {
@@ -772,7 +773,7 @@ test('桌宠窗口应在继续提醒卡片出现/消失时动态扩展原生窗�
   assert.match(engineSource, /clamp_window_within_current_monitor/);
   assert.match(engineSource, /AVATAR_WINDOW_EXPANDED_BASE_WIDTH/);
   assert.match(engineSource, /AVATAR_WINDOW_EXPANDED_BASE_HEIGHT/);
-  assert.match(engineSource, /fn avatar_window_size\(scale: f64, expanded: bool\)/);
+  assert.match(engineSource, /fn avatar_window_size\(scale: f64, expanded: bool, body_hidden: bool\)/);
 });
 
 test('桌宠窗口在系统级 resize 后应回正尺寸，避免拖拽时持续变小', () => {

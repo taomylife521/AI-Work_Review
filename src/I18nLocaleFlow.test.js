@@ -11,12 +11,13 @@ async function readCommandsSource() {
 }
 
 test('前端应向日报生成与工作助手透传当前 locale，并让日期输入跟随语言切换', async () => {
-  const [appSource, reportSource, askSource, timelineSource, summarySource] = await Promise.all([
+  const [appSource, reportSource, askSource, timelineSource, summarySource, summaryDrawerSource] = await Promise.all([
     readFile(new URL('./App.svelte', import.meta.url), 'utf8'),
     readFile(new URL('./routes/report/Report.svelte', import.meta.url), 'utf8'),
     readFile(new URL('./routes/ask/Ask.svelte', import.meta.url), 'utf8'),
     readFile(new URL('./routes/timeline/Timeline.svelte', import.meta.url), 'utf8'),
     readFile(new URL('./routes/timeline/Summary.svelte', import.meta.url), 'utf8'),
+    readFile(new URL('./routes/timeline/HourlySummaryDrawer.svelte', import.meta.url), 'utf8'),
   ]);
 
   assert.match(appSource, /invoke\('generate_report', \{ date: today, force: false, locale: currentLocale \}\)/);
@@ -30,10 +31,12 @@ test('前端应向日报生成与工作助手透传当前 locale，并让日期�
 
   assert.match(reportSource, /LocalizedDatePicker/);
   assert.match(timelineSource, /LocalizedDatePicker/);
-  assert.match(summarySource, /LocalizedDatePicker/);
+  assert.doesNotMatch(summarySource, /LocalizedDatePicker/);
+  assert.match(summaryDrawerSource, /formatDurationLocalized/);
+  assert.match(summaryDrawerSource, /t\('timelineSummary\./);
   assert.match(reportSource, /localeCode=\{currentLocale\}/);
   assert.match(timelineSource, /localeCode=\{currentLocale\}/);
-  assert.match(summarySource, /localeCode=\{currentLocale\}/);
+  assert.doesNotMatch(summarySource, /localeCode=\{currentLocale\}/);
 });
 
 test('助手页展示层不应继续依赖写死中文的工作智能工具函数', async () => {

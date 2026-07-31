@@ -1,6 +1,7 @@
 <script>
   export let followup = null;
   export let copy = null;
+  export let flipLeft = false;
   export let onTimeline = () => {};
   export let onFocus = () => {};
   export let onRemember = () => {};
@@ -16,7 +17,7 @@
 {#if followup && copy}
   <div class="absolute inset-0 z-30 overflow-visible pointer-events-none">
     <section
-      class={`pointer-events-auto absolute right-[4%] top-[8px] flex w-[min(92vw,348px)] max-w-[348px] flex-col overflow-hidden rounded-[16px] border border-slate-200/95 bg-[rgba(255,255,255,0.96)] p-[14px] text-slate-900 shadow-[0_14px_28px_rgba(15,23,42,0.14),0_4px_12px_rgba(15,23,42,0.07)] backdrop-blur-[14px] ${copy.surfaceClass || ''}`}
+      class={`pointer-events-auto absolute ${flipLeft ? 'left-[4%]' : 'right-[4%]'} top-[8px] flex w-[min(92vw,348px)] max-w-[348px] flex-col overflow-hidden rounded-[16px] border border-slate-200/95 bg-[rgba(255,255,255,0.96)] p-[14px] text-slate-900 shadow-[0_14px_28px_rgba(15,23,42,0.14),0_4px_12px_rgba(15,23,42,0.07)] backdrop-blur-[14px] ${copy.surfaceClass || ''}`}
       style="max-height: calc(100vh - 16px);"
     >
       <div class="pointer-events-none absolute inset-[1px] rounded-[15px] border border-white/70"></div>

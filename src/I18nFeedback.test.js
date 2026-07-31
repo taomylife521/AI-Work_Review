@@ -17,7 +17,7 @@ test('交互反馈文案不应继续直接透出后端 message 或硬编码中�
   assert.match(updaterSource, /t\('updater\.upToDate'\)/);
   assert.match(updaterSource, /localizeRuntimeStatusMessage/);
   assert.doesNotMatch(aboutSource, /读取中\.\.\./);
-  assert.match(appUsageSource, /t\('overview\.appUsageExpandAll'/);
+  assert.match(appUsageSource, /t\('overview\.appsFooter'/);
 });
 
 test('日报模式标签在简中和繁中下不应退化为未翻译的 key', async () => {

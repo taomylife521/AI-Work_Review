@@ -1,7 +1,9 @@
 use hmac::{Hmac, Mac};
 use reqwest::Client;
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 use work_review_core::config::{
     RemoteStorageConfig, RemoteStorageProvider, S3Config, WebDavConfig,
 };
@@ -9,12 +11,68 @@ use work_review_core::error::{AppError, Result};
 
 type HmacSha256 = Hmac<Sha256>;
 
+/// 上传专用 HTTP 客户端：**禁止自动跟随重定向**。
+/// 默认策略下 301/302/303 会把 PUT 静默降级为 GET（丢弃请求体），服务器对
+/// GET 返回 200,代码误判"上传成功"而远端并没有文件——这是 WebDAV 配置
+/// http→https 跳转、域名迁移等场景下"配置了却不生效"的头号原因。
+/// 主流客户端（rclone 等）的做法一致：遇到重定向直接报错,让用户改填最终地址。
+static UPLOAD_CLIENT: OnceLock<Client> = OnceLock::new();
+
+fn upload_client() -> Result<&'static Client> {
+    if let Some(client) = UPLOAD_CLIENT.get() {
+        return Ok(client);
+    }
+    let built = Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| AppError::Unknown(format!("初始化上传客户端失败: {e}")))?;
+    Ok(UPLOAD_CLIENT.get_or_init(|| built))
+}
+
+/// 网络抖动 / 5xx 瞬态失败自动重试一次（2 秒后），避免后台上传因一次抖动而丢失。
+async fn send_with_one_retry(
+    request: reqwest::RequestBuilder,
+) -> std::result::Result<reqwest::Response, reqwest::Error> {
+    let retry = request.try_clone();
+    match request.send().await {
+        Ok(resp) if resp.status().is_server_error() => match retry {
+            Some(retry_request) => {
+                log::warn!("远程上传返回 {}，2 秒后重试一次", resp.status());
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                retry_request.send().await
+            }
+            None => Ok(resp),
+        },
+        Ok(resp) => Ok(resp),
+        Err(e) => match retry {
+            Some(retry_request) => {
+                log::warn!("远程上传请求失败（{e}），2 秒后重试一次");
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                retry_request.send().await
+            }
+            None => Err(e),
+        },
+    }
+}
+
+/// 本进程内已确认存在的 WebDAV 目录缓存（MKCOL 成功或返回 405 视为已存在）。
+/// 截图按天分目录，同一目录只需确认一次，不再每张截图逐级重发 MKCOL；
+/// 若远端目录被外部删除，后续 PUT 会以 409 等状态失败并由补传机制兜底，
+/// 进程重启后缓存自然重建。
+static ENSURED_WEBDAV_DIRS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+fn ensured_webdav_dirs() -> &'static Mutex<HashSet<String>> {
+    ENSURED_WEBDAV_DIRS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
 pub async fn upload_screenshot(
-    client: &Client,
     config: &RemoteStorageConfig,
     local_path: &Path,
     relative_path: &str,
 ) -> Result<String> {
+    let client = upload_client()?;
     let file_bytes = tokio::fs::read(local_path)
         .await
         .map_err(|e| AppError::Screenshot(format!("读取截图文件失败: {e}")))?;
@@ -89,15 +147,16 @@ async fn upload_s3(
         config.access_key, credential_scope, signed_headers, signature
     );
 
-    let resp = client
+    // SigV4 签名有 15 分钟有效窗口，2 秒后的重试可安全重放同一签名请求
+    let request = client
         .put(&url)
         .header("Content-Type", content_type)
         .header("Host", &host_with_port)
         .header("x-amz-content-sha256", &payload_hash)
         .header("x-amz-date", &amz_date)
         .header("Authorization", &authorization)
-        .body(file_bytes.to_vec())
-        .send()
+        .body(file_bytes.to_vec());
+    let resp = send_with_one_retry(request)
         .await
         .map_err(|e| AppError::Screenshot(format!("S3 PUT 请求失败: {e}")))?;
 
@@ -106,8 +165,7 @@ async fn upload_s3(
         let body = resp.text().await.unwrap_or_default();
         let body_preview = body.chars().take(500).collect::<String>();
         return Err(AppError::Screenshot(format!(
-            "S3 PUT 返回 {}: {}",
-            status, body_preview
+            "S3 PUT 返回 {status}: {body_preview}"
         )));
     }
 
@@ -227,12 +285,12 @@ async fn upload_webdav(
     .await?;
 
     let put_url = format!("{}/{}", base, &object_path);
-    let resp = client
+    let request = client
         .put(&put_url)
         .basic_auth(&config.username, Some(&config.password))
-        .header("Content-Type", "image/jpeg")
-        .body(file_bytes.to_vec())
-        .send()
+        .header("Content-Type", content_type_for_extension(&object_path))
+        .body(file_bytes.to_vec());
+    let resp = send_with_one_retry(request)
         .await
         .map_err(|e| AppError::Screenshot(format!("WebDAV PUT 失败: {e}")))?;
 
@@ -241,8 +299,7 @@ async fn upload_webdav(
         let body = resp.text().await.unwrap_or_default();
         let body_preview = body.chars().take(500).collect::<String>();
         return Err(AppError::Screenshot(format!(
-            "WebDAV PUT 返回 {}: {}",
-            status, body_preview
+            "WebDAV PUT 返回 {status}: {body_preview}"
         )));
     }
 
@@ -252,6 +309,7 @@ async fn upload_webdav(
     Ok(public_url)
 }
 
+/// 逐级确保远程目录存在（带进程内缓存，已确认过的目录不再重复 MKCOL）。
 async fn ensure_webdav_directories(
     client: &Client,
     base_url: &str,
@@ -272,6 +330,16 @@ async fn ensure_webdav_directories(
         }
         current.push_str(part);
 
+        let cache_key = format!("{}/{}", base_url, &current);
+        {
+            let ensured = ensured_webdav_dirs()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if ensured.contains(&cache_key) {
+                continue;
+            }
+        }
+
         let mkcol_url = format!("{}/{}/", base_url, &current);
         let mkcol_method = reqwest::Method::from_bytes(b"MKCOL")
             .map_err(|e| AppError::Screenshot(format!("MKCOL method: {e}")))?;
@@ -282,7 +350,12 @@ async fn ensure_webdav_directories(
             .send()
             .await
         {
-            Ok(r) if r.status().is_success() || r.status().as_u16() == 405 => {}
+            Ok(r) if r.status().is_success() || r.status().as_u16() == 405 => {
+                ensured_webdav_dirs()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(cache_key);
+            }
             Ok(r) => log::debug!("MKCOL {} 返回 {}", mkcol_url, r.status()),
             Err(e) => log::debug!("MKCOL {mkcol_url} 失败: {e}"),
         }

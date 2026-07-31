@@ -2,25 +2,26 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-test('工作时间跨零点时应显示跨天后的总时长而不是横线', async () => {
+test('工作时间跨零点时应拆成当天首尾两段后计算并集', async () => {
   const source = await readFile(
     new URL('./components/SettingsGeneral.svelte', import.meta.url),
     'utf8'
   );
 
-  assert.match(source, /endTotal === startTotal/);
-  assert.match(source, /endTotal < startTotal/);
-  assert.match(source, /24 \* 60/);
-  assert.doesNotMatch(source, /const diffSeconds = \(endTotal - startTotal\) \* 60;/);
+  assert.match(source, /function totalWorkSegmentMinutes\(segments\)/);
+  assert.match(source, /ranges\.push\(\[start, 24 \* 60\], \[0, end\]\)/);
+  assert.match(source, /ranges\.sort/);
+  assert.match(source, /Math\.max\(current\[1\], range\[1\]\)/);
 });
 
-test('开始时间等于结束时间时应显示零时长而不是横线', async () => {
+test('开始时间等于结束时间时应按零时长处理', async () => {
   const source = await readFile(
     new URL('./components/SettingsGeneral.svelte', import.meta.url),
     'utf8'
   );
 
-  assert.match(source, /endTotal === startTotal/);
+  assert.match(source, /if \(start === end\) continue/);
+  assert.match(source, /const diffMinutes = totalWorkSegmentMinutes\(workSegments\)/);
   assert.match(source, /formatDurationLocalized\(0\)/);
 });
 
@@ -148,6 +149,31 @@ test('基本设置页不应继续内嵌设备节点与控制面配置块，相�
   assert.doesNotMatch(source, /config\.node_gateway/);
   assert.doesNotMatch(source, /invoke\('get_node_gateway_status'\)/);
   assert.doesNotMatch(source, /control_plane_endpoint/);
+});
+
+test('基本设置的开关和数值输入应提供本地化可访问名称', async () => {
+  const source = await readFile(
+    new URL('./components/SettingsGeneral.svelte', import.meta.url),
+    'utf8'
+  );
+
+  assert.equal((source.match(/role="switch"/g) || []).length, 4);
+  assert.equal((source.match(/aria-checked=\{/g) || []).length, 4);
+  for (const key of [
+    'workTime',
+    'standardWorkHours',
+    'idleThreshold',
+    'workGoalHours',
+    'reportAutoGenerateTime',
+    'autoStart',
+    'hideDockIcon',
+    'lightweightMode',
+  ]) {
+    assert.match(source, new RegExp(`aria-label=\\{t\\('settingsGeneral\\.${key}'\\)\\}`));
+  }
+  assert.match(source, /aria-label=\{`\$\{t\('settingsGeneral\.segmentLabel'/);
+  assert.match(source, /\$\{t\('settingsGeneral\.from'\)\}`\}/);
+  assert.match(source, /\$\{t\('settingsGeneral\.to'\)\}`\}/);
 });
 
 test('工作时间设置应支持分段配置并写回 work_time_segments', async () => {

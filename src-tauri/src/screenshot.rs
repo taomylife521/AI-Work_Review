@@ -1237,6 +1237,7 @@ fn run_gnome_display_config_positions() -> Option<Vec<(i32, i32)>> {
 }
 
 #[cfg(any(target_os = "linux", test))]
+#[allow(clippy::too_many_arguments)]
 fn linux_screenshot_support_for_session(
     session: LinuxDesktopSession,
     desktop_environment: LinuxDesktopEnvironment,

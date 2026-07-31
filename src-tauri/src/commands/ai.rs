@@ -2,11 +2,8 @@
 
 use crate::config::{AiProvider, AiProviderConfig, ModelConfig};
 use crate::error::AppError;
-use crate::AppState;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::State;
 
 /// 模型测试结果
 #[derive(Serialize, Deserialize, Debug)]
@@ -15,10 +12,6 @@ pub struct ModelTestResult {
     pub message: String,
     pub response_time_ms: u64,
     pub model_info: Option<String>,
-}
-
-pub(crate) fn is_text_model_available(model_config: &ModelConfig) -> bool {
-    !model_config.endpoint.trim().is_empty() && !model_config.model.trim().is_empty()
 }
 
 /// 判断主机名是否为本机/内网地址（Ollama 等本地部署允许走 http）。
@@ -240,7 +233,7 @@ fn openai_compatible_chat_completion_urls(endpoint: &str) -> Vec<String> {
     // base 已含版本号段（/v1、/v3、/v4 等）：直接拼 /chat/completions，不再回退 /v1。
     // 例：火山引擎 api/v3 → v3/chat/completions（正确），不应再试 v3/v1/chat/completions。
     let mut urls = vec![format!("{base}/chat/completions")];
-    if !endpoint_has_version_segment(&base) {
+    if !endpoint_has_version_segment(base) {
         // base 不含版本号（如 DeepSeek api.deepseek.com）：补一个 /v1 回退候选。
         urls.push(format!("{base}/v1/chat/completions"));
     }
@@ -746,49 +739,30 @@ pub async fn fetch_models(
 
 /// 获取支持的 AI 提供商列表
 /// 测试助手联网搜索配置：按当前服务商发一次最小搜索请求。
-/// 不要求先启用总开关（用户通常想先测通再开启）。
+/// 接收设置页表单的当前值直接测试（而非后端已保存配置）：设置更改需点「保存」
+/// 才落盘，此前命令读已保存配置，填完表单未保存就点「测试搜索」会误报
+/// 「请先填写 Tavily API Key」（选了免费方案却仍校验旧的服务商）。所测即所见；
+/// 实际运行仍以保存后的配置为准。不要求先启用总开关（用户通常想先测通再开启）。
 #[tauri::command]
 pub async fn test_assistant_search(
-    state: State<'_, Arc<Mutex<AppState>>>,
+    provider: String,
+    api_key: Option<String>,
 ) -> Result<serde_json::Value, AppError> {
-    let (provider, api_key) = {
-        let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-        (
-            s.config.assistant_search_provider.clone(),
-            s.config
-                .assistant_search_api_key
-                .clone()
-                .unwrap_or_default(),
-        )
-    };
+    let api_key = api_key.unwrap_or_default();
 
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(12))
-        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(20))
+        .connect_timeout(Duration::from_secs(8))
         .build()
         .map_err(|e| AppError::Unknown(format!("创建 HTTP 客户端失败: {e}")))?;
 
     let started = std::time::Instant::now();
     let count: usize = match provider.as_str() {
         "duckduckgo" => {
-            // 免费方案实际请求 Bing：拿到结果页且包含结果标题即视为可用
-            let resp = client
-                .get("https://www.bing.com/search")
-                .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
-                .query(&[("q", "connection test"), ("count", "3")])
-                .send()
+            // 免费方案实际请求 Bing（含重试）：拿到结果页且包含结果标题即视为可用
+            let html = crate::agent::tools::bing_search_html(&client, "connection test", 3)
                 .await
-                .map_err(|e| AppError::Analysis(format!("搜索请求失败: {e}")))?;
-            if !resp.status().is_success() {
-                return Err(AppError::Analysis(format!(
-                    "搜索服务返回 HTTP {}",
-                    resp.status()
-                )));
-            }
-            let html = resp
-                .text()
-                .await
-                .map_err(|e| AppError::Analysis(format!("搜索响应读取失败: {e}")))?;
+                .map_err(AppError::Analysis)?;
             if html.contains("<h2") { 1 } else { 0 }
         }
         "bocha" => {

@@ -28,19 +28,19 @@ pub(crate) fn synthesize_insights_inner(
         .iter()
         .max_by_key(|h| h.duration)
     {
-        if peak.duration > 0 && peak.duration >= 1800 {
+        if peak.duration >= 1800 {
             let hours = peak.duration / 3600;
             let mins = (peak.duration % 3600) / 60;
             let content = format!(
                 "今日高峰时段 {:02}:00，累计 {}{}",
                 peak.hour,
                 if hours > 0 {
-                    format!("{}小时", hours)
+                    format!("{hours}小时")
                 } else {
                     String::new()
                 },
                 if mins > 0 {
-                    format!("{}分钟", mins)
+                    format!("{mins}分钟")
                 } else {
                     String::new()
                 },
@@ -85,10 +85,10 @@ pub(crate) fn synthesize_insights_inner(
     // 洞察 3：工作时长总结
     if stats.work_time_duration > 0 {
         let hours = stats.work_time_duration / 3600;
-        let content = format!("今日办公时长 {} 小时", hours);
+        let content = format!("今日办公时长 {hours} 小时");
         if !state
             .database
-            .has_similar_insight("work_volume", &format!("{}小时", hours))?
+            .has_similar_insight("work_volume", &format!("{hours}小时"))?
         {
             let id = state
                 .database

@@ -676,7 +676,8 @@ pub fn categorize_app(app_name: &str, window_title: &str) -> String {
         || app_lower.contains("zoom")
         || app_lower.contains("discord")
         || app_lower.contains("wechat")
-        || app_lower.contains("微信")
+        // 微信读书是阅读应用(知识库归娱乐),不应被"微信"拦进通讯
+        || (app_lower.contains("微信") && !app_lower.contains("微信读书"))
         || app_lower.contains("wecom")
         || app_lower.contains("企业微信")
         || (app_lower.contains("qq") && !app_lower.contains("qqbrowser"))
@@ -740,6 +741,12 @@ pub fn categorize_app(app_name: &str, window_title: &str) -> String {
         || app_lower.contains("爱奇艺")
     {
         return "entertainment".to_string();
+    }
+
+    // 内置应用知识库兜底：覆盖上方硬编码链之外的常见应用（中文生态/创作/学术等），
+    // 词边界匹配防误伤；仍未命中才继续窗口标题兜底与 "other"
+    if let Some(category) = crate::knowledge::builtin_app_category(&app_lower) {
+        return category.to_string();
     }
 
     // 窗口标题兜底：app_name 无法识别时，用窗口标题中的 IDE/工具关键词做最后一轮匹配

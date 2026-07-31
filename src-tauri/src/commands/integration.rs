@@ -81,17 +81,21 @@ pub async fn rotate_localhost_api_token(
     Ok(token)
 }
 
-/// 测试远程存储连接
+/// 测试远程存储连接。
+/// 接收设置页表单的当前值直接测试（而非后端已保存配置）：设置更改需点「保存」
+/// 才落盘，此前命令读已保存配置，填完表单未保存就点「测试连接」会误报
+/// 「未配置远程存储」。所测即所见；实际录制上传仍以保存后的配置为准。
 #[tauri::command]
 pub async fn test_remote_storage(
+    remote_storage: work_review_core::config::RemoteStorageConfig,
     state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<String, AppError> {
-    let (remote_config, data_dir) = {
+    let data_dir = {
         let guard = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-        (guard.config.remote_storage.clone(), guard.data_dir.clone())
+        guard.data_dir.clone()
     };
 
-    if remote_config.provider == work_review_core::config::RemoteStorageProvider::None {
+    if remote_storage.provider == work_review_core::config::RemoteStorageProvider::None {
         return Err(AppError::Config("未配置远程存储".into()));
     }
 
@@ -107,10 +111,8 @@ pub async fn test_remote_storage(
         .await
         .map_err(|e| AppError::Screenshot(format!("写入测试文件失败: {e}")))?;
 
-    let client = reqwest::Client::new();
     let result = crate::remote_upload::upload_screenshot(
-        &client,
-        &remote_config,
+        &remote_storage,
         &test_path,
         "test/connection-test.jpg",
     )

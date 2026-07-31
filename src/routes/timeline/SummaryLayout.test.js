@@ -2,29 +2,22 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-test('时段摘要页应渲染编辑部阶段带状布局', async () => {
+test('旧时段摘要页面应收敛为兼容跳转，不再维护独立摘要布局', async () => {
   const source = await readFile(new URL('./Summary.svelte', import.meta.url), 'utf8');
 
-  assert.match(source, /summary-editorial-shell/);
-  assert.match(source, /summary-band/);
-  assert.match(source, /summary-band-card/);
-  assert.match(source, /summary-app-tags/);
+  assert.match(source, /import \{ replace, params \} from 'svelte-spa-router'/);
+  assert.match(source, /onMount/);
+  assert.match(source, /summary=1/);
+  assert.match(source, /replace\(target\)/);
+  assert.doesNotMatch(source, /summary-editorial-shell/);
+  assert.doesNotMatch(source, /LocalizedDatePicker/);
+  assert.doesNotMatch(source, /get_hourly_summaries/);
 });
 
-test('时段摘要页应提取一句主摘要并替换旧的 bullet 列表模式', async () => {
+test('旧时段摘要页面跳转期间应提供轻量加载状态', async () => {
   const source = await readFile(new URL('./Summary.svelte', import.meta.url), 'utf8');
 
-  assert.match(source, /getPrimarySummary/);
-  assert.match(source, /getMainApps/);
-  assert.match(source, /summary-primary-copy/);
-  assert.doesNotMatch(source, /function formatSummary/);
-});
-
-test('时段摘要页应增加副摘要与节奏信息层，而不是只显示一句话和应用标签', async () => {
-  const source = await readFile(new URL('./Summary.svelte', import.meta.url), 'utf8');
-
-  assert.match(source, /summary-secondary-copy/);
-  assert.match(source, /summary-meta-row/);
-  assert.match(source, /summary-rhythm-chip/);
-  assert.match(source, /summary-app-count/);
+  assert.match(source, /summary-route-redirect/);
+  assert.match(source, /aria-live="polite"/);
+  assert.match(source, /timelineSummary\.title/);
 });

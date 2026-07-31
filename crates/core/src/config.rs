@@ -1127,6 +1127,9 @@ pub struct AppConfig {
     /// 是否启用桌面化身窗口
     #[serde(default)]
     pub avatar_enabled: bool,
+    /// 隐藏桌宠本体（仅保留通知气泡与卡片），窗口收缩到仅容纳通知区（#137 诉求二）
+    #[serde(default)]
+    pub avatar_body_hidden: bool,
     /// 桌宠缩放比例（0.7 - 1.3）
     #[serde(default = "default_avatar_scale")]
     pub avatar_scale: f64,
@@ -1177,6 +1180,7 @@ pub struct ConfigLoadResult {
     pub backup_error: Option<String>,
 }
 
+#[allow(clippy::large_enum_variant)]
 enum ConfigFileLoad {
     Loaded(AppConfig),
     Missing,
@@ -1329,6 +1333,7 @@ impl Default for AppConfig {
             embedding_model: default_embedding_model(),
             embedding_api_key: None,
             avatar_enabled: false,
+            avatar_body_hidden: false,
             avatar_scale: default_avatar_scale(),
             avatar_opacity: default_avatar_opacity(),
             avatar_preset: default_avatar_preset(),
@@ -2009,6 +2014,8 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::field_reassign_with_default)]
+
     use super::{
         commit_pending_config, config_backup_path, default_avatar_opacity, default_avatar_persona,
         default_avatar_preset, default_avatar_scale, default_ui_visual_style,
@@ -2270,7 +2277,7 @@ mod tests {
         drop(config_file);
 
         let result = commit_pending_config(&mut pending_config, &path, &dir, |_| {
-            Err(io::Error::new(io::ErrorKind::Other, "模拟父目录同步失败"))
+            Err(io::Error::other("模拟父目录同步失败"))
         });
 
         assert!(result.is_ok());
@@ -2291,7 +2298,7 @@ mod tests {
         std::fs::write(&path, original_bytes).expect("应写入原主配置");
 
         let result = update_config_backup_with_sync(&path, |_| {
-            Err(io::Error::new(io::ErrorKind::Other, "模拟父目录同步失败"))
+            Err(io::Error::other("模拟父目录同步失败"))
         });
 
         assert!(result.is_ok());

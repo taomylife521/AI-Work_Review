@@ -229,6 +229,7 @@ impl Orchestrator {
     /// 处理用户请求的总入口
     ///
     /// 对应 Python: Orchestrator.handle()
+    #[allow(clippy::too_many_arguments)]
     pub async fn handle(
         question: &str,
         model_config: Option<&ModelConfig>,
@@ -581,7 +582,7 @@ pub fn fast_answer(
     lines.push("".to_string());
 
     // 分类分布
-    lines.push(format!("{}：", lbl_category));
+    lines.push(format!("{lbl_category}："));
     for (cat_key, dur) in &sorted_cats {
         let cat_display = if is_chinese {
             get_category_name(cat_key).to_string()
@@ -608,7 +609,7 @@ pub fn fast_answer(
 
     // Top 5 应用
     lines.push("".to_string());
-    lines.push(format!("{}：", lbl_top_apps));
+    lines.push(format!("{lbl_top_apps}："));
     for (app, dur) in &sorted_apps {
         lines.push(format!("  - {app}: {}", fmt_dur(*dur)));
     }
@@ -619,7 +620,7 @@ pub fn fast_answer(
         .unwrap_or_default();
     if !fts_results.is_empty() {
         lines.push("".to_string());
-        lines.push(format!("{}：", lbl_related));
+        lines.push(format!("{lbl_related}："));
         for r in &fts_results {
             lines.push(format!("- {} | {}", r.date, r.title));
         }

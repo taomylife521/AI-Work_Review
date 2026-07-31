@@ -304,7 +304,7 @@
 </script>
 
 <div class="page-shell settings-editorial-shell" data-locale={currentLocale}>
-  <div class="page-header">
+  <div class="page-header page-axis-operation">
     <div class="page-title-group">
       <div class="page-title-badge">
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -351,7 +351,7 @@
       <button on:click={loadConfig} class="page-action-brand">{t('settings.retry')}</button>
     </div>
   {:else if config}
-    <div class="w-full settings-editorial-board">
+    <div class="w-full settings-editorial-board page-axis-operation">
       {#if settingsRuntimePlatform === 'macos'}
         <div class="settings-card settings-top-status-zone">
           <SettingsSystem />
@@ -359,11 +359,12 @@
       {/if}
 
       <div class="settings-stage-layout">
-        <div class="settings-tab-rail">
+        <nav class="settings-tab-rail" aria-label={t('settings.title')}>
           {#each tabs as tab}
             <button
               on:click={() => activeTab = tab.id}
               class="settings-tab-rail-item {activeTab === tab.id ? 'settings-tab-rail-item-active' : ''}"
+              aria-current={activeTab === tab.id ? 'page' : undefined}
             >
               <span class="settings-tab-rail-icon">
                 {#if tab.icon === 'general'}
@@ -392,7 +393,7 @@
               </span>
             </button>
           {/each}
-        </div>
+        </nav>
 
         <div class="settings-stage-shell">
         {#if activeTab === 'general'}

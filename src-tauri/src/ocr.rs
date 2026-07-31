@@ -821,27 +821,6 @@ return outputText
             }
         }
     }
-
-    /// 检查 PaddleOCR 是否可用
-    pub fn check_paddle_available() -> bool {
-        let python_cmd = Self::get_python_path();
-        let output = Self::run_command_with_timeout(
-            Command::new(&python_cmd).args(["-c", "import paddleocr; print('ok')"]),
-            "PaddleOCR 可用性检查",
-        );
-
-        match output {
-            Ok(result) => {
-                result.status.success() && String::from_utf8_lossy(&result.stdout).trim() == "ok"
-            }
-            Err(_) => false,
-        }
-    }
-
-    /// 获取安装 PaddleOCR 的命令
-    pub fn get_paddle_install_command() -> &'static str {
-        "pip install paddlepaddle paddleocr -i https://mirror.baidu.com/pypi/simple"
-    }
 }
 
 impl PaddleWorkerClient {
@@ -1522,10 +1501,32 @@ pub fn filter_sensitive_text(text: &str) -> String {
         result = re.replace_all(&result, "[身份证号]").to_string();
     }
 
-    // 过滤银行卡号（要求独立出现的 16-19 位数字，或 4 位一组以空格/横线分隔）
-    if let Ok(re) = Regex::new(r"(?<!\d)\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{0,3}(?!\d)")
-    {
-        result = re.replace_all(&result, "[银行卡号]").to_string();
+    // 过滤银行卡号（要求独立出现的 16-19 位数字，或 4 位一组以空格/横线分隔）。
+    // 注意：regex crate 不支持 look-around——此前用 (?<!\d)/(?!\d) 会编译失败并被
+    // `if let Ok` 静默吞掉，导致银行卡号从未被过滤。改为匹配候选后手动校验
+    // 前后邻位不是数字（语义与原 look-around 意图一致）。
+    if let Ok(re) = Regex::new(r"\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{0,3}") {
+        let mut filtered = String::with_capacity(result.len());
+        let mut last_end = 0;
+        for m in re.find_iter(&result) {
+            let prev_is_digit = result[..m.start()]
+                .chars()
+                .next_back()
+                .is_some_and(|c| c.is_ascii_digit());
+            let next_is_digit = result[m.end()..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_digit());
+            if prev_is_digit || next_is_digit {
+                // 属于更长数字串的一部分（如订单号/流水号），不视为银行卡
+                continue;
+            }
+            filtered.push_str(&result[last_end..m.start()]);
+            filtered.push_str("[银行卡号]");
+            last_end = m.end();
+        }
+        filtered.push_str(&result[last_end..]);
+        result = filtered;
     }
 
     // 过滤邮箱
@@ -1568,6 +1569,24 @@ mod tests {
             confidence: 0.9,
             boxes: vec![],
         }
+    }
+
+    #[test]
+    fn 银行卡号应被过滤且不误伤更长数字串() {
+        // 连续 16 位与 4-4-4-4 分隔两种形态都应被打码
+        let masked =
+            super::filter_sensitive_text("卡号 6222020200112233 或 6222-0202-0011-2233 备用");
+        assert!(!masked.contains("6222020200112233"), "实际输出: {masked}");
+        assert!(!masked.contains("2233"), "实际输出: {masked}");
+        assert!(masked.contains("[银行卡号]"), "实际输出: {masked}");
+
+        // 匹配段之后紧跟数字（整体超出 16-19 位,如 4 位一组的 20 位编号）时不应误报
+        let longer = super::filter_sensitive_text("编号 6222-0202-0011-2233-4444 结束");
+        assert!(!longer.contains("[银行卡号]"), "实际输出: {longer}");
+        assert!(
+            longer.contains("6222-0202-0011-2233-4444"),
+            "实际输出: {longer}"
+        );
     }
 
     fn create_test_image(width: u32, height: u32) -> std::path::PathBuf {

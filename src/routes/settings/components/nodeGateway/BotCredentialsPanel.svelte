@@ -39,13 +39,16 @@
       on:click={toggle}
       disabled={saving}
       class="switch-track {config[enabledKey] ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'} {saving ? 'opacity-60 cursor-not-allowed' : ''}"
+      role="switch"
+      aria-label={t(titleKey)}
+      aria-checked={config[enabledKey]}
     >
       <span class="switch-thumb {config[enabledKey] ? 'translate-x-5' : 'translate-x-0'}"></span>
     </button>
   </div>
   {#if config[enabledKey]}
     <div class="mt-2 space-y-2">
-      <div class="grid gap-2" class:grid-cols-2={fields.length > 2}>
+      <div class="settings-responsive-field-grid grid gap-2">
         {#each fields as field}
           <label class="block">
             <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t(field.labelKey)}</span>
@@ -71,6 +74,7 @@
                 <button
                   type="button"
                   class="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-[#adbac7]"
+                  aria-label={`${t(secretVisible[field.key] ? 'nodeGatewayPage.hideSecret' : 'nodeGatewayPage.showSecret')}: ${t(field.labelKey)}`}
                   on:click={() => (secretVisible[field.key] = !secretVisible[field.key])}
                 >
                   {#if secretVisible[field.key]}

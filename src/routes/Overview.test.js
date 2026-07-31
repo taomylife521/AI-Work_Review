@@ -26,21 +26,200 @@ test('概览页面应支持在网站访问弹层中直接修改域名语义分�
   assert.match(source, /delete_custom_semantic_category/);
 });
 
+test('常驻网站应使用纯文字来源与分段轨道，不再展示域名印章或浏览器图标', async () => {
+  const source = await readFile(new URL('./Overview.svelte', import.meta.url), 'utf8');
+
+  assert.match(source, /overviewDomainPresentation\.js/);
+  assert.match(source, /buildDomainPresentation/);
+  assert.match(source, /overview-domain-row/);
+  assert.match(source, /overview-domain-source-list/);
+  assert.match(source, /overview-domain-source-track/);
+  assert.match(source, /overview-domain-source-segment/);
+  assert.doesNotMatch(source, /overview-domain-stamp/);
+  assert.doesNotMatch(source, /overview-domain-source-badge/);
+  assert.doesNotMatch(source, /overview-domain-source-icon/);
+  assert.doesNotMatch(source, /getDomainInitials/);
+  assert.doesNotMatch(source, /getDomainStampClass/);
+  assert.doesNotMatch(source, /getPrimaryDomainBrowser/);
+});
+
+test('网站语义分类保存应保持并发安全并刷新当前域名详情', async () => {
+  const source = await readFile(new URL('./Overview.svelte', import.meta.url), 'utf8');
+
+  assert.match(source, /let pendingDomainSemanticRequests = new Map\(\);/);
+  assert.match(source, /let nextDomainSemanticRequestId = 0;/);
+  assert.match(source, /let domainSemanticEditSessionId = 0;/);
+  assert.match(source, /function isDomainSemanticSavePending\(domainKey\)/);
+  assert.match(source, /function isCurrentDomainSemanticSave\(domainKey, requestId, editSessionId\)/);
+  assert.match(source, /function closeDomainOverlay\(\)[\s\S]*cancelDomainSemanticEdit\(\{ restoreFocus: false \}\)/);
+
+  const cancelStart = source.indexOf('function cancelDomainSemanticEdit');
+  const cancelEnd = source.indexOf('function getOverviewDomainParams', cancelStart);
+  const cancelSource = source.slice(cancelStart, cancelEnd);
+  assert.ok(cancelStart >= 0 && cancelEnd > cancelStart, '应保留独立的编辑会话关闭函数');
+  assert.doesNotMatch(
+    cancelSource,
+    /pendingDomainSemanticRequests|savingDomainKey/,
+    '关闭 Popover 或详情时不能清除仍在进行的后端保存请求'
+  );
+
+  const refreshStart = source.indexOf('async function refreshCurrentDomainDetail');
+  const refreshEnd = source.indexOf('function shouldUseOverviewCache', refreshStart);
+  const refreshSource = source.slice(refreshStart, refreshEnd);
+  assert.match(refreshSource, /get_overview_domain_detail/);
+  assert.match(refreshSource, /isCurrent/);
+  assert.ok(
+    (refreshSource.match(/if \(!isCurrent\(\)\) return false;/g) ?? []).length >= 2,
+    '刷新前后都应验证请求仍属于当前编辑会话，避免重新打开已关闭详情'
+  );
+
+  const saveStart = source.indexOf('async function saveDomainSemanticRule');
+  const saveEnd = source.indexOf('async function refreshOverviewStats', saveStart);
+  const saveSource = source.slice(saveStart, saveEnd);
+  assert.match(saveSource, /const domainKey = domain\.domain;/);
+  assert.match(saveSource, /const editSessionId = domainSemanticEditSessionId;/);
+  assert.match(saveSource, /const requestId = \+\+nextDomainSemanticRequestId;/);
+  assert.match(saveSource, /setDomainSemanticSavePending\(domainKey, requestId\)/);
+  assert.match(saveSource, /isCurrentDomainSemanticSave\(domainKey, requestId, editSessionId\)/);
+  assert.match(saveSource, /refreshCurrentDomainDetail\(domainKey, isCurrent\)/);
+  assert.match(saveSource, /finally \{[\s\S]*clearDomainSemanticSavePending\(domainKey, requestId\)/);
+  assert.doesNotMatch(source, /let savingDomainKey/);
+  assert.match(source, /disabled=\{isDomainSemanticSavePending\(domain\.domain\)\}/);
+});
+
+test('常驻网站应按需加载完整摘要并在卡片内展开，同时保留单域名详情弹层', async () => {
+  const source = await readFile(new URL('./Overview.svelte', import.meta.url), 'utf8');
+
+  assert.match(source, /let domainUsageExpanded = false/);
+  assert.match(source, /let expandedDomainUsageItems = \[\]/);
+  assert.match(source, /domainUsageExpanded && expandedDomainUsageItems\.length > 0/);
+  assert.match(source, /async function toggleDomainUsageExpanded\(\)/);
+  assert.match(source, /invoke\('get_overview_domains', getOverviewDomainParams\(\)\)/);
+  assert.match(source, /requestId !== domainUsageRequestId/);
+  assert.match(source, /\(stats\.domain_total_count \|\| domainUsageItems\.length\) > 6/);
+  assert.match(source, /disabled=\{domainUsageLoading\}/);
+  assert.match(source, /on:click=\{toggleDomainUsageExpanded\}/);
+  assert.doesNotMatch(source, /openAllDomainsDetail/);
+  assert.match(source, /invoke\('get_overview_domain_detail'/);
+  assert.match(source, /async function openDomainDetail\(domain\)/);
+  assert.match(source, /const availableDomains = expandedDomainUsageItems\.length > 0/);
+  assert.match(source, /browser_sources: item\.browser_sources/);
+  assert.match(source, /stats\?\.domain_total_count \|\| availableDomains\.length/);
+  assert.match(source, /use:trapFocus/);
+  assert.match(source, /aria-labelledby="overview-domain-overlay-title"/);
+  assert.match(source, /id="overview-domain-overlay-title"/);
+  assert.match(source, /bind:this=\{domainOverlayDialog\}/);
+  assert.match(source, /function focusDomainOverlayView\(\)/);
+  assert.match(source, /domainOverlayDialog\?\.querySelector\('\[data-domain-summary\]'\)/);
+  assert.match(source, /bind:this=\{domainOverlayBackButton\}/);
+  assert.match(source, /data-domain-summary/);
+  assert.match(source, /on:click\|self=\{closeDomainOverlay\}/);
+});
+
+test('概览总时长 KPI 应使用紧凑格式并保持单行', async () => {
+  const [overviewSource, statsCardSource] = await Promise.all([
+    readFile(new URL('./Overview.svelte', import.meta.url), 'utf8'),
+    readFile(new URL('../lib/components/StatsCard.svelte', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(overviewSource, /formatDurationLocalized\(stats\.total_duration, \{ compact: true \}\)/);
+  assert.match(overviewSource, /formatDurationLocalized\(stats\.work_time_duration \|\| 0, \{ compact: true \}\)/);
+  assert.match(statsCardSource, /whitespace-nowrap text-\[1\.9rem\]/);
+});
+
+test('小时应用明细只应接受最后一次日期范围请求的结果', async () => {
+  const source = await readFile(new URL('./Overview.svelte', import.meta.url), 'utf8');
+  const start = source.indexOf('async function loadHourlyBreakdown');
+  const end = source.indexOf('// 切换日期时刷新 hourly 分类细分', start);
+  const loadSource = source.slice(start, end);
+
+  assert.match(source, /let hourlyBreakdownRequestId = 0;/);
+  assert.match(loadSource, /const requestId = \+\+hourlyBreakdownRequestId;/);
+  assert.match(loadSource, /const breakdown = await invoke\('get_hourly_app_breakdown'/);
+  assert.match(loadSource, /if \(requestId === hourlyBreakdownRequestId\) \{\s*hourlyAppBreakdown = breakdown;\s*\}/);
+  assert.match(loadSource, /catch \(e\) \{\s*if \(requestId === hourlyBreakdownRequestId\) \{\s*hourlyAppBreakdown = \[\];\s*\}\s*\}/);
+});
+
+test('网站语义分类应使用含色点、名称与当前项勾选的紧凑 Popover', async () => {
+  const source = await readFile(new URL('./Overview.svelte', import.meta.url), 'utf8');
+
+  assert.match(source, /overview-semantic-popover/);
+  assert.match(source, /role="dialog"/);
+  assert.match(source, /overview-semantic-option/);
+  assert.match(source, /overview-semantic-color-dot/);
+  assert.match(source, /getSemanticCategoryColor\(cat\.key\)/);
+  assert.match(source, /editingSemanticCategory === cat\.key[\s\S]*overview-semantic-check/);
+  assert.match(source, /aria-pressed=\{editingSemanticCategory === cat\.key\}/);
+  assert.match(source, /syncHistory:\s*true/);
+  assert.match(source, /save_custom_semantic_category/);
+  assert.match(source, /delete_custom_semantic_category/);
+  assert.match(source, /startRenameSemanticCategory/);
+  assert.match(source, /use:registerDomainSemanticTrigger=\{domain\.domain\}/);
+  assert.match(source, /bind:this=\{semanticCategoryPopover\}/);
+  assert.match(source, /semanticCategoryPopover\?\.focus\(\)/);
+  assert.match(source, /domainSemanticTriggers\.get\(domainKey\)\?\.focus\(\)/);
+  assert.match(source, /getViewportPopoverPlacement/);
+  assert.match(source, /style=\{semanticPopoverStyle\}/);
+  assert.match(source, /overview-semantic-popover fixed/);
+});
+
+test('网站语义分类弹层的同步说明应只显示一次', async () => {
+  const source = await readFile(new URL('./Overview.svelte', import.meta.url), 'utf8');
+  const helpTextOccurrences = source.match(/t\('overview\.semanticCategoryHelp'\)/g) ?? [];
+
+  assert.equal(helpTextOccurrences.length, 1, '同步说明不应在弹层正文和操作栏重复显示');
+});
+
 test('概览页面应展示按小时活跃度柱状图', async () => {
   const source = await readFile(new URL('./Overview.svelte', import.meta.url), 'utf8');
 
   assert.match(source, /ActivityHourlyChart/);
-  assert.match(source, /overview\.hourlyActivity/);
+  assert.match(source, /overview\.todayRhythm/);
   assert.match(source, /stats\.hourly_activity_distribution/);
   assert.match(source, /hourlyChartDistributionTitle/);
   assert.match(source, /hourlyChartDistributionSubtitleKey/);
   assert.match(source, /hourlyChart\.distributionTitleToday/);
   assert.match(source, /hourlyChart\.distributionTitleWeek/);
   assert.match(source, /hourlyChart\.distributionTitleRange/);
+  // 2026-07 概览改版（有意变更）：按小时活跃度并入「节奏」主视觉卡，
+  // 上移为 KPI 之下的第一视觉，应用投入退居下方双栏 —— 原顺序断言反转。
   assert.ok(
-    source.indexOf('overview.appUsage') < source.indexOf('overview.hourlyActivity'),
-    '按小时活跃度应位于应用使用模块下方'
+    source.indexOf('<ActivityHourlyChart') < source.indexOf("t('overview.appUsage')"),
+    '改版后按小时活跃度（节奏卡）应位于应用使用模块上方'
   );
+});
+
+test('概览改版应提供可选择的分类构成条、分类摘要与按天投入', async () => {
+  const source = await readFile(new URL('./Overview.svelte', import.meta.url), 'utf8');
+
+  assert.match(source, /compositionTotals = stats\?\.category_usage/);
+  assert.match(source, /compositionSegments/);
+  assert.match(source, /let selectedCompositionCategory = null/);
+  assert.match(source, /buildCategoryCompositionSummary/);
+  assert.match(source, /function toggleCompositionCategory\(category\)/);
+  assert.match(source, /selectedCompositionCategory === category \? null : category/);
+  assert.match(source, /overview-composition-segment/);
+  assert.match(source, /aria-pressed=\{selectedCompositionCategory === segment\.category\}/);
+  assert.match(source, /overview-composition-summary/);
+  assert.match(source, /selectedCategory=\{selectedCompositionCategory\}/);
+  assert.match(source, /function clearSelectedCompositionCategory\(\)/);
+
+  for (const handlerName of ['setOverviewMode', 'handleOverviewDateChange', 'stepOverviewDateRange']) {
+    const start = source.indexOf(`function ${handlerName}`);
+    const end = source.indexOf('\n  function ', start + 1);
+    assert.match(source.slice(start, end), /clearSelectedCompositionCategory\(\)/, `${handlerName} 应清除分类选择`);
+  }
+
+  assert.match(source, /invoke\('get_range_daily_totals'/);
+  assert.match(source, /\{#if overviewMode !== 'today'\}/);
+  assert.match(source, /overview\.dailyInvest/);
+  assert.match(source, /overview\.heaviestDay/);
+});
+
+test('按天投入命令应注册为 get_range_daily_totals', async () => {
+  const source = await readFile(new URL('../../src-tauri/src/main.rs', import.meta.url), 'utf8');
+
+  assert.match(source, /commands::get_range_daily_totals/);
 });
 
 test('概览页面在不可见时应暂停时钟与定时刷新', async () => {
@@ -133,21 +312,22 @@ test('概览卡片标题应随今日、单日、范围和本周视角切换', as
   assert.match(source, /overview\.workDurationWeek/);
 });
 
-test('概览页的应用使用与按小时活跃度应支持视图切换并记忆用户偏好', async () => {
+test('概览页只保留应用使用视图偏好，小时活跃度固定为竖向图', async () => {
   const source = await readFile(new URL('./Overview.svelte', import.meta.url), 'utf8');
 
   assert.match(source, /appUsageViewMode/);
-  assert.match(source, /hourlyActivityViewMode/);
   assert.match(source, /APP_USAGE_VIEW_MODE_KEY = 'overview\.appUsage\.viewMode'/);
-  assert.match(source, /HOURLY_ACTIVITY_VIEW_MODE_KEY = 'overview\.hourlyActivity\.viewMode'/);
   assert.match(source, /overview\.appUsageBar/);
   assert.match(source, /overview\.appUsageColumn/);
-  assert.match(source, /overview\.hourlyActivityBar/);
-  assert.match(source, /overview\.hourlyActivityColumn/);
   assert.match(source, /readStoredOverviewViewMode/);
   assert.match(source, /persistOverviewViewMode/);
   assert.match(source, /localStorage\.getItem\(key\)/);
   assert.match(source, /localStorage\.setItem\(key, value\)/);
+  assert.doesNotMatch(source, /hourlyActivityViewMode/);
+  assert.doesNotMatch(source, /HOURLY_ACTIVITY_VIEW_MODE_KEY/);
+  assert.doesNotMatch(source, /overview\.hourlyActivityBar/);
+  assert.doesNotMatch(source, /overview\.hourlyActivityColumn/);
+  assert.doesNotMatch(source, /mode=\{hourlyActivityViewMode\}/);
 });
 
 test('概览页小时应用明细应与当前概览日期范围保持同口径', async () => {

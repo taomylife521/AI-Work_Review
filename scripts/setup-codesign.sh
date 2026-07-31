@@ -10,9 +10,20 @@ set -euo pipefail
 CERT_NAME="WorkReview Self-Signed"
 KEYCHAIN=~/Library/Keychains/login.keychain-db
 
+cleanup() {
+    rm -f /tmp/wr_key.pem /tmp/wr_cert.pem /tmp/wr_cert.p12
+}
+trap cleanup EXIT
+
 if security find-certificate -c "$CERT_NAME" "$KEYCHAIN" &>/dev/null; then
-    echo "[OK] Certificate '$CERT_NAME' already exists in login keychain."
-    exit 0
+    security find-certificate -c "$CERT_NAME" -p "$KEYCHAIN" > /tmp/wr_cert.pem
+    security add-trusted-cert -r trustRoot -p codeSign -k "$KEYCHAIN" /tmp/wr_cert.pem
+    if security find-identity -v -p codesigning "$KEYCHAIN" | grep -Fq "\"$CERT_NAME\""; then
+        echo "[OK] Certificate '$CERT_NAME' is already installed and trusted."
+        exit 0
+    fi
+    echo "[ERROR] Certificate '$CERT_NAME' exists but is not a valid code-signing identity."
+    exit 1
 fi
 
 echo "[1/3] Generating self-signed certificate (valid 10 years)..."
@@ -45,7 +56,11 @@ EOF
 
 echo "[2/3] Importing into login keychain..."
 
-openssl pkcs12 -export \
+PKCS12_ARGS=()
+if openssl pkcs12 -help 2>&1 | grep -- '-legacy' >/dev/null; then
+    PKCS12_ARGS=(-legacy)
+fi
+openssl pkcs12 -export "${PKCS12_ARGS[@]}" \
     -out /tmp/wr_cert.p12 \
     -inkey /tmp/wr_key.pem \
     -in /tmp/wr_cert.pem \
@@ -55,14 +70,15 @@ security import /tmp/wr_cert.p12 \
     -k "$KEYCHAIN" \
     -P workreview \
     -T /usr/bin/codesign 2>&1
+security add-trusted-cert -r trustRoot -p codeSign -k "$KEYCHAIN" /tmp/wr_cert.pem
 
 rm -f /tmp/wr_key.pem /tmp/wr_cert.pem /tmp/wr_cert.p12
 
 echo "[3/3] Verifying..."
-if security find-certificate -c "$CERT_NAME" "$KEYCHAIN" &>/dev/null; then
+if security find-identity -v -p codesigning "$KEYCHAIN" | grep -Fq "\"$CERT_NAME\""; then
     echo "[OK] Certificate installed. Tauri builds will now use stable code signing."
     echo "     tauri.conf.json signingIdentity should be: \"$CERT_NAME\""
 else
-    echo "[WARN] Certificate was not found after import. Check Keychain Access manually."
+    echo "[ERROR] Certificate is not a valid code-signing identity."
     exit 1
 fi

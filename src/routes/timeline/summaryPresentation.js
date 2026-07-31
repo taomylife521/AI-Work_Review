@@ -23,6 +23,23 @@ function ensureChineseStop(text) {
   return `${text.replace(/[。！？!?]+$/g, '').trim()}。`;
 }
 
+export function orderHourlySummariesForDisplay(summaries = []) {
+  const displaySummaries = Array.isArray(summaries) ? summaries : [];
+  return [...displaySummaries].sort(
+    (left, right) => Number(right.hour) - Number(left.hour)
+  );
+}
+
+export function formatHourRange(hour) {
+  const numericHour = Number(hour);
+  const normalizedHour = Number.isFinite(numericHour)
+    ? Math.max(0, Math.min(23, Math.trunc(numericHour)))
+    : 0;
+  const start = String(normalizedHour).padStart(2, '0');
+  const end = String(normalizedHour + 1).padStart(2, '0');
+  return `${start}:00–${end}:00`;
+}
+
 export function getFullSummary(text) {
   return normalizeSummary(text);
 }
@@ -64,6 +81,20 @@ export function getSecondarySummary(text) {
   return '';
 }
 
+export function getSummaryDisplayParts(text, expanded = false) {
+  if (expanded) {
+    return {
+      primary: getFullSummary(text),
+      secondary: '',
+    };
+  }
+
+  return {
+    primary: getPrimarySummary(text),
+    secondary: getSecondarySummary(text),
+  };
+}
+
 export function getMainApps(mainApps) {
   return (mainApps || '')
     .split(/[，,]/)
@@ -72,14 +103,14 @@ export function getMainApps(mainApps) {
     .slice(0, 4);
 }
 
-export function getSummaryRhythmMeta(totalDuration = 0) {
+export function getSummaryRhythmTone(totalDuration = 0) {
   if (totalDuration >= 45 * 60) {
-    return { tone: 'deep', label: '深度推进' };
+    return 'deep';
   }
 
   if (totalDuration >= 20 * 60) {
-    return { tone: 'steady', label: '持续推进' };
+    return 'steady';
   }
 
-  return { tone: 'light', label: '轻量切换' };
+  return 'light';
 }

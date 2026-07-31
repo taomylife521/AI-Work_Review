@@ -531,8 +531,11 @@ mod tests {
         )
         .expect("should match");
 
+        // session.date 基于 start_timestamp（activity.timestamp - duration），
+        // 因为 work session 语义已改为 [timestamp-duration, timestamp]。
+        // 第一个 activity 的 duration=1200，start = 1710000000 - 1200 = 1709998800。
         let expected_date = chrono::Local
-            .timestamp_opt(1_710_000_000, 0)
+            .timestamp_opt(1_710_000_000 - 1200, 0)
             .earliest()
             .map(|dt| dt.format("%Y-%m-%d").to_string())
             .unwrap_or_default();

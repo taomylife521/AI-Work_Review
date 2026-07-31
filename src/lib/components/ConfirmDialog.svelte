@@ -45,7 +45,7 @@
           </svg>
         </div>
         <div class="min-w-0 flex-1">
-          <h3 id="confirm-dialog-title" class="text-lg font-semibold tracking-tight text-slate-900 dark:text-[#e6edf3]">
+          <h3 id="confirm-dialog-title" class="text-lg font-semibold text-slate-900 dark:text-[#e6edf3]">
             {dialogState.title}
           </h3>
           <p class="mt-2 text-sm leading-6 text-slate-500 dark:text-[#7d8590] whitespace-pre-line">

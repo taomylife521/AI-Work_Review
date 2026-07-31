@@ -83,19 +83,38 @@
     config.work_end_minute = last.end_minute;
   }
 
-  function segmentDurationMinutes(segment) {
-    const startTotal = segment.start_hour * 60 + segment.start_minute;
-    const endTotal = segment.end_hour * 60 + segment.end_minute;
-    const isZeroDuration = endTotal === startTotal;
-    if (isZeroDuration) return 0;
-    return endTotal < startTotal ? endTotal + 24 * 60 - startTotal : endTotal - startTotal;
+  function totalWorkSegmentMinutes(segments) {
+    const ranges = [];
+    for (const segment of segments) {
+      const start = segment.start_hour * 60 + segment.start_minute;
+      const end = segment.end_hour * 60 + segment.end_minute;
+      if (start === end) continue;
+      if (end > start) {
+        ranges.push([start, end]);
+      } else {
+        ranges.push([start, 24 * 60], [0, end]);
+      }
+    }
+    ranges.sort((left, right) => left[0] - right[0] || left[1] - right[1]);
+
+    let total = 0;
+    let current = null;
+    for (const range of ranges) {
+      if (!current || range[0] > current[1]) {
+        if (current) total += current[1] - current[0];
+        current = [...range];
+      } else {
+        current[1] = Math.max(current[1], range[1]);
+      }
+    }
+    return total + (current ? current[1] - current[0] : 0);
   }
 
   $: workSegments = normalizeWorkSegments(config?.work_time_segments);
 
   $: {
     currentLocale;
-    const diffMinutes = workSegments.reduce((sum, segment) => sum + segmentDurationMinutes(segment), 0);
+    const diffMinutes = totalWorkSegmentMinutes(workSegments);
     const diffSeconds = diffMinutes * 60;
     workHours = diffSeconds === 0 ? formatDurationLocalized(0) : formatDurationLocalized(diffSeconds);
   }
@@ -231,7 +250,9 @@
             handleChange();
           }}
           class="switch-track {config.work_time_enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-[#484f58]'}"
-          aria-pressed={config.work_time_enabled}
+          role="switch"
+          aria-label={t('settingsGeneral.workTime')}
+          aria-checked={config.work_time_enabled}
         >
           <span class="switch-thumb {config.work_time_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
         </button>
@@ -246,6 +267,7 @@
               <span class="settings-subtle">{t('settingsGeneral.from')}</span>
               <input
                 type="time"
+                aria-label={`${t('settingsGeneral.segmentLabel', { index: index + 1 })} ${t('settingsGeneral.from')}`}
                 value={segmentToTimeValue(segment.start_hour, segment.start_minute)}
                 on:change={(e) => updateSegment(index, 'start', e.target.value)}
                 class="w-24 bg-transparent text-sm font-mono text-slate-900 dark:text-[#e6edf3] focus:outline-none"
@@ -258,6 +280,7 @@
               <span class="settings-subtle">{t('settingsGeneral.to')}</span>
               <input
                 type="time"
+                aria-label={`${t('settingsGeneral.segmentLabel', { index: index + 1 })} ${t('settingsGeneral.to')}`}
                 value={segmentToTimeValue(segment.end_hour, segment.end_minute)}
                 on:change={(e) => updateSegment(index, 'end', e.target.value)}
                 class="w-24 bg-transparent text-sm font-mono text-slate-900 dark:text-[#e6edf3] focus:outline-none"
@@ -297,14 +320,23 @@
           <div class="flex items-center gap-2">
             <input
               type="number"
+              aria-label={t('settingsGeneral.standardWorkHours')}
               min="1"
               max="24"
               step="0.5"
               value={config.standard_work_hours ?? 8}
               on:change={(e) => {
+                // 非法值不再静默忽略(此前输入 30 会保留旧值但输入框仍显示 30):
+                // 数字越界就 clamp 到 1~24,非数字回退当前值,并把结果回写到输入框
                 const val = parseFloat(e.target.value);
-                if (!isNaN(val) && val >= 1 && val <= 24) {
-                  config.standard_work_hours = val;
+                if (isNaN(val)) {
+                  e.target.value = config.standard_work_hours ?? 8;
+                  return;
+                }
+                const clamped = Math.min(24, Math.max(1, val));
+                e.target.value = clamped;
+                if (config.standard_work_hours !== clamped) {
+                  config.standard_work_hours = clamped;
                   handleChange();
                 }
               }}
@@ -323,6 +355,7 @@
           <div class="flex items-center gap-2">
             <input
               type="number"
+              aria-label={t('settingsGeneral.idleThreshold')}
               min="1"
               max="60"
               step="1"
@@ -349,6 +382,7 @@
         <div class="flex items-center gap-2">
           <input
             type="number"
+            aria-label={t('settingsGeneral.workGoalHours')}
             min="0"
             max="16"
             step="0.5"
@@ -385,6 +419,7 @@
         <div class="control-inline">
           <input
             type="time"
+            aria-label={t('settingsGeneral.reportAutoGenerateTime')}
             value={config.daily_report_auto_generate_time ?? ''}
             on:change={(e) => {
               config.daily_report_auto_generate_time = e.target.value || null;
@@ -415,8 +450,12 @@
         <div class="settings-row">
           <span class="settings-text">{t('settingsGeneral.autoStart')}</span>
           <button
+            type="button"
             on:click={toggleAutoStart}
             class="switch-track {autoStartEnabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'}"
+            role="switch"
+            aria-label={t('settingsGeneral.autoStart')}
+            aria-checked={autoStartEnabled}
           >
             <span class="switch-thumb {autoStartEnabled ? 'translate-x-5' : 'translate-x-0'}"></span>
           </button>
@@ -447,8 +486,12 @@
         <div class="settings-row">
           <span class="settings-text">{t('settingsGeneral.hideDockIcon')}</span>
           <button
+            type="button"
             on:click={toggleDockIcon}
             class="switch-track {config.hide_dock_icon ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'}"
+            role="switch"
+            aria-label={t('settingsGeneral.hideDockIcon')}
+            aria-checked={config.hide_dock_icon}
           >
             <span class="switch-thumb {config.hide_dock_icon ? 'translate-x-5' : 'translate-x-0'}"></span>
           </button>
@@ -460,8 +503,12 @@
             <p class="settings-muted mt-0.5">{t('settingsGeneral.lightweightModeDescription')}</p>
           </div>
           <button
+            type="button"
             on:click={toggleLightweightMode}
             class="switch-track {config.lightweight_mode ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'}"
+            role="switch"
+            aria-label={t('settingsGeneral.lightweightMode')}
+            aria-checked={config.lightweight_mode}
           >
             <span class="switch-thumb {config.lightweight_mode ? 'translate-x-5' : 'translate-x-0'}"></span>
           </button>

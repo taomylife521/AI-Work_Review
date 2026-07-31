@@ -1082,7 +1082,7 @@ fn html_to_text(html: &str) -> String {
 /// 构造联网工具共用的 HTTP 客户端（重定向逐跳过 SSRF 校验）。
 fn web_client(total_timeout_secs: u64) -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(5))
+        .connect_timeout(std::time::Duration::from_secs(8))
         .timeout(std::time::Duration::from_secs(total_timeout_secs))
         .user_agent("WorkReviewAssistant/1.0 (+local personal tool)")
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
@@ -1096,6 +1096,53 @@ fn web_client(total_timeout_secs: u64) -> Result<reqwest::Client, String> {
         }))
         .build()
         .map_err(|e| format!("HTTP 客户端初始化失败: {e}"))
+}
+
+/// Bing 免费 HTML 搜索的共享请求逻辑（含重试）。
+///
+/// `www.bing.com` 在部分网络（尤其国内）会出现间歇性连接超时，这里对连接类错误
+/// 做 2 次指数退避重试（1s、2s），把瞬态抖动消化掉。HTTP 业务错误（4xx/5xx）
+/// 不重试——那是确定性失败。返回结果 HTML 文本，由调用方解析。
+/// 同时被「测试搜索」和实际 web_search 复用，保证两者行为一致。
+pub(crate) async fn bing_search_html(client: &reqwest::Client, query: &str, count: u32) -> Result<String, String> {
+    // 重试只针对“连接/超时”这类瞬态错误：is_connect() || is_timeout()
+    let mut last_err = String::new();
+    let mut backoff_secs = 1u64;
+    for attempt in 0..=2 {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
+            backoff_secs *= 2;
+        }
+        let resp = client
+            .get("https://www.bing.com/search")
+            .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+            .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+            .query(&[("q", query), ("count", &count.to_string())])
+            .send()
+            .await;
+        match resp {
+            Ok(r) => {
+                let status = r.status();
+                if !status.is_success() {
+                    // HTTP 业务错误：不重试，直接返回
+                    return Err(format!("搜索服务返回 HTTP {status}"));
+                }
+                return r
+                    .text()
+                    .await
+                    .map_err(|e| format!("搜索响应读取失败: {e}"));
+            }
+            Err(e) => {
+                // 只重试连接/超时类错误；其他（如 DNS、SSL）也一并重试，反正最后一次会返回
+                last_err = format!("搜索请求失败: {e}");
+                let transient = e.is_connect() || e.is_timeout();
+                if !transient {
+                    return Err(last_err);
+                }
+            }
+        }
+    }
+    Err(last_err)
 }
 
 /// query_activities：按日期返回活动记录（按应用聚合 + 代表性标题）。
@@ -1113,7 +1160,7 @@ fn query_activities_execute(ctx: &ToolContext, args: Value) -> Result<String, St
     let activities = ctx.filter_activities(activities);
 
     if activities.is_empty() {
-        return Ok(format!("{} 没有活动记录。", date));
+        return Ok(format!("{date} 没有活动记录。"));
     }
 
     // 按应用聚合：app_name → (total_duration, count, sample_title)
@@ -1151,8 +1198,7 @@ fn query_activities_execute(ctx: &ToolContext, args: Value) -> Result<String, St
             format!(" — {title}")
         };
         lines.push(format!(
-            "- {app}：{} 分钟（{}%，{} 条记录）{title_part}",
-            mins, pct, count
+            "- {app}：{mins} 分钟（{pct}%，{count} 条记录）{title_part}"
         ));
     }
     Ok(lines.join("\n"))
@@ -1226,23 +1272,12 @@ async fn web_search_execute(ctx: &ToolContext<'_>, args: Value) -> Result<String
         .search_key()
         .ok_or_else(|| "未配置搜索服务 API Key".to_string())?;
 
-    let client = web_client(12)?;
+    let client = web_client(20)?;
     let results = match web.provider.as_str() {
         "duckduckgo" => {
             // Bing 免费搜索（无需 API Key），国内可直连。
             // DuckDuckGo 在中国被墙，改用 Bing HTML 搜索作为免费方案。
-            let resp = client
-                .get("https://www.bing.com/search")
-                .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
-                .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-                .query(&[("q", query), ("count", "5")])
-                .send()
-                .await
-                .map_err(|e| format!("搜索请求失败: {e}"))?;
-            let html = resp
-                .text()
-                .await
-                .map_err(|e| format!("搜索响应读取失败: {e}"))?;
+            let html = bing_search_html(&client, query, 5).await?;
             parse_bing_html(&html)
         }
         "bocha" => {

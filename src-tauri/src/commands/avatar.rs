@@ -128,11 +128,11 @@ pub async fn set_avatar_window_expanded(
     app: AppHandle,
     state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<(), AppError> {
-    let scale = {
+    let (scale, body_hidden) = {
         let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-        state.config.avatar_scale
+        (state.config.avatar_scale, state.config.avatar_body_hidden)
     };
-    crate::avatar_engine::apply_avatar_window_expansion(&app, scale, expanded)
+    crate::avatar_engine::apply_avatar_window_expansion(&app, scale, expanded, body_hidden)
         .map_err(|e| AppError::Unknown(format!("调整桌宠窗口尺寸失败: {e}")))
 }
 

@@ -4,12 +4,13 @@
   export let data = [];
   export let distributionTitle = '';
   export let distributionSubtitleKey = 'hourlyChart.distributionSubtitle';
-  export let mode = 'column';
   export let peakHourLabel = '';
   export let peakDurationLabel = '';
   export let embedded = false;
   // 按分类着色（堆叠柱）：categoryMode 开启时，每根柱按应用分类分段着色
   export let categoryMode = true;
+  // 概览构成条选中的分类；为空时展示完整堆叠。
+  export let selectedCategory = null;
   // { [hour]: [{ category, duration }, ...] }，由 Overview 从 hourly_app_breakdown 聚合
   export let categoryBreakdown = null;
   // { [category]: '#RRGGBB' }，来自 custom_categories
@@ -97,7 +98,7 @@
     ? 'min-h-[88px] rounded-[22px] bg-slate-50/90 px-2 py-3 text-center dark:bg-[#161b22]/30'
     : 'min-h-[104px] rounded-2xl border border-slate-100 bg-white p-4 text-center dark:border-[#30363d]/60 dark:bg-[#21262d]/80';
   $: summaryValueClass =
-    'mt-2 text-center text-base font-semibold tracking-tight text-slate-900 dark:text-[#e6edf3] leading-tight';
+    'mt-2 text-center text-base font-semibold text-slate-900 dark:text-[#e6edf3] leading-tight';
   $: chartShellClass = embedded
     ? 'rounded-[24px] bg-transparent p-0'
     : 'rounded-2xl border border-slate-100 bg-white p-4 dark:border-[#30363d]/60 dark:bg-[#21262d]/80';
@@ -178,60 +179,7 @@
       </div>
     {/if}
 
-    {#if mode === 'row'}
-      <div class="space-y-2 rounded-2xl bg-slate-50 p-3 dark:bg-[#161b22]/40">
-        {#each buckets as bucket}
-          {@const width = bucket.duration > 0 ? Math.max((bucket.duration / maxDuration) * 100, 3) : 1}
-          {@const isPeak = bucket.duration > 0 && bucket.hour === peakBucket.hour}
-          <button
-            type="button"
-            class={`grid w-full grid-cols-[3.25rem_minmax(0,1fr)_4.75rem] items-center gap-2 rounded-xl px-1.5 py-1 text-left transition-colors duration-200 ${selectedHour === bucket.hour ? 'bg-sky-50 dark:bg-sky-500/10' : 'hover:bg-white/70 dark:hover:bg-[#21262d]/60'}`}
-            aria-pressed={selectedHour === bucket.hour}
-            on:click={() => selectHour(bucket.hour)}
-          >
-            <span class="text-[11px] font-medium text-slate-500 dark:text-[#7d8590]">{formatHourLabel(bucket.hour)}</span>
-            <div class="h-3 overflow-hidden rounded-full bg-slate-200 dark:bg-[#30363d]/60">
-              {#if categoryMode && bucket.duration > 0}
-                <div class="flex h-full" style={`width: ${width}%;`}>
-                  {#each (categoryBreakdown?.[bucket.hour] || []) as seg}
-                    <div
-                      style={`width: ${(seg.duration / bucket.duration) * 100}%; background: ${(categoryColors && categoryColors[seg.category]) || '#94a3b8'};`}
-                      class="h-full"
-                      title={`${formatHourRangeLabel(bucket.hour)} · ${formatDurationLocalized(bucket.duration)}`}
-                    ></div>
-                  {/each}
-                </div>
-              {:else}
-                <div
-                  class={`h-full rounded-full transition-all duration-300 ${isPeak ? 'bg-sky-500 dark:bg-sky-400' : 'bg-slate-400 dark:bg-[#636c76]'}`}
-                  style={`width: ${width}%; opacity: ${bucket.duration > 0 ? 1 : 0.35};`}
-                  title={`${formatHourRangeLabel(bucket.hour)} · ${formatDurationLocalized(bucket.duration)}`}
-                ></div>
-              {/if}
-            </div>
-            <span class="text-right text-[11px] font-medium tabular-nums text-slate-500 dark:text-[#7d8590]">{formatCompact(bucket.duration)}</span>
-          </button>
-          {#if selectedHour === bucket.hour && bucket.duration > 0}
-            {@const hourApps = (appBreakdown?.find(b => b.hour === bucket.hour)?.apps || [])
-              .slice().sort((a, b) => b.duration - a.duration).slice(0, 5)}
-            <div class="ml-[3.5rem] mr-[5rem] mb-1 rounded-lg bg-white/80 px-3 py-2 ring-1 ring-slate-200/60 dark:bg-[#21262d]/60 dark:ring-[#30363d]/60">
-              {#if hourApps.length > 0}
-                <div class="flex flex-wrap gap-x-3 gap-y-1">
-                  {#each hourApps as app}
-                    <span class="inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-[#7d8590]">
-                      <span class="inline-block h-2 w-2 rounded-sm" style={`background: ${(categoryColors && categoryColors[app.category]) || '#94a3b8'};`}></span>
-                      <span>{app.app_name}</span>
-                      <span class="tabular-nums text-slate-400">{formatCompact(app.duration)}</span>
-                    </span>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          {/if}
-        {/each}
-      </div>
-    {:else}
-      <div class="overflow-hidden rounded-2xl bg-slate-50 px-3 pb-3 pt-4 dark:bg-[#161b22]/40">
+    <div class="overflow-hidden rounded-2xl bg-slate-50 px-3 pb-3 pt-4 dark:bg-[#161b22]/40">
         <div class="grid grid-cols-[2.9rem_minmax(0,1fr)] gap-2">
           <div class="relative h-44">
             {#each yAxisTicks as tick, index}
@@ -265,7 +213,10 @@
                       {#if categoryMode && bucket.duration > 0}
                         <div class="flex h-full w-full flex-col justify-end overflow-hidden" style="border-top-left-radius: 10px; border-top-right-radius: 10px;">
                           {#each (categoryBreakdown?.[bucket.hour] || []) as seg}
-                            <div style={`height: ${(seg.duration / bucket.duration) * 100}%; background: ${(categoryColors && categoryColors[seg.category]) || '#94a3b8'};`}></div>
+                            <div
+                              class={`activity-hourly-category-segment ${selectedCategory === seg.category ? 'activity-hourly-category-segment-selected' : ''} ${selectedCategory && seg.category !== selectedCategory ? 'activity-hourly-category-segment-muted' : ''}`}
+                              style={`height: ${(seg.duration / bucket.duration) * 100}%; background: ${(categoryColors && categoryColors[seg.category]) || '#94a3b8'}; opacity: ${selectedCategory && seg.category !== selectedCategory ? 0.18 : 1};`}
+                            ></div>
                           {/each}
                         </div>
                       {/if}
@@ -290,8 +241,9 @@
 
       {#if selectedBucket}
         {@const hourApps = (appBreakdown?.find(b => b.hour === selectedBucket.hour)?.apps || [])
+          .filter((app) => !selectedCategory || app.category === selectedCategory)
           .slice().sort((a, b) => b.duration - a.duration).slice(0, 5)}
-        <div class="mt-3 rounded-2xl bg-sky-50 px-3.5 py-3 text-left dark:bg-sky-500/10">
+        <div class="activity-hourly-selected-apps mt-3 rounded-2xl bg-sky-50 px-3.5 py-3 text-left dark:bg-sky-500/10">
           <div class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
             <span class="inline-flex items-center rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold tracking-[0.08em] text-sky-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-[#161b22]/80 dark:text-sky-300 dark:shadow-none">
               {t('chart.currentlySelected')}
@@ -316,6 +268,5 @@
           {/if}
         </div>
       {/if}
-    {/if}
   </div>
 </div>

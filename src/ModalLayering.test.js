@@ -12,10 +12,10 @@ test('路由级详情弹层应使用全局对话层级，主滚动区不应创�
   assert.doesNotMatch(appCss, /\.app-shell-main-scroll\s*\{[^}]*z-index:\s*1;/);
   assert.match(
     timelineSource,
-    /class="fixed inset-0 [^"]*z-\[140\][^"]*"/
+    /class="[^"]*\bfixed\b[^"]*\binset-0\b[^"]*\bz-\[140\][^"]*"/
   );
   assert.match(
     overviewSource,
-    /class="fixed inset-0 [^"]*z-\[140\][^"]*"/
+    /class="[^"]*\bfixed\b[^"]*\binset-0\b[^"]*\bz-\[140\][^"]*"/
   );
 });

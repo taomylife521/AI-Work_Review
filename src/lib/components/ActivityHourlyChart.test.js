@@ -59,3 +59,17 @@ test('按小时活跃度图表的紧凑时长应跟随当前语言', async () =>
   assert.doesNotMatch(source, /return `\$\{minutes\}m`/);
   assert.doesNotMatch(source, /return `\$\{s\}s`/);
 });
+
+test('按小时活跃度只保留竖向图并支持所选分类弱化与应用过滤', async () => {
+  const source = await readFile(new URL('./ActivityHourlyChart.svelte', import.meta.url), 'utf8');
+
+  assert.match(source, /export let selectedCategory = null/);
+  assert.doesNotMatch(source, /export let mode/);
+  assert.doesNotMatch(source, /\{#if mode === 'row'\}/);
+  assert.match(source, /activity-hourly-category-segment/);
+  assert.match(source, /activity-hourly-category-segment-selected/);
+  assert.match(source, /activity-hourly-category-segment-muted/);
+  assert.match(source, /selectedCategory && seg\.category !== selectedCategory/);
+  assert.match(source, /\.filter\(\(app\) => !selectedCategory \|\| app\.category === selectedCategory\)/);
+  assert.match(source, /activity-hourly-selected-apps/);
+});

@@ -282,6 +282,7 @@ pub(crate) fn persist_app_config(
         previous_avatar_opacity,
         previous_avatar_preset,
         previous_avatar_click_through,
+        previous_avatar_body_hidden,
         previous_avatar_x,
         previous_avatar_y,
         previous_hide_dock_icon,
@@ -307,6 +308,7 @@ pub(crate) fn persist_app_config(
             config.avatar_opacity,
             &config.avatar_preset,
             &config.avatar_persona,
+            config.avatar_body_hidden,
         );
         (
             previous_config.avatar_enabled,
@@ -314,6 +316,7 @@ pub(crate) fn persist_app_config(
             previous_config.avatar_opacity,
             previous_config.avatar_preset,
             previous_config.avatar_click_through,
+            previous_config.avatar_body_hidden,
             previous_config.avatar_x,
             previous_config.avatar_y,
             previous_config.hide_dock_icon,
@@ -324,11 +327,14 @@ pub(crate) fn persist_app_config(
 
     let avatar_window_changed = previous_avatar_enabled != config.avatar_enabled
         || previous_avatar_scale != config.avatar_scale
+        || previous_avatar_body_hidden != config.avatar_body_hidden
         || previous_avatar_x != config.avatar_x
         || previous_avatar_y != config.avatar_y;
     let avatar_click_through_changed = previous_avatar_click_through != config.avatar_click_through;
     let avatar_visual_changed = previous_avatar_opacity != config.avatar_opacity
         || previous_avatar_preset != config.avatar_preset;
+    // 隐藏本体既是窗口尺寸变化也是视觉变化（前端需重新渲染 canvas 显隐）
+    let avatar_body_hidden_changed = previous_avatar_body_hidden != config.avatar_body_hidden;
     let dock_visibility_changed = previous_hide_dock_icon != config.hide_dock_icon
         || previous_lightweight_mode != config.lightweight_mode;
 
@@ -339,6 +345,7 @@ pub(crate) fn persist_app_config(
             config.avatar_scale,
             config.avatar_x.zip(config.avatar_y),
             false,
+            config.avatar_body_hidden,
         )
         .map_err(|e| AppError::Unknown(format!("同步桌宠窗口失败: {e}")))?;
 
@@ -349,7 +356,7 @@ pub(crate) fn persist_app_config(
     }
 
     if config.avatar_enabled
-        && (avatar_window_changed || avatar_visual_changed)
+        && (avatar_window_changed || avatar_visual_changed || avatar_body_hidden_changed)
         && !refresh_avatar_state_for_current_window(&app, state)
     {
         crate::avatar_engine::emit_avatar_state(&app, &avatar_state);
@@ -410,6 +417,7 @@ fn refresh_avatar_state_for_current_window(app: &AppHandle, state: &Arc<Mutex<Ap
             state_guard.config.avatar_opacity,
             &state_guard.config.avatar_preset,
             &state_guard.config.avatar_persona,
+            state_guard.config.avatar_body_hidden,
         );
         state_guard.avatar_state = next_state.clone();
         next_state
@@ -453,6 +461,7 @@ mod tests {
                     duration: 60,
                 },
             ],
+            domain_total_count: 3,
             domain_usage: vec![
                 DomainUsage {
                     domain: "linux.do".to_string(),

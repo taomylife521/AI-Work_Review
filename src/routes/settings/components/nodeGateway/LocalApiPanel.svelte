@@ -69,6 +69,9 @@
       on:click={toggle}
       disabled={saving}
       class="switch-track {config.localhost_api_enabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'} {saving ? 'opacity-60 cursor-not-allowed' : ''}"
+      role="switch"
+      aria-label={t('nodeGatewayPage.localApi')}
+      aria-checked={config.localhost_api_enabled}
     >
       <span class="switch-thumb {config.localhost_api_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
     </button>
@@ -76,11 +79,12 @@
 
   {#if config.localhost_api_enabled}
     <div class="space-y-2">
-      <div class="grid gap-2 grid-cols-2">
+      <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
         <div class="rounded-lg bg-white/70 px-3 py-1.5 ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
           <div class="text-[11px] text-slate-400 dark:text-[#636c76]">{t('nodeGatewayPage.apiHostLabel')}</div>
           <input
             type="text"
+            aria-label={t('nodeGatewayPage.apiHostLabel')}
             bind:value={config.localhost_api_host}
             class="w-full bg-transparent text-sm font-mono text-slate-900 dark:text-[#e6edf3] focus:outline-none"
             placeholder="127.0.0.1"
@@ -90,6 +94,7 @@
           <div class="text-[11px] text-slate-400 dark:text-[#636c76]">{t('nodeGatewayPage.apiPortLabel')}</div>
           <input
             type="number"
+            aria-label={t('nodeGatewayPage.apiPortLabel')}
             bind:value={config.localhost_api_port}
             on:blur={() => {
               if (!Number.isInteger(config.localhost_api_port) || config.localhost_api_port <= 0 || config.localhost_api_port > 65535) {

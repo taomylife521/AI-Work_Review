@@ -281,7 +281,10 @@
     webTestStatus = 'testing';
     webTestMessage = '';
     try {
-      const result = await invoke('test_assistant_search');
+      const result = await invoke('test_assistant_search', {
+        provider: config.assistant_search_provider,
+        apiKey: config.assistant_search_api_key,
+      });
       webTestStatus = 'success';
       webTestMessage = t('settingsAI.webAccess.testOk', {
         count: result?.resultCount ?? 1,
@@ -298,7 +301,12 @@
     memTestStatus = 'testing';
     memTestMessage = '';
     try {
-      const result = await invoke('test_embedding_model');
+      const result = await invoke('test_embedding_model', {
+        provider: config.embedding_provider,
+        endpoint: config.embedding_endpoint,
+        model: config.embedding_model,
+        apiKey: config.embedding_api_key,
+      });
       memTestStatus = 'success';
       memTestMessage = t('settingsAI.semanticMemory.testOk', {
         dim: result?.dimension ?? 0,
@@ -541,7 +549,7 @@
 <!-- AI 能力配置：三入口分区 -->
 {#if isAiMode}
   <div class="pt-3 border-t border-slate-200 dark:border-[#30363d]">
-    <div class="mb-3 grid grid-cols-3 gap-2">
+    <div class="mb-3 grid grid-cols-1 gap-2 md:grid-cols-3">
       {#each [
         { id: 'model', label: t('settingsAI.sectionModel'), on: isTextModelConfigured },
         { id: 'web', label: t('settingsAI.sectionWeb'), on: Boolean(config.assistant_web_access_enabled) },
@@ -779,7 +787,9 @@
         <button
           type="button"
           class="switch-track shrink-0 {config.assistant_web_access_enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-[#484f58]'}"
-          aria-pressed={config.assistant_web_access_enabled}
+          role="switch"
+          aria-label={t('settingsAI.webAccess.title')}
+          aria-checked={config.assistant_web_access_enabled}
           on:click={() => {
             config.assistant_web_access_enabled = !config.assistant_web_access_enabled;
             handleChange();
@@ -862,7 +872,9 @@
         <button
           type="button"
           class="switch-track shrink-0 {config.memory_semantic_enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-[#484f58]'}"
-          aria-pressed={config.memory_semantic_enabled}
+          role="switch"
+          aria-label={t('settingsAI.semanticMemory.title')}
+          aria-checked={config.memory_semantic_enabled}
           on:click={() => {
             config.memory_semantic_enabled = !config.memory_semantic_enabled;
             handleChange();

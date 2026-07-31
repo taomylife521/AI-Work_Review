@@ -9,15 +9,11 @@ use crate::linux_session::{
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde_json::Value;
-#[cfg(any(target_os = "macos", target_os = "linux", test))]
-use std::collections::HashMap;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use std::process::{Command, Output, Stdio};
-#[cfg(any(target_os = "macos", target_os = "linux", test))]
-use std::sync::Mutex;
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use std::thread;
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -34,36 +30,6 @@ static URL_LIKE_RE: Lazy<Regex> = Lazy::new(|| {
     )
     .expect("URL regex should compile")
 });
-
-#[cfg(any(target_os = "macos", target_os = "linux", test))]
-static LAST_BROWSER_URL_LOGS: Lazy<Mutex<HashMap<String, String>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
-
-#[cfg(any(target_os = "macos", target_os = "linux", test))]
-fn remember_browser_url_log(cache: &mut HashMap<String, String>, key: &str, url: &str) -> bool {
-    const MAX_ENTRIES: usize = 256;
-    match cache.get(key) {
-        Some(previous) if previous == url => false,
-        _ => {
-            if cache.len() >= MAX_ENTRIES {
-                cache.clear();
-            }
-            cache.insert(key.to_string(), url.to_string());
-            true
-        }
-    }
-}
-
-#[cfg(any(target_os = "macos", target_os = "linux", test))]
-fn log_browser_url_once(log_key: &str, message: &str, url: &str) {
-    let mut cache = LAST_BROWSER_URL_LOGS
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    if remember_browser_url_log(&mut cache, log_key, url) {
-        let truncated: String = url.chars().take(50).collect();
-        log::info!("{message}: {truncated}");
-    }
-}
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn run_monitor_command_with_timeout(command: &mut Command, context: &str) -> Result<Output> {
@@ -1268,11 +1234,6 @@ fn firefox_family_session_store_url(app_name: &str, window_title: &str) -> Optio
             continue;
         };
         if let Some(url) = extract_active_tab_url_from_session_store_value(&value, window_title) {
-            log_browser_url_once(
-                &format!("sessionstore:{app_name}"),
-                &format!("从 sessionstore 获取到 {app_name} URL"),
-                &url,
-            );
             return Some(url);
         }
     }
@@ -1799,10 +1760,8 @@ mod tests {
         normalize_possible_url, parse_gnome_focused_window_dbus_output,
         parse_hyprland_window_bounds, parse_kdotool_geometry_output,
         parse_macos_window_bounds_fields, parse_xdotool_geometry_shell_output,
-        remember_browser_url_log, resolve_browser_url_for_window_linux,
-        semantic_category_to_base_category, WindowBounds,
+        resolve_browser_url_for_window_linux, semantic_category_to_base_category, WindowBounds,
     };
-    use std::collections::HashMap;
     use std::path::Path;
     #[cfg(target_os = "macos")]
     use std::{
@@ -2268,27 +2227,6 @@ Path=Profiles/wkm9x2lf.Default (release)
             extract_active_tab_url_from_session_store_value(&value, "定的计划 - Google 搜索"),
             Some("https://www.google.com/search?q=test".to_string())
         );
-    }
-
-    #[test]
-    fn 相同浏览器_url日志应去重() {
-        let mut cache = HashMap::new();
-
-        assert!(remember_browser_url_log(
-            &mut cache,
-            "sessionstore:firefox",
-            "https://example.com/a"
-        ));
-        assert!(!remember_browser_url_log(
-            &mut cache,
-            "sessionstore:firefox",
-            "https://example.com/a"
-        ));
-        assert!(remember_browser_url_log(
-            &mut cache,
-            "sessionstore:firefox",
-            "https://example.com/b"
-        ));
     }
 
     #[test]
@@ -3374,30 +3312,6 @@ fn best_browser_url_candidate_from_output(output: &str) -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
-fn browser_url_candidates_preview_from_output(output: &str, max_items: usize) -> Vec<String> {
-    let mut items = Vec::new();
-
-    for raw_line in output.lines() {
-        let (_, raw) = parse_browser_url_candidate_line(raw_line);
-        if raw.is_empty() {
-            continue;
-        }
-
-        let value = normalize_possible_url(raw).unwrap_or_else(|| raw.to_string());
-        if items.iter().any(|existing| existing == &value) {
-            continue;
-        }
-
-        items.push(value);
-        if items.len() >= max_items {
-            break;
-        }
-    }
-
-    items
-}
-
-#[cfg(target_os = "macos")]
 fn get_browser_url_via_system_events(process_name: &str) -> Option<String> {
     let script = browser_url_ui_script_macos(process_name);
     let output = run_monitor_command_with_timeout(
@@ -3413,21 +3327,7 @@ fn get_browser_url_via_system_events(process_name: &str) -> Option<String> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    if process_name == "Zen" {
-        let preview = browser_url_candidates_preview_from_output(&stdout, 8);
-        if !preview.is_empty() {
-            log::info!("Zen UI URL 候选: {}", preview.join(" | "));
-        }
-    }
-    let url = best_browser_url_candidate_from_output(&stdout);
-    if let Some(ref url) = url {
-        log_browser_url_once(
-            &format!("ui:{process_name}"),
-            &format!("获取到 {process_name} UI URL"),
-            url,
-        );
-    }
-    url
+    best_browser_url_candidate_from_output(&stdout)
 }
 
 #[cfg(target_os = "macos")]
@@ -3464,11 +3364,6 @@ fn get_browser_url(app_name: &str, window_title: &str) -> Option<String> {
     if output.status.success() {
         let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if !url.is_empty() && (url.starts_with("http") || url.starts_with("file")) {
-            log_browser_url_once(
-                &format!("script:{browser_name}"),
-                &format!("获取到 {browser_name} URL"),
-                &url,
-            );
             Some(url)
         } else {
             log::debug!("{browser_name} 返回空 URL");
@@ -4092,11 +3987,9 @@ fn find_focused_sway_node(value: &Value) -> Option<&Value> {
         .get("focused")
         .and_then(|v| v.as_bool())
         .unwrap_or(false)
-    {
-        if value.get("pid").is_some() || value.get("app_id").is_some() {
+        && (value.get("pid").is_some() || value.get("app_id").is_some()) {
             return Some(value);
         }
-    }
 
     for key in ["nodes", "floating_nodes"] {
         if let Some(nodes) = value.get(key).and_then(|v| v.as_array()) {

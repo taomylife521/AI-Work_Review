@@ -126,6 +126,7 @@ impl AgentExecutor {
     ///
     /// `event_tx` 用于流式推送步骤进度（StepStart/StepResult）与终态（Done）。
     /// 为 None 时退化为静默执行（单测 / 非流式调用方）。
+    #[allow(clippy::too_many_arguments)]
     pub async fn run(
         question: &str,
         model_config: &ModelConfig,

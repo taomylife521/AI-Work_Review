@@ -1019,7 +1019,7 @@ pub fn spawn_avatar_input_bridge(app: AppHandle) {
     }
 
     let smart_click_through_polling_enabled =
-        smart_click_through_polling_enabled_for_platform(cfg!(target_os = "windows"));
+        smart_click_through_polling_enabled_for_platform();
 
     tauri::async_runtime::spawn(async move {
         let mut last_payload: Option<AvatarInputPayload> = None;
@@ -1043,8 +1043,14 @@ pub fn spawn_avatar_input_bridge(app: AppHandle) {
     });
 }
 
-fn smart_click_through_polling_enabled_for_platform(is_windows: bool) -> bool {
-    !is_windows
+/// 所有平台均启用智能穿透轮询。
+///
+/// 此前 Windows 被显式禁用（`!is_windows`），导致开启穿透后整个窗口永久穿透，
+/// 通知卡片按钮完全无法点击（issue #137 诉求三）。现有 `apply_smart_click_through`
+/// 已有缓存去抖（`AVATAR_CLICK_THROUGH_IGNORE_CACHE`，仅在状态变化时才调 setter），
+/// 轮询间隔 ~64ms 且状态不变时不触发任何窗口 API，无高频闪烁风险。
+fn smart_click_through_polling_enabled_for_platform() -> bool {
+    true
 }
 
 /// 智能穿透：穿透开启且桌宠启用时，鼠标在桌宠窗口内→不穿透（可交互），外→穿透。
@@ -1590,9 +1596,10 @@ mod tests {
     }
 
     #[test]
-    fn windows应禁用智能穿透自动命中轮询() {
-        assert!(!smart_click_through_polling_enabled_for_platform(true));
-        assert!(smart_click_through_polling_enabled_for_platform(false));
+    fn 所有平台均启用智能穿透命中轮询() {
+        // issue #137 诉求三：Windows 此前被禁用，导致穿透模式下通知按钮无法点击。
+        // 现统一启用，鼠标进入窗口矩形（含通知按钮区域）时临时关闭穿透，按钮可点。
+        assert!(smart_click_through_polling_enabled_for_platform());
     }
 
     #[test]

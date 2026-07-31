@@ -38,51 +38,6 @@ pub struct AssistantCard {
     pub content: serde_json::Value,
 }
 
-pub(crate) fn format_browser_url_for_display(raw_url: &str) -> String {
-    let mut output = String::with_capacity(raw_url.len());
-    let bytes = raw_url.as_bytes();
-    let mut index = 0usize;
-
-    while index < bytes.len() {
-        if bytes[index] != b'%' {
-            output.push(bytes[index] as char);
-            index += 1;
-            continue;
-        }
-
-        let start = index;
-        let mut decoded_bytes = Vec::new();
-
-        while index + 2 < bytes.len() && bytes[index] == b'%' {
-            let hex = &raw_url[index + 1..index + 3];
-            let Ok(value) = u8::from_str_radix(hex, 16) else {
-                break;
-            };
-            decoded_bytes.push(value);
-            index += 3;
-        }
-
-        if decoded_bytes.is_empty() {
-            output.push('%');
-            index = start + 1;
-            continue;
-        }
-
-        let raw_segment = &raw_url[start..index];
-        if !decoded_bytes.iter().any(|byte| *byte >= 0x80) {
-            output.push_str(raw_segment);
-            continue;
-        }
-
-        match String::from_utf8(decoded_bytes) {
-            Ok(decoded) => output.push_str(&decoded),
-            Err(_) => output.push_str(raw_segment),
-        }
-    }
-
-    output
-}
-
 fn assistant_empty_question_message(locale: AppLocale) -> &'static str {
     match locale {
         AppLocale::ZhCn => "请输入你想问的问题。",
@@ -744,11 +699,15 @@ static ASSISTANT_CANCEL_SENDERS: once_cell::sync::Lazy<
     Mutex<std::collections::HashMap<String, tokio::sync::watch::Sender<bool>>>,
 > = once_cell::sync::Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
 
+type PendingAssistantConfirmation =
+    (std::time::Instant, tokio::sync::oneshot::Sender<bool>);
+type AssistantConfirmationMap =
+    std::collections::HashMap<String, PendingAssistantConfirmation>;
+
 /// 待确认的行动（confirm_id → (创建时间, oneshot sender)）。
 /// 用户在确认卡片上点击后经 `confirm_assistant_action` 回传。
-static ASSISTANT_CONFIRMATIONS: once_cell::sync::Lazy<
-    Mutex<std::collections::HashMap<String, (std::time::Instant, tokio::sync::oneshot::Sender<bool>)>>,
-> = once_cell::sync::Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
+static ASSISTANT_CONFIRMATIONS: once_cell::sync::Lazy<Mutex<AssistantConfirmationMap>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
 
 /// 请求结束时移除停止信号注册（无论正常返回还是错误）。
 struct CancelRegistrationGuard {
@@ -1013,7 +972,7 @@ async fn execute_assistant_action(
 /// - 复杂查询 → AgentPath（LLM 自主决策 + 多轮工具调用）
 /// - 无模型   → FallbackPath（纯模板回答）
 #[tauri::command]
-#[allow(unused_variables)] // date_from/date_to 为接口预留，Agent 当前从问题自行推断时间范围
+#[allow(unused_variables, clippy::too_many_arguments)] // date_from/date_to 为接口预留，Agent 当前从问题自行推断时间范围
 pub async fn chat_work_assistant(
     question: String,
     history: Option<Vec<AssistantChatMessage>>,
@@ -1230,22 +1189,6 @@ pub async fn generate_text_with_model(
 mod tests {
     use super::*;
 
-    #[test]
-    fn 应将命令输出中的_url_格式化为可读文本() {
-        assert_eq!(
-            format_browser_url_for_display(
-                "https://www.google.com.hk/search?q=%E5%A4%A7%E6%B8%A1%E5%8F%A3&client=firefox-b-d"
-            ),
-            "https://www.google.com.hk/search?q=大渡口&client=firefox-b-d"
-        );
-        assert_eq!(
-            format_browser_url_for_display(
-                "https://example.com/search?q=a%26b&name=%E5%BC%A0%E4%B8%89"
-            ),
-            "https://example.com/search?q=a%26b&name=张三"
-        );
-    }
-
     /// system prompt 必须包含真实固定的工具历史摘要格式（每个 locale 都要有）。
     /// 防回归：之前这声明曾误加在 executor.rs 的 DEFAULT_SYSTEM_PROMPT，但生产路径
     /// chat_work_assistant 始终传 Some(build_assistant_system_prompt(...))，unwrap_or
@@ -1275,15 +1218,11 @@ mod tests {
             let prompt = build_assistant_system_prompt(locale);
             assert!(
                 prompt.contains("[工具：xxx→N条 | yyy✓ | zzz↯ | aaa?]"),
-                "locale {:?} 的 system prompt 未引用真实固定机器格式，got: {}",
-                locale,
-                prompt
+                "locale {locale:?} 的 system prompt 未引用真实固定机器格式，got: {prompt}"
             );
             assert!(
                 prompt.contains(unknown_hint),
-                "locale {:?} 的 system prompt 未正确说明旧数据未知状态，got: {}",
-                locale,
-                prompt
+                "locale {locale:?} 的 system prompt 未正确说明旧数据未知状态，got: {prompt}"
             );
         }
     }

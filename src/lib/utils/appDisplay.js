@@ -27,9 +27,9 @@ function isCompactRawToken(value) {
   return Boolean(source) && /^[a-z0-9_.-]+$/i.test(source) && !/[A-Z]/.test(source);
 }
 
-export function getPreferredTimelineAppName({ appName, windowTitle }) {
-  const rawAppName = trimmed(appName);
-  const rawTitle = trimmed(windowTitle);
+export function getPreferredTimelineAppName(activity = {}) {
+  const rawAppName = trimmed(activity.appName || activity.app_name);
+  const rawTitle = trimmed(activity.windowTitle || activity.window_title);
   if (!rawTitle) {
     return rawAppName;
   }
@@ -75,9 +75,9 @@ export function getPreferredTimelineAppName({ appName, windowTitle }) {
   return rawAppName || rawTitle;
 }
 
-export function shouldPreferTimelineFallbackIcon({ appName, windowTitle }) {
-  const rawAppName = trimmed(appName);
-  const rawTitle = trimmed(windowTitle);
+export function shouldPreferTimelineFallbackIcon(activity = {}) {
+  const rawAppName = trimmed(activity.appName || activity.app_name);
+  const rawTitle = trimmed(activity.windowTitle || activity.window_title);
   const preferredName = getPreferredTimelineAppName({ appName: rawAppName, windowTitle: rawTitle });
 
   if (!preferredName) {

@@ -129,14 +129,8 @@ pub(crate) async fn generate_report_inner(
 
     let (config, stats, activities, data_dir) = {
         let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-        let segments = state.config.effective_work_segments();
         let (ignored_apps, excluded_domains) = collect_privacy_filters(&state);
-        let stats = state.database.get_daily_stats_with_segments_filtered(
-            &date,
-            &segments,
-            &ignored_apps,
-            &excluded_domains,
-        )?;
+        let stats = super::stats::load_daily_stats_for_overview(&state, &date)?;
         // 生成日报时获取最多 2000 条记录
         let raw_activities = state.database.get_timeline(&date, Some(2000), None)?;
         let activities =
@@ -163,6 +157,7 @@ pub(crate) async fn generate_report_inner(
             state.config.avatar_opacity,
             &state.config.avatar_preset,
             &state.config.avatar_persona,
+            state.config.avatar_body_hidden,
         );
         state.avatar_state = avatar_state.clone();
         if state.config.avatar_enabled {
@@ -274,6 +269,7 @@ pub(crate) async fn generate_report_inner(
             state.config.avatar_opacity,
             &state.config.avatar_preset,
             &state.config.avatar_persona,
+            state.config.avatar_body_hidden,
         );
         state.avatar_state = avatar_state.clone();
         if state.config.avatar_enabled {
@@ -407,14 +403,7 @@ pub(crate) fn get_saved_report_inner(
 
     // 用最新的 stats 重新渲染统计区块，解决 issue #80：保存的 markdown 里固化的时长
     // 数字会随着工作日继续推进而变得陈旧。老报告若没有占位符标记则原样返回。
-    let segments = state.config.effective_work_segments();
-    let (ignored_apps, excluded_domains) = collect_privacy_filters(&state);
-    if let Ok(live_stats) = state.database.get_daily_stats_with_segments_filtered(
-        &date,
-        &segments,
-        &ignored_apps,
-        &excluded_domains,
-    ) {
+    if let Ok(live_stats) = super::stats::load_daily_stats_for_overview(&state, &date) {
         let category_name_overrides: std::collections::HashMap<String, String> = state
             .config
             .custom_categories

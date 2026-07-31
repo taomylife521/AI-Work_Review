@@ -694,7 +694,7 @@
     font-size: 24px;
     line-height: 1.2;
     font-weight: 700;
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
     color: rgb(15, 23, 42);
   }
 

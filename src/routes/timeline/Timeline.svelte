@@ -1,5 +1,5 @@
 <script>
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { open } from '@tauri-apps/plugin-shell';
@@ -17,14 +17,18 @@
     translateCategoryLabel,
   } from '$lib/i18n/index.js';
   import { formatUserError } from '$lib/utils/errorDisplay.js';
+  import { trapFocus } from '$lib/utils/focusTrap.js';
+  import { isValidLocalDateString } from '$lib/utils/dateValidation.js';
   import {
     getPreferredTimelineAppName,
     shouldPreferTimelineFallbackIcon,
   } from '$lib/utils/appDisplay.js';
   import { resolveAppIconSrc } from '../../lib/utils/appVisuals.js';
   import { formatBrowserUrlForDisplay } from '../../lib/utils/browserUrl.js';
+  import { getViewportPopoverPlacement } from '../../lib/utils/popoverPosition.js';
   import { prepareTimelineActivities, upsertTimelineActivity } from './timelineData.js';
   import LocalizedDatePicker from '../../lib/components/LocalizedDatePicker.svelte';
+  import HourlySummaryDrawer from './HourlySummaryDrawer.svelte';
   import { confirm } from '../../lib/stores/confirm.js';
 
   // 获取本地日期（避免 UTC 时区问题）
@@ -42,6 +46,17 @@
   let error = null;
   let selectedDate = getLocalDateString();
   let selectedActivity = null;
+  let showSummaryDrawer = false;
+  let summaryRefreshing = false;
+  let summaryRefreshError = null;
+  let summaryRefreshRequestId = 0;
+  let summaryTrigger;
+  let detailTrigger;
+  let detailCloseButton;
+  let categoryTrigger;
+  let categoryPopover;
+  let categoryPopoverStyle = '';
+  let showCategoryPopover = false;
   let unlisten = null;
   let componentDestroyed = false;
   let currentTime = new Date();
@@ -49,7 +64,6 @@
   let handleVisibilityChange;
   let handleTimelineFocus;
   let appIcons = {};
-  const DATE_PARAM_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
   // LRU 缓存：防止长时间运行内存无限增长
   // 缩略图 ~80KB/条，60 条 ≈ 5MB；高清图 ~300KB/条，20 条 ≈ 6MB
@@ -83,22 +97,50 @@
 
   const unsubIcons = appIconStore.subscribe(v => appIcons = v);
 
-  function readRequestedTimelineDate() {
+  function readTimelineQuery() {
     if (typeof window === 'undefined') {
-      return null;
+      return new URLSearchParams();
     }
 
     // hash 路由：query 在 location.hash（如 #/timeline?date=2026-06-22），不在 location.search
     const hash = window.location.hash;
     const queryIndex = hash.indexOf('?');
     const search = queryIndex >= 0 ? hash.slice(queryIndex + 1) : '';
-    const nextDate = new URLSearchParams(search).get('date');
-    return nextDate && DATE_PARAM_PATTERN.test(nextDate) ? nextDate : null;
+    return new URLSearchParams(search);
+  }
+
+  function readRequestedTimelineDate() {
+    const nextDate = readTimelineQuery().get('date');
+    return nextDate && isValidLocalDateString(nextDate) ? nextDate : null;
+  }
+
+  function readRequestedSummaryOpen() {
+    return readTimelineQuery().get('summary') === '1';
+  }
+
+  // summary=1 只作为一次性的旧路由兼容指令，消费后立即从地址中移除。
+  function consumeRequestedSummaryOpen() {
+    if (typeof window === 'undefined') return;
+
+    const params = readTimelineQuery();
+    if (params.get('summary') !== '1') return;
+
+    params.delete('summary');
+    const hash = window.location.hash;
+    const queryIndex = hash.indexOf('?');
+    const routeHash = queryIndex >= 0 ? hash.slice(0, queryIndex) : hash;
+    const nextQuery = params.toString();
+    const nextHash = `${routeHash}${nextQuery ? `?${nextQuery}` : ''}`;
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${window.location.pathname}${window.location.search}${nextHash}`
+    );
   }
 
   function applyTimelineFocus(payload) {
     const nextDate =
-      typeof payload?.date === 'string' && DATE_PARAM_PATTERN.test(payload.date)
+      typeof payload?.date === 'string' && isValidLocalDateString(payload.date)
         ? payload.date
         : null;
 
@@ -190,6 +232,34 @@
     };
   }
 
+  function selectActivityCategory(nextCategory) {
+    prepareCategoryConfirmation();
+    changeAppCategory(selectedActivity, nextCategory);
+  }
+
+  // 从分类 Popover 进入二次确认前，先把焦点交还给稳定存在的分类入口。
+  // 确认层的 trapFocus 会记录该入口，并在关闭时自动恢复焦点。
+  function prepareCategoryConfirmation() {
+    showCategoryPopover = false;
+    categoryPopoverStyle = '';
+    categoryTrigger?.focus();
+  }
+
+  // 保存期间分类入口会暂时禁用；恢复可用后，仅在焦点无人接管时重新聚焦。
+  async function restoreCategoryTriggerAfterSaving() {
+    await tick();
+    if (!selectedActivity || !categoryTrigger || typeof document === 'undefined') return;
+
+    const activeElement = document.activeElement;
+    if (
+      activeElement
+      && activeElement !== document.body
+      && activeElement !== document.documentElement
+    ) return;
+
+    categoryTrigger?.focus();
+  }
+
   // 确认后实际执行分类修改
   async function doChangeAppCategory(activity, nextCategory) {
     categorySaving = true;
@@ -233,6 +303,7 @@
       );
     } finally {
       categorySaving = false;
+      await restoreCategoryTriggerAfterSaving();
     }
   }
 
@@ -378,6 +449,7 @@
 
       // 创建成功后弹窗确认是否应用到当前应用
       if (selectedActivity) {
+        prepareCategoryConfirmation();
         pendingApplyCategory = { key, name };
       }
     } catch (e) {
@@ -594,6 +666,7 @@
   }
 
   let loadTimelineRequestId = 0;
+  let loadMoreRequestId = 0;
 
   // 加载时间线数据（重置）
   async function loadTimeline() {
@@ -601,6 +674,9 @@
     // 后端已实现 GROUP BY 聚合，无需前端缓存旧数据
 
     const requestId = ++loadTimelineRequestId;
+    const requestDate = selectedDate;
+    loadMoreRequestId += 1;
+    loadingMore = false;
 
     // 2. 缓存未命中，请求后端
     loading = true;
@@ -612,15 +688,15 @@
 
     try {
       const [activitiesData, summariesData] = await Promise.all([
-        invoke('get_timeline', { date: selectedDate, limit: PAGE_SIZE, offset: 0 }),
-        invoke('get_hourly_summaries', { date: selectedDate }),
+        invoke('get_timeline', { date: requestDate, limit: PAGE_SIZE, offset: 0 }),
+        invoke('get_hourly_summaries', { date: requestDate }),
       ]);
 
-      if (requestId !== loadTimelineRequestId) return;
+      if (requestId !== loadTimelineRequestId || requestDate !== selectedDate) return;
 
       const preparedActivities = prepareTimelineActivities(activitiesData);
       await preloadTimelineLeadThumbnails(preparedActivities);
-      if (requestId !== loadTimelineRequestId) return;
+      if (requestId !== loadTimelineRequestId || requestDate !== selectedDate) return;
 
       activities = preparedActivities;
 
@@ -629,7 +705,7 @@
       hasMore = activitiesData.length >= PAGE_SIZE;
       
       // 保存到缓存（直接使用后端返回结果）
-      cache.setTimeline(selectedDate, activities, summariesData);
+      cache.setTimeline(requestDate, activities, summariesData);
       
       // 预加载缩略图
       activities.slice(6).forEach(a => loadThumbnail(a.screenshot_path));
@@ -648,24 +724,32 @@
       );
       preloadAppIcons(uniqueIconEntries, invoke);
     } catch (e) {
+      if (requestId !== loadTimelineRequestId || requestDate !== selectedDate) return;
       error = formatUserError(e, t('common.loadFailedRetry'));
       console.error('获取时间线失败:', e);
     } finally {
-      loading = false;
+      if (requestId === loadTimelineRequestId && requestDate === selectedDate) {
+        loading = false;
+      }
     }
   }
 
   // 加载更多
   async function loadMore() {
     if (loadingMore || !hasMore) return;
+    const requestId = ++loadMoreRequestId;
+    const requestDate = selectedDate;
+    const requestOffset = offset;
     loadingMore = true;
 
     try {
       const moreActivities = await invoke('get_timeline', { 
-        date: selectedDate, 
+        date: requestDate,
         limit: PAGE_SIZE, 
-        offset: offset 
+        offset: requestOffset,
       });
+
+      if (requestId !== loadMoreRequestId || requestDate !== selectedDate) return;
 
       if (moreActivities.length > 0) {
         const prepared = prepareTimelineActivities(moreActivities);
@@ -674,7 +758,7 @@
         const newItems = prepared.filter(a => !existingIds.has(a.id));
         activities = [...activities, ...newItems];
         // Always increment by full fetched count to keep DB pagination in sync
-        offset += moreActivities.length;
+        offset = requestOffset + moreActivities.length;
         // 预加载新图片
         moreActivities.forEach(a => loadThumbnail(a.screenshot_path));
         const iconEntries = Array.from(
@@ -692,15 +776,149 @@
         hasMore = false;
       }
     } catch (e) {
+      if (requestId !== loadMoreRequestId || requestDate !== selectedDate) return;
       console.error('加载更多失败:', e);
     } finally {
-      loadingMore = false;
+      if (requestId === loadMoreRequestId && requestDate === selectedDate) {
+        loadingMore = false;
+      }
     }
+  }
+
+  // 打开时段摘要抽屉，并静默刷新一次当前日期的数据。
+  async function refreshHourlySummaries() {
+    const requestId = ++summaryRefreshRequestId;
+    const requestDate = selectedDate;
+    summaryRefreshing = true;
+    summaryRefreshError = null;
+
+    try {
+      const summariesData = await invoke('get_hourly_summaries', { date: requestDate });
+      if (requestId !== summaryRefreshRequestId || requestDate !== selectedDate) return;
+      hourlySummaries = summariesData;
+    } catch (e) {
+      if (requestId !== summaryRefreshRequestId || requestDate !== selectedDate) return;
+      console.warn('刷新小时摘要失败:', e);
+      summaryRefreshError = t('timelineSummary.refreshFailed');
+    } finally {
+      if (requestId === summaryRefreshRequestId && requestDate === selectedDate) {
+        summaryRefreshing = false;
+      }
+    }
+  }
+
+  async function openSummaryDrawer() {
+    await closeDetail(false);
+    showSummaryDrawer = true;
+    summaryRefreshError = null;
+    void refreshHourlySummaries();
+  }
+
+  async function closeSummaryDrawer(restoreFocus = true) {
+    showSummaryDrawer = false;
+    summaryRefreshRequestId += 1;
+    summaryRefreshing = false;
+    summaryRefreshError = null;
+    if (restoreFocus) {
+      await tick();
+      summaryTrigger?.focus();
+    }
+  }
+
+  function updateCategoryPopoverPosition() {
+    if (!showCategoryPopover || !categoryTrigger || typeof window === 'undefined') {
+      categoryPopoverStyle = '';
+      return;
+    }
+
+    const position = getViewportPopoverPlacement(categoryTrigger.getBoundingClientRect(), {
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      preferredWidth: 352,
+    });
+    const verticalStyle = position.top === null
+      ? `top: auto; bottom: ${position.bottom}px;`
+      : `top: ${position.top}px; bottom: auto;`;
+    categoryPopoverStyle = `left: ${position.left}px; width: ${position.width}px; max-height: ${position.maxHeight}px; ${verticalStyle}`;
+  }
+
+  async function closeCategoryPopover() {
+    showCategoryPopover = false;
+    categoryPopoverStyle = '';
+    await tick();
+    categoryTrigger?.focus();
+  }
+
+  async function toggleCategoryPopover() {
+    if (showCategoryPopover) {
+      await closeCategoryPopover();
+      return;
+    }
+
+    showCategoryPopover = true;
+    await tick();
+    updateCategoryPopoverPosition();
+    await tick();
+    categoryPopover?.focus();
+  }
+
+  function handleCategoryPopoverKeydown(event) {
+    if (!showCategoryPopover || event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    void closeCategoryPopover();
+  }
+
+  function cancelPendingAction() {
+    if (pendingDeleteCategory) {
+      cancelDeleteCategory();
+    } else if (pendingApplyCategory) {
+      cancelApplyCategory();
+    } else if (pendingPrivacyRule) {
+      cancelPrivacyRule();
+    } else if (pendingChangeCategory) {
+      cancelChangeCategory();
+    }
+  }
+
+  function handleTimelineWindowKeydown(event) {
+    if (
+      event.key === 'Escape'
+      && (pendingDeleteCategory || pendingApplyCategory || pendingPrivacyRule || pendingChangeCategory)
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      cancelPendingAction();
+      return;
+    }
+
+    handleCategoryPopoverKeydown(event);
+  }
+
+  function handleDetailDismiss() {
+    if (showCategoryPopover) {
+      void closeCategoryPopover();
+      return;
+    }
+    void closeDetail();
+  }
+
+  function handleDetailOverlayKeydown(event) {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    handleDetailDismiss();
+  }
+
+  function handleDetailScroll() {
+    if (showCategoryPopover) updateCategoryPopoverPosition();
   }
 
   // 查看活动详情
   let viewActivityRequestId = 0;
-  async function viewActivity(activity) {
+  async function viewActivity(activity, trigger = null) {
+    await closeSummaryDrawer(false);
+    detailTrigger = trigger;
+    showCategoryPopover = false;
     const requestId = ++viewActivityRequestId;
     const previewThumbnail = getTimelineThumbnail(activity);
     selectedActivity = {
@@ -708,6 +926,8 @@
       thumbnail: getTimelineThumbnail(activity),
       thumbnailLoading: !!activity.screenshot_path,
     };
+    await tick();
+    detailCloseButton?.focus();
 
     const freshActivityPromise = activity.id
       ? invoke('get_activity', { id: activity.id }).catch((e) => {
@@ -812,16 +1032,27 @@
       showToast(e.toString(), 'error');
     } finally {
       categorySaving = false;
+      await restoreCategoryTriggerAfterSaving();
     }
   }
 
-  // 关闭详情
-  function closeDetail() {
+  // 关闭详情并把焦点交还给打开详情的时间线记录。
+  async function closeDetail(restoreFocus = true) {
+    viewActivityRequestId += 1;
     selectedActivity = null;
     categorySaving = false;
+    showCategoryPopover = false;
+    categoryPopoverStyle = '';
+    showCreateCategory = false;
+    showRenameCategory = false;
     pendingChangeCategory = null;
     pendingApplyCategory = null;
     pendingDeleteCategory = null;
+    if (restoreFocus) {
+      await tick();
+      detailTrigger?.focus();
+    }
+    detailTrigger = null;
   }
 
   // 删除单条活动记录（连带截图）
@@ -968,9 +1199,12 @@
   let lastLoadedDate = null;
   let featuredActivityIds = new Set();
 
-  // 日期变化时重新加载
+  // 日期变化时重新加载，同时让旧日期的静默摘要请求立即失效。
   $: if (selectedDate && selectedDate !== lastLoadedDate) {
     lastLoadedDate = selectedDate;
+    summaryRefreshRequestId += 1;
+    summaryRefreshing = false;
+    summaryRefreshError = null;
     loadTimeline();
   }
 
@@ -986,6 +1220,10 @@
     const requestedDate = readRequestedTimelineDate();
     if (requestedDate) {
       selectedDate = requestedDate;
+    }
+    if (readRequestedSummaryOpen()) {
+      showSummaryDrawer = true;
+      consumeRequestedSummaryOpen();
     }
 
     handleTimelineFocus = (event) => applyTimelineFocus(event.detail);
@@ -1052,6 +1290,8 @@
     unsubIcons();
   });
 </script>
+
+<svelte:window on:resize={handleDetailScroll} on:keydown={handleTimelineWindowKeydown} />
 
 <div class="page-shell" data-locale={currentLocale}>
   <!-- 页面标题 -->
@@ -1143,9 +1383,13 @@
           <span>00:00 - {activities[0] ? formatTime(activities[0].timestamp) : '--:--'}</span>
         </div>
 
-        <a
-          href="#/timeline/summary/{selectedDate}"
+        <button
+          bind:this={summaryTrigger}
+          type="button"
           class="page-control-btn timeline-summary-action"
+          aria-haspopup="dialog"
+          aria-expanded={showSummaryDrawer}
+          on:click={openSummaryDrawer}
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -1157,7 +1401,7 @@
           <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
           </svg>
-        </a>
+        </button>
       </div>
 
       <!-- 时间线列表 -->
@@ -1169,7 +1413,7 @@
           {@const timelineTitle = getTimelineTitle(activity)}
           <button
             class={`timeline-entry ${featured ? 'timeline-entry-featured' : 'timeline-entry-compact'}`}
-            on:click={() => viewActivity(activity)}
+            on:click={(event) => viewActivity(activity, event.currentTarget)}
           >
             <div class="timeline-entry-anchor">
               <div class="timeline-entry-time">{formatTimelineAnchor(activity.timestamp)}</div>
@@ -1280,21 +1524,37 @@
   {/if}
 </div>
 
-<!-- 活动详情弹窗 -->
+<HourlySummaryDrawer
+  open={showSummaryDrawer}
+  date={selectedDate}
+  summaries={hourlySummaries}
+  loading={loading}
+  refreshing={summaryRefreshing}
+  error={summaryRefreshError}
+  on:close={() => closeSummaryDrawer()}
+/>
+
+<!-- 活动详情右侧抽屉 -->
 {#if selectedActivity}
   {@const info = getCategoryMeta(selectedActivity.category)}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div
-    class="fixed inset-0 z-[140] bg-slate-950/52 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn"
-    role="button"
-    tabindex="0"
-    on:click|self={closeDetail}
-    on:keydown={(e) => e.key === 'Escape' && closeDetail()}
+    class="timeline-detail-overlay fixed inset-0 z-[140] bg-slate-950/52 backdrop-blur-md flex items-center justify-end p-4 animate-fadeIn"
+    role="presentation"
+    on:click|self={handleDetailDismiss}
+    on:keydown={handleDetailOverlayKeydown}
   >
-    <div class="timeline-detail-dialog bg-white dark:bg-[#21262d] rounded-xl shadow-xl dark:shadow-[0_12px_32px_rgba(0,0,0,0.5)] max-w-3xl w-full max-h-[90vh] overflow-auto relative" role="dialog" aria-modal="true">
+    <aside
+      class="timeline-detail-drawer"
+      use:trapFocus
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="timeline-detail-title"
+      on:scroll={handleDetailScroll}
+    >
       <!-- 头部 -->
-      <div class="timeline-detail-header p-6 border-b border-slate-200 dark:border-[#30363d]">
+      <div class="timeline-detail-header">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-3">
             <div class="timeline-app-icon timeline-app-icon-lg"
@@ -1308,7 +1568,7 @@
               {/if}
             </div>
             <div>
-              <h3 class="text-lg font-semibold text-slate-900 dark:text-[#e6edf3]">{getTimelineAppName(selectedActivity)}</h3>
+              <h3 id="timeline-detail-title" class="text-lg font-semibold text-slate-900 dark:text-[#e6edf3]">{getTimelineAppName(selectedActivity)}</h3>
               <p class="text-sm text-slate-500 dark:text-[#7d8590]">{info.name}</p>
             </div>
           </div>
@@ -1322,7 +1582,7 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
               </svg>
             </button>
-            <button class="btn btn-ghost" on:click={closeDetail}>
+            <button bind:this={detailCloseButton} class="btn btn-ghost" aria-label={t('window.close')} on:click={() => closeDetail()}>
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
               </svg>
@@ -1332,8 +1592,67 @@
       </div>
 
       <!-- 内容 -->
-      <div class="p-6 space-y-4">
-        <div>
+      <div class="timeline-detail-body">
+        <section class="timeline-detail-hero" aria-label={t('timeline.detail.recordTime')}>
+          <div class="timeline-detail-hero-item">
+            <span>{t('timeline.detail.recordTime')}</span>
+            <strong>{formatTime(selectedActivity.timestamp)}</strong>
+          </div>
+          <span class="timeline-detail-hero-divider" aria-hidden="true"></span>
+          <div class="timeline-detail-hero-item">
+            <span>{t('timeline.detail.duration')}</span>
+            <strong>{formatDuration(selectedActivity.duration)}</strong>
+          </div>
+        </section>
+
+        <section class="timeline-detail-preview">
+          <div class="timeline-detail-section-heading">
+            <span>{t('timeline.detail.screenshot')}</span>
+          </div>
+          <div class="timeline-detail-preview-frame">
+            {#if selectedActivity.thumbnail}
+              <img src={selectedActivity.thumbnail} alt={t('timeline.detail.screenshotAlt')} class="timeline-detail-preview-image" />
+              {#if selectedActivity.thumbnailLoading}
+                <span class="timeline-detail-preview-loading-indicator" aria-hidden="true">
+                  <span class="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-primary-500"></span>
+                </span>
+              {/if}
+            {:else if selectedActivity.thumbnailLoading}
+              <div class="timeline-detail-preview-state">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
+              </div>
+            {:else if selectedActivity.screenshot_path}
+              <div class="timeline-detail-preview-state text-slate-400 dark:text-[#7d8590]">
+                <span>{t('timeline.detail.screenshotLoadFailed')}</span>
+              </div>
+            {:else}
+              <div class="timeline-detail-preview-state text-slate-400 dark:text-[#7d8590]">
+                <span>{t('timeline.detail.screenshotMissing')}</span>
+              </div>
+            {/if}
+          </div>
+        </section>
+
+        <section class="timeline-detail-meta">
+          <div class="timeline-detail-meta-row">
+            <span>{t('timeline.detail.windowTitle')}</span>
+            <p>{selectedActivity.window_title || t('timeline.noTitle')}</p>
+          </div>
+          {#if selectedActivity.browser_url}
+            <div class="timeline-detail-meta-row">
+              <span>{t('timeline.detail.visitedUrl')}</span>
+              <button
+                on:click={() => openUrl(selectedActivity.browser_url)}
+                class="timeline-detail-url"
+              >
+                {formatBrowserUrlForDisplay(selectedActivity.browser_url)}
+              </button>
+            </div>
+          {/if}
+        </section>
+
+        <section class="timeline-detail-settings">
+        <div class="timeline-category-section timeline-detail-setting-row">
           <div class="flex items-center justify-between gap-3">
             <div>
               <span class="text-sm font-medium text-slate-500 dark:text-[#7d8590]">{t('timeline.detail.appCategory')}</span>
@@ -1345,140 +1664,157 @@
               <span class="text-xs text-slate-400 dark:text-[#7d8590]">{t('timeline.detail.saving')}</span>
             {/if}
           </div>
-          <div class="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
-            {#each $categoryStore as cat}
-              <div class="relative group">
+
+          <div class="timeline-category-control">
+            <button
+              bind:this={categoryTrigger}
+              type="button"
+              class="timeline-category-trigger"
+              aria-haspopup="dialog"
+              aria-expanded={showCategoryPopover}
+              disabled={categorySaving}
+              on:click={toggleCategoryPopover}
+            >
+              <span class="timeline-category-dot" style={`background-color: ${info.color}`}></span>
+              <span>{info.name}</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {#if showCategoryPopover}
+              <div
+                bind:this={categoryPopover}
+                class="timeline-category-popover"
+                role="dialog"
+                tabindex="-1"
+                aria-label={t('timeline.detail.appCategory')}
+                style={categoryPopoverStyle}
+              >
+                <div class="timeline-category-options">
+                  {#each $categoryStore as cat}
+                    <div class="timeline-category-option-row">
+                      <button
+                        type="button"
+                        class="timeline-category-option"
+                        class:timeline-category-option-active={(selectedActivity.category || 'other') === cat.key}
+                        aria-pressed={(selectedActivity.category || 'other') === cat.key}
+                        disabled={categorySaving}
+                        on:click={() => selectActivityCategory(cat.key)}
+                      >
+                        <span class="timeline-category-dot" style={`background-color: ${cat.color}`}></span>
+                        <span class="timeline-category-option-name">{getCategoryDisplayName(cat)}</span>
+                        {#if (selectedActivity.category || 'other') === cat.key}
+                          <span class="timeline-category-check" aria-hidden="true">✓</span>
+                        {/if}
+                      </button>
+                      {#if !cat.is_system}
+                        <div class="timeline-category-option-actions">
+                          <button
+                            type="button"
+                            disabled={categorySaving}
+                            title={t('timeline.renameCategory')}
+                            aria-label={t('timeline.renameCategory')}
+                            on:click={() => {
+                              showCreateCategory = false;
+                              startRenameCategory(cat);
+                            }}
+                          >
+                            <span aria-hidden="true">✎</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={categorySaving}
+                            title={t('timeline.deleteCategory')}
+                            aria-label={t('timeline.deleteCategory')}
+                            on:click={() => {
+                              prepareCategoryConfirmation();
+                              pendingDeleteCategory = { key: cat.key, name: getCategoryDisplayName(cat) };
+                            }}
+                          >
+                            <span aria-hidden="true">×</span>
+                          </button>
+                        </div>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+
                 <button
-                  on:click={() => changeAppCategory(selectedActivity, cat.key)}
-                  class="segment-btn rounded-lg border px-3 py-2 text-sm flex items-center justify-center gap-1.5 w-full
-                    {(selectedActivity.category || 'other') === cat.key
-                      ? 'settings-segment-success'
-                      : 'settings-segment-idle'}"
+                  type="button"
+                  class="timeline-category-create-trigger"
                   disabled={categorySaving}
+                  on:click={() => {
+                    showRenameCategory = false;
+                    showCreateCategory = !showCreateCategory;
+                  }}
                 >
-                  <span class="text-xs">{cat.icon}</span>
-                  <span>{getCategoryDisplayName(cat)}</span>
+                  <span aria-hidden="true">{showCreateCategory ? '×' : '+'}</span>
+                  <span>{t('timeline.createCategory')}</span>
                 </button>
-                {#if !cat.is_system}
-                  <button
-                    on:click|stopPropagation={() => startRenameCategory(cat)}
-                    class="absolute -top-1.5 left-1/2 -translate-x-1/2 w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs leading-none opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-blue-600 transition-opacity shadow-sm dark:shadow-none"
-                    disabled={categorySaving}
-                    title={t('timeline.renameCategory')}
-                  >✎</button>
-                  <button
-                    on:click|stopPropagation={() => pendingDeleteCategory = { key: cat.key, name: getCategoryDisplayName(cat) }}
-                    class="absolute -top-1.5 -end-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center text-xs leading-none opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-red-600 transition-opacity shadow-sm dark:shadow-none"
-                    disabled={categorySaving}
-                    title={t('timeline.deleteCategory')}
-                  >×</button>
+
+                {#if showCreateCategory}
+                  <div class="timeline-category-editor">
+                    <p>{t('timeline.createCategoryHint')}</p>
+                    <div class="timeline-category-editor-fields">
+                      <input
+                        type="text"
+                        bind:value={newCategoryName}
+                        placeholder={t('timeline.categoryNamePlaceholder')}
+                      />
+                      <input type="color" bind:value={newCategoryColor} aria-label={t('timeline.detail.appCategory')} />
+                      <span>{newCategoryIcon}</span>
+                    </div>
+                    <div class="timeline-category-emoji-grid">
+                      {#each CATEGORY_EMOJIS as emoji}
+                        <button
+                          type="button"
+                          class:timeline-category-emoji-active={newCategoryIcon === emoji}
+                          on:click={() => newCategoryIcon = emoji}
+                        >{emoji}</button>
+                      {/each}
+                    </div>
+                    <div class="timeline-category-editor-actions">
+                      <button type="button" on:click={() => showCreateCategory = false}>{t('timeline.cancel')}</button>
+                      <button type="button" class="timeline-category-editor-primary" on:click={createCustomCategory}>{t('timeline.confirmChange')}</button>
+                    </div>
+                  </div>
+                {/if}
+
+                {#if showRenameCategory}
+                  <div class="timeline-category-editor">
+                    <p>{t('timeline.renameCategory')}</p>
+                    <div class="timeline-category-editor-fields">
+                      <input
+                        type="text"
+                        bind:value={renameCategoryName}
+                        placeholder={t('timeline.categoryNamePlaceholder')}
+                      />
+                      <input type="color" bind:value={renameCategoryColor} aria-label={t('timeline.detail.appCategory')} />
+                      <span>{renameCategoryIcon}</span>
+                    </div>
+                    <div class="timeline-category-emoji-grid">
+                      {#each CATEGORY_EMOJIS as emoji}
+                        <button
+                          type="button"
+                          class:timeline-category-emoji-active={renameCategoryIcon === emoji}
+                          on:click={() => renameCategoryIcon = emoji}
+                        >{emoji}</button>
+                      {/each}
+                    </div>
+                    <div class="timeline-category-editor-actions">
+                      <button type="button" on:click={() => showRenameCategory = false}>{t('timeline.cancel')}</button>
+                      <button type="button" class="timeline-category-editor-primary" on:click={saveRenameCategory}>{t('timeline.confirmChange')}</button>
+                    </div>
+                  </div>
                 {/if}
               </div>
-            {/each}
-            <button
-              on:click={() => showCreateCategory = !showCreateCategory}
-              class="segment-btn rounded-lg border px-3 py-2 text-sm settings-segment-idle
-                flex items-center justify-center gap-1.5 border-dashed"
-              disabled={categorySaving}
-            >
-              <span class="text-xs">{showCreateCategory ? '×' : '+'}</span>
-              <span>{t('timeline.createCategory')}</span>
-            </button>
+            {/if}
           </div>
-
-          {#if showCreateCategory}
-            <div class="mt-3 p-3 rounded-lg border border-dashed border-slate-300 dark:border-[#484f58] bg-slate-50 dark:bg-[#21262d]/50 space-y-2">
-              <p class="text-xs text-slate-500 dark:text-[#7d8590]">{t('timeline.createCategoryHint')}</p>
-              <div class="flex items-center gap-2">
-                <input
-                  type="text"
-                  bind:value={newCategoryName}
-                  placeholder={t('timeline.categoryNamePlaceholder')}
-                  class="flex-1 px-2 py-1 text-sm rounded border border-slate-300 dark:border-[#484f58] bg-white dark:bg-[#30363d]"
-                />
-                <input
-                  type="color"
-                  bind:value={newCategoryColor}
-                  class="w-8 h-8 rounded cursor-pointer border-0"
-                />
-                <span class="text-lg">{newCategoryIcon}</span>
-              </div>
-              <div class="flex flex-wrap gap-1">
-                {#each CATEGORY_EMOJIS as emoji}
-                  <button
-                    type="button"
-                    on:click={() => newCategoryIcon = emoji}
-                    class="w-7 h-7 flex items-center justify-center text-base rounded hover:bg-slate-200 dark:hover:bg-[#484f58] transition-colors {newCategoryIcon === emoji ? 'bg-primary-100 dark:bg-primary-900/40 ring-1 ring-primary-400' : ''}"
-                  >
-                    {emoji}
-                  </button>
-                {/each}
-              </div>
-              <div class="flex justify-end gap-2">
-                <button
-                  on:click={() => showCreateCategory = false}
-                  class="px-3 py-1 text-xs rounded-lg text-slate-500 hover:text-slate-700 dark:text-[#7d8590] dark:hover:text-[#adbac7]"
-                >
-                  {t('timeline.cancel')}
-                </button>
-                <button
-                  on:click={createCustomCategory}
-                  class="px-3 py-1 text-xs rounded-lg bg-primary-600 text-white hover:bg-primary-700"
-                >
-                  {t('timeline.confirmChange')}
-                </button>
-              </div>
-            </div>
-          {/if}
-
-          {#if showRenameCategory}
-            <div class="mt-3 p-3 rounded-lg border border-dashed border-blue-300 dark:border-blue-600 bg-blue-50 dark:bg-blue-900/20 space-y-2">
-              <p class="text-xs text-slate-500 dark:text-[#7d8590]">{t('timeline.renameCategory')}</p>
-              <div class="flex items-center gap-2">
-                <input
-                  type="text"
-                  bind:value={renameCategoryName}
-                  placeholder={t('timeline.categoryNamePlaceholder')}
-                  class="flex-1 px-2 py-1 text-sm rounded border border-slate-300 dark:border-[#484f58] bg-white dark:bg-[#30363d]"
-                />
-                <input
-                  type="color"
-                  bind:value={renameCategoryColor}
-                  class="w-8 h-8 rounded cursor-pointer border-0"
-                />
-                <span class="text-lg">{renameCategoryIcon}</span>
-              </div>
-              <div class="flex flex-wrap gap-1">
-                {#each CATEGORY_EMOJIS as emoji}
-                  <button
-                    type="button"
-                    on:click={() => renameCategoryIcon = emoji}
-                    class="w-7 h-7 flex items-center justify-center text-base rounded hover:bg-slate-200 dark:hover:bg-[#484f58] transition-colors {renameCategoryIcon === emoji ? 'bg-primary-100 dark:bg-primary-900/40 ring-1 ring-primary-400' : ''}"
-                  >
-                    {emoji}
-                  </button>
-                {/each}
-              </div>
-              <div class="flex justify-end gap-2">
-                <button
-                  on:click={() => showRenameCategory = false}
-                  class="px-3 py-1 text-xs rounded-lg text-slate-500 hover:text-slate-700 dark:text-[#7d8590] dark:hover:text-[#adbac7]"
-                >
-                  {t('timeline.cancel')}
-                </button>
-                <button
-                  on:click={saveRenameCategory}
-                  class="px-3 py-1 text-xs rounded-lg bg-primary-600 text-white hover:bg-primary-700"
-                >
-                  {t('timeline.confirmChange')}
-                </button>
-              </div>
-            </div>
-          {/if}
         </div>
 
         <!-- 记录策略快捷设置 -->
-        <div>
+        <div class="timeline-detail-setting-row">
           <div class="flex items-center justify-between gap-3">
             <div>
               <span class="text-sm font-medium text-slate-500 dark:text-[#7d8590]">{t('timeline.detail.privacyRule')}</span>
@@ -1515,58 +1851,9 @@
             }[(selectedActivity._privacyLevel || 'full')] || ''}
           </p>
         </div>
-
-        <!-- 截图预览 -->
-        <div>
-          <span class="text-sm font-medium text-slate-500 dark:text-[#7d8590]">{t('timeline.detail.screenshot')}</span>
-          <!-- 容器居中对齐，避免图片尺寸小时产生大面积空白 -->
-          <div class="mt-2 rounded-lg overflow-hidden bg-slate-100 dark:bg-[#30363d] flex items-center justify-center min-h-[120px]">
-            {#if selectedActivity.thumbnailLoading}
-              <div class="py-12 flex items-center justify-center">
-                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
-              </div>
-            {:else if selectedActivity.thumbnail}
-              <!-- max-h 限制高度防止超高图片撑开弹窗，object-contain 保持比例居中 -->
-              <img src={selectedActivity.thumbnail} alt={t('timeline.detail.screenshotAlt')} class="max-w-full max-h-96 object-contain" />
-            {:else if selectedActivity.screenshot_path}
-              <div class="py-12 flex items-center justify-center text-slate-400 dark:text-[#7d8590]">
-                <span>{t('timeline.detail.screenshotLoadFailed')}</span>
-              </div>
-            {:else}
-              <div class="py-12 flex items-center justify-center text-slate-400 dark:text-[#7d8590]">
-                <span>{t('timeline.detail.screenshotMissing')}</span>
-              </div>
-            {/if}
-          </div>
-        </div>
-
-        <div>
-          <span class="text-sm font-medium text-slate-500 dark:text-[#7d8590]">{t('timeline.detail.windowTitle')}</span>
-          <p class="text-base text-slate-900 dark:text-[#e6edf3] mt-1 break-all leading-relaxed">{selectedActivity.window_title || t('timeline.noTitle')}</p>
-        </div>
-        <div class="grid grid-cols-2 gap-4">
-          <div>
-            <span class="text-sm font-medium text-slate-500 dark:text-[#7d8590]">{t('timeline.detail.recordTime')}</span>
-            <p class="text-base text-slate-900 dark:text-[#e6edf3] mt-1 font-mono">{formatTime(selectedActivity.timestamp)}</p>
-          </div>
-          <div>
-            <span class="text-sm font-medium text-slate-500 dark:text-[#7d8590]">{t('timeline.detail.duration')}</span>
-            <p class="text-base text-slate-900 dark:text-[#e6edf3] mt-1">{formatDuration(selectedActivity.duration)}</p>
-          </div>
-        </div>
-        {#if selectedActivity.browser_url}
-          <div>
-            <span class="text-sm font-medium text-slate-500 dark:text-[#7d8590]">{t('timeline.detail.visitedUrl')}</span>
-            <button 
-              on:click={() => openUrl(selectedActivity.browser_url)}
-              class="text-primary-600 dark:text-primary-400 mt-1 text-sm hover:underline break-all block text-start cursor-pointer"
-            >
-              {formatBrowserUrlForDisplay(selectedActivity.browser_url)}
-            </button>
-          </div>
-        {/if}
+        </section>
       </div>
-    </div>
+    </aside>
   </div>
 {/if}
 
@@ -1681,14 +1968,21 @@
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div
     class="fixed inset-0 z-[150] bg-slate-950/40 backdrop-blur-sm flex items-center justify-center animate-fadeIn"
-    role="button"
-    tabindex="0"
+    role="presentation"
     on:click|self={cancelAction}
-    on:keydown={(e) => e.key === 'Escape' && cancelAction()}
   >
-    <div class="w-full max-w-sm rounded-2xl border border-slate-200 dark:border-[#30363d] bg-white dark:bg-[#161b22] shadow-2xl p-6 mx-4">
+    <div
+      class="timeline-action-confirm-dialog"
+      use:trapFocus
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="timeline-action-confirm-title"
+      tabindex="-1"
+    >
       {#if isDelete}
-        <h3 class="text-base font-semibold text-slate-900 dark:text-[#e6edf3]">{t('timeline.deleteCategoryTitle')}</h3>
+        <h3 id="timeline-action-confirm-title" class="text-base font-semibold text-slate-900 dark:text-[#e6edf3]">
+          {t('timeline.deleteCategoryTitle')}
+        </h3>
         <p class="mt-2 text-sm text-slate-700 dark:text-[#7d8590] leading-relaxed">
           {t('timeline.deleteCategoryMessage', { category: pendingDeleteCategory.name })}
         </p>
@@ -1707,7 +2001,9 @@
           </button>
         </div>
       {:else if isPrivacy}
-        <h3 class="text-base font-semibold text-slate-900 dark:text-[#e6edf3]">{t('timeline.detail.privacyRule')}</h3>
+        <h3 id="timeline-action-confirm-title" class="text-base font-semibold text-slate-900 dark:text-[#e6edf3]">
+          {t('timeline.detail.privacyRule')}
+        </h3>
         <p class="mt-2 text-sm text-slate-700 dark:text-[#7d8590] leading-relaxed">
           {t('timeline.detail.privacyConfirmMessage', {
             appName: selectedActivity.app_name,
@@ -1731,7 +2027,9 @@
       {:else}
         {@const categoryName = isApply ? pendingApplyCategory.name : pendingChangeCategory.categoryName}
         {@const appName = selectedActivity.app_name}
-        <h3 class="text-base font-semibold text-slate-900 dark:text-[#e6edf3]">{t('timeline.changeCategoryTitle')}</h3>
+        <h3 id="timeline-action-confirm-title" class="text-base font-semibold text-slate-900 dark:text-[#e6edf3]">
+          {t('timeline.changeCategoryTitle')}
+        </h3>
         <p class="mt-2 text-sm text-slate-700 dark:text-[#7d8590] leading-relaxed">
           {t('timeline.changeCategoryMessage', { appName, category: categoryName })}
         </p>
@@ -1755,6 +2053,22 @@
 {/if}
 
 <style>
+  .timeline-action-confirm-dialog {
+    width: 100%;
+    max-width: 24rem;
+    margin: 1rem;
+    padding: 1.5rem;
+    border: 1px solid rgb(226 232 240);
+    border-radius: 1rem;
+    background: white;
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+  }
+
+  :global(.dark) .timeline-action-confirm-dialog {
+    border-color: #30363d;
+    background: #161b22;
+  }
+
   .timeline-summary-strip {
     display: flex;
     align-items: center;
@@ -2068,7 +2382,7 @@
     font-size: 0.98rem;
     font-weight: 600;
     color: #111827;
-    letter-spacing: -0.01em;
+    letter-spacing: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2125,7 +2439,7 @@
     font-size: 1.02rem;
     line-height: 1.55;
     font-weight: 600;
-    letter-spacing: -0.01em;
+    letter-spacing: 0;
   }
 
   .timeline-entry-title-compact {
@@ -2228,12 +2542,395 @@
     font-size: 0.78rem;
   }
 
-  .timeline-detail-dialog {
+  .timeline-detail-overlay {
+    overflow: hidden;
+  }
+
+  .timeline-detail-drawer {
+    width: min(42rem, 100%);
+    height: calc(100vh - 2rem);
+    overflow-y: auto;
+    position: relative;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 1.25rem;
     background: var(--editorial-surface-featured);
+    box-shadow: -18px 0 48px rgba(15, 23, 42, 0.18);
   }
 
   .timeline-detail-header {
-    background: var(--editorial-surface-subtle);
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    padding: 1.15rem 1.35rem;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+    background: color-mix(in srgb, var(--editorial-surface-featured) 94%, transparent);
+    backdrop-filter: blur(18px);
+  }
+
+  .timeline-detail-body {
+    display: grid;
+    gap: 1.35rem;
+    padding: 1.15rem 1.35rem 1.5rem;
+  }
+
+  .timeline-detail-hero {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    min-height: 2.75rem;
+  }
+
+  .timeline-detail-hero-item {
+    display: grid;
+    gap: 0.18rem;
+  }
+
+  .timeline-detail-hero-item span,
+  .timeline-detail-section-heading,
+  .timeline-detail-meta-row > span {
+    color: #78716c;
+    font-size: 0.76rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+
+  .timeline-detail-hero-item strong {
+    color: #292524;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.94rem;
+    font-weight: 600;
+  }
+
+  .timeline-detail-hero-divider {
+    width: 1px;
+    height: 1.75rem;
+    background: rgba(148, 163, 184, 0.28);
+  }
+
+  .timeline-detail-preview,
+  .timeline-detail-meta,
+  .timeline-detail-settings {
+    min-width: 0;
+  }
+
+  .timeline-detail-section-heading {
+    margin-bottom: 0.55rem;
+  }
+
+  .timeline-detail-preview-frame {
+    min-height: 13rem;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.9rem;
+    background: rgba(148, 163, 184, 0.1);
+  }
+
+  .timeline-detail-preview-state {
+    min-height: 13rem;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    font-size: 0.84rem;
+    text-align: center;
+  }
+
+  .timeline-detail-preview-image {
+    display: block;
+    width: 100%;
+    max-height: 25rem;
+    object-fit: contain;
+  }
+
+  .timeline-detail-preview-loading-indicator {
+    position: absolute;
+    top: 0.65rem;
+    right: 0.65rem;
+    width: 1.75rem;
+    height: 1.75rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.82);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+  }
+
+  .timeline-detail-meta {
+    display: grid;
+    gap: 0.85rem;
+  }
+
+  .timeline-detail-meta-row {
+    display: grid;
+    grid-template-columns: 6.25rem minmax(0, 1fr);
+    align-items: baseline;
+    gap: 1rem;
+  }
+
+  .timeline-detail-meta-row p,
+  .timeline-detail-url {
+    min-width: 0;
+    margin: 0;
+    color: #292524;
+    font-size: 0.92rem;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+    text-align: start;
+  }
+
+  .timeline-detail-url {
+    padding: 0;
+    border: 0;
+    color: #b45309;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .timeline-detail-url:hover {
+    text-decoration: underline;
+  }
+
+  .timeline-detail-settings {
+    display: grid;
+    gap: 1.2rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid rgba(148, 163, 184, 0.2);
+  }
+
+  .timeline-detail-setting-row {
+    min-width: 0;
+  }
+
+  .timeline-category-section {
+    position: relative;
+  }
+
+  .timeline-category-control {
+    position: relative;
+    margin-top: 0.75rem;
+  }
+
+  .timeline-category-trigger {
+    width: 100%;
+    min-height: 2.7rem;
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 0.8rem;
+    color: #292524;
+    background: rgba(255, 255, 255, 0.82);
+    font-size: 0.88rem;
+    text-align: start;
+  }
+
+  .timeline-category-trigger:focus-visible,
+  .timeline-category-option:focus-visible,
+  .timeline-category-create-trigger:focus-visible,
+  .timeline-category-option-actions button:focus-visible,
+  .timeline-category-editor button:focus-visible,
+  .timeline-category-editor input:focus-visible {
+    outline: 2px solid rgba(217, 119, 6, 0.55);
+    outline-offset: 2px;
+  }
+
+  .timeline-category-trigger svg {
+    width: 0.95rem;
+    height: 0.95rem;
+    margin-inline-start: auto;
+    color: #a8a29e;
+  }
+
+  .timeline-category-dot {
+    width: 0.62rem;
+    height: 0.62rem;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.12);
+  }
+
+  .timeline-category-popover {
+    position: fixed;
+    z-index: 152;
+    overflow-y: auto;
+    padding: 0.42rem;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 0.9rem;
+    background: #fff;
+    box-shadow: 0 18px 42px rgba(15, 23, 42, 0.14);
+  }
+
+  .timeline-category-options {
+    display: grid;
+    gap: 0.18rem;
+  }
+
+  .timeline-category-option-row {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .timeline-category-option {
+    min-width: 0;
+    min-height: 2.35rem;
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 0.62rem;
+    padding: 0.48rem 0.62rem;
+    border: 0;
+    border-radius: 0.65rem;
+    color: #57534e;
+    background: transparent;
+    font-size: 0.84rem;
+    text-align: start;
+  }
+
+  .timeline-category-option:hover,
+  .timeline-category-option-active {
+    color: #292524;
+    background: #f5f5f4;
+  }
+
+  .timeline-category-option-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .timeline-category-check {
+    margin-inline-start: auto;
+    color: #b45309;
+    font-weight: 800;
+  }
+
+  .timeline-category-option-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.12rem;
+  }
+
+  .timeline-category-option-actions button {
+    width: 1.9rem;
+    height: 1.9rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 0.55rem;
+    color: #a8a29e;
+    background: transparent;
+    font-size: 0.76rem;
+  }
+
+  .timeline-category-option-actions button:hover {
+    color: #57534e;
+    background: #f5f5f4;
+  }
+
+  .timeline-category-create-trigger {
+    width: 100%;
+    min-height: 2.3rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    margin-top: 0.3rem;
+    border: 1px dashed rgba(148, 163, 184, 0.32);
+    border-radius: 0.65rem;
+    color: #78716c;
+    background: transparent;
+    font-size: 0.8rem;
+  }
+
+  .timeline-category-editor {
+    display: grid;
+    gap: 0.65rem;
+    margin-top: 0.42rem;
+    padding: 0.72rem;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 0.72rem;
+    background: #fafaf9;
+  }
+
+  .timeline-category-editor p {
+    margin: 0;
+    color: #78716c;
+    font-size: 0.74rem;
+  }
+
+  .timeline-category-editor-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 2rem 1.5rem;
+    align-items: center;
+    gap: 0.45rem;
+  }
+
+  .timeline-category-editor-fields input[type='text'] {
+    min-width: 0;
+    padding: 0.42rem 0.55rem;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 0.55rem;
+    background: #fff;
+    font-size: 0.8rem;
+  }
+
+  .timeline-category-editor-fields input[type='color'] {
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: 0;
+    border-radius: 0.45rem;
+    background: transparent;
+  }
+
+  .timeline-category-emoji-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.2rem;
+  }
+
+  .timeline-category-emoji-grid button {
+    width: 1.85rem;
+    height: 1.85rem;
+    border: 0;
+    border-radius: 0.45rem;
+    background: transparent;
+  }
+
+  .timeline-category-emoji-grid button:hover,
+  .timeline-category-emoji-active {
+    background: #e7e5e4 !important;
+  }
+
+  .timeline-category-editor-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.45rem;
+  }
+
+  .timeline-category-editor-actions button {
+    padding: 0.4rem 0.68rem;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 0.55rem;
+    color: #78716c;
+    background: #fff;
+    font-size: 0.76rem;
+  }
+
+  .timeline-category-editor-actions .timeline-category-editor-primary {
+    color: #fff;
+    border-color: #d97706;
+    background: #d97706;
   }
 
   :global(.dark) .timeline-summary-copy {
@@ -2251,24 +2948,16 @@
 
   :global(.dark) .timeline-editorial-board {
     background: var(--editorial-surface-featured);
-    border-color: rgba(71, 85, 105, 0.58);
-    box-shadow:
-      0 24px 54px rgba(2, 6, 23, 0.34),
-      inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    border-color: rgba(71, 85, 105, 0.5);
+    box-shadow: 0 24px 54px rgba(2, 6, 23, 0.3);
   }
 
   :global(.dark) .timeline-editorial-board::before {
-    background:
-      linear-gradient(180deg, rgba(148, 163, 184, 0.06), transparent 28%),
-      repeating-linear-gradient(
-        135deg,
-        rgba(148, 163, 184, 0.015) 0 6px,
-        transparent 6px 16px
-      );
+    display: none;
   }
 
   :global(.dark) .timeline-rail {
-    background: linear-gradient(180deg, rgba(248, 250, 252, 0.84), rgba(148, 163, 184, 0.08));
+    background: linear-gradient(180deg, rgba(71, 85, 105, 0.62), rgba(48, 54, 61, 0.2));
   }
 
   :global(.dark) .timeline-entry-time {
@@ -2276,7 +2965,7 @@
   }
 
   :global(.dark) .timeline-entry-marker {
-    background: #e2e8f0;
+    background: #64748b;
     box-shadow:
       0 0 0 0.32rem rgba(15, 23, 42, 0.96),
       0 0 0 0.5rem rgba(148, 163, 184, 0.08);
@@ -2393,12 +3082,87 @@
     color: #64748b;
   }
 
-  :global(.dark) .timeline-detail-dialog {
-    background: var(--editorial-surface-featured);
+  :global(.dark) .timeline-detail-drawer {
+    border-color: rgba(48, 54, 61, 0.88);
+    background: #161b22;
+    box-shadow: -18px 0 48px rgba(0, 0, 0, 0.28);
   }
 
   :global(.dark) .timeline-detail-header {
-    background: var(--editorial-surface-subtle);
+    border-color: rgba(48, 54, 61, 0.8);
+    background: rgba(22, 27, 34, 0.94);
+  }
+
+  :global(.dark) .timeline-detail-hero-item span,
+  :global(.dark) .timeline-detail-section-heading,
+  :global(.dark) .timeline-detail-meta-row > span {
+    color: #7d8590;
+  }
+
+  :global(.dark) .timeline-detail-hero-item strong,
+  :global(.dark) .timeline-detail-meta-row p {
+    color: #e6edf3;
+  }
+
+  :global(.dark) .timeline-detail-hero-divider,
+  :global(.dark) .timeline-detail-settings {
+    border-color: rgba(48, 54, 61, 0.8);
+  }
+
+  :global(.dark) .timeline-detail-hero-divider {
+    background: rgba(48, 54, 61, 0.8);
+  }
+
+  :global(.dark) .timeline-detail-preview-frame {
+    background: rgba(48, 54, 61, 0.38);
+  }
+
+  :global(.dark) .timeline-detail-preview-loading-indicator {
+    border-color: rgba(48, 54, 61, 0.8);
+    background: rgba(22, 27, 34, 0.82);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  }
+
+  :global(.dark) .timeline-detail-url {
+    color: #d29922;
+  }
+
+  :global(.dark) .timeline-category-trigger,
+  :global(.dark) .timeline-category-popover,
+  :global(.dark) .timeline-category-editor,
+  :global(.dark) .timeline-category-editor-fields input[type='text'],
+  :global(.dark) .timeline-category-editor-actions button {
+    border-color: rgba(48, 54, 61, 0.8);
+    color: #adbac7;
+    background: #21262d;
+  }
+
+  :global(.dark) .timeline-category-option {
+    color: #adbac7;
+  }
+
+  :global(.dark) .timeline-category-option:hover,
+  :global(.dark) .timeline-category-option-active,
+  :global(.dark) .timeline-category-option-actions button:hover,
+  :global(.dark) .timeline-category-emoji-grid button:hover,
+  :global(.dark) .timeline-category-emoji-active {
+    color: #e6edf3;
+    background: #30363d !important;
+  }
+
+  :global(.dark) .timeline-category-create-trigger {
+    color: #8b949e;
+    border-color: rgba(48, 54, 61, 0.8);
+  }
+
+  :global(.dark) .timeline-category-check {
+    color: #d29922;
+  }
+
+  :global(.dark) .timeline-category-editor-actions .timeline-category-editor-primary {
+    color: #fff;
+    border-color: #9e6a03;
+    background: #9e6a03;
   }
 
   @media (max-width: 860px) {
@@ -2408,6 +3172,40 @@
   }
 
   @media (max-width: 640px) {
+    .page-shell {
+      padding-inline: 0.5rem;
+    }
+
+    .timeline-detail-overlay {
+      padding: 0;
+    }
+
+    .timeline-detail-drawer {
+      width: 100%;
+      height: 100vh;
+      border-inline-end: 0;
+      border-radius: 0;
+    }
+
+    .timeline-detail-header,
+    .timeline-detail-body {
+      padding-inline: 1rem;
+    }
+
+    .timeline-detail-body {
+      gap: 1.15rem;
+    }
+
+    .timeline-detail-preview-frame,
+    .timeline-detail-preview-state {
+      min-height: 10rem;
+    }
+
+    .timeline-detail-meta-row {
+      grid-template-columns: 1fr;
+      gap: 0.25rem;
+    }
+
     .timeline-summary-strip {
       align-items: flex-start;
       flex-direction: column;
@@ -2415,16 +3213,17 @@
     }
 
     .timeline-editorial-shell {
-      --timeline-anchor-width: 4.8rem;
-      padding: 1.1rem 0.85rem 1.35rem;
+      --timeline-anchor-width: 0;
+      padding: 0.6rem 0.5rem 1rem;
     }
 
     .timeline-rail {
-      inset-inline-start: calc(0.85rem + var(--timeline-anchor-width));
+      display: none;
     }
 
     .timeline-entry {
-      gap: 0.7rem;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 0.35rem;
     }
 
     .timeline-entry-card-compact-grid {
@@ -2433,6 +3232,17 @@
         'app'
         'title'
         'meta';
+      padding: 0.85rem 0.8rem;
+    }
+
+    .timeline-entry-app {
+      gap: 0.65rem;
+    }
+
+    .timeline-app-icon {
+      width: 2.5rem;
+      height: 2.5rem;
+      border-radius: 0.85rem;
     }
 
     .timeline-entry-tail-compact {
@@ -2440,8 +3250,9 @@
     }
 
     .timeline-entry-anchor {
-      gap: 0.45rem;
-      padding-top: 0.8rem;
+      display: block;
+      min-height: 0;
+      padding: 0.4rem 0.25rem 0;
     }
 
     .timeline-entry-time {
@@ -2450,8 +3261,7 @@
     }
 
     .timeline-entry-marker {
-      width: 0.68rem;
-      height: 0.68rem;
+      display: none;
     }
 
     .timeline-entry-card-compact {
@@ -2463,8 +3273,7 @@
     }
 
     .timeline-load-more {
-      padding: 0 0.85rem 1.1rem;
-      padding-inline-start: calc(0.85rem + var(--timeline-anchor-width));
+      padding: 0 0.5rem 1rem;
     }
   }
 </style>

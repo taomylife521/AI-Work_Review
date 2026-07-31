@@ -15,7 +15,7 @@
   onDestroy(() => unsubIcons());
 
   // 展开/收起状态
-  const DEFAULT_COUNT = 8;
+  const DEFAULT_COUNT = 6;
   let expanded = false;
   $: currentLocale = $locale;
 
@@ -94,37 +94,45 @@
       </div>
     </div>
   {:else}
-    {#each displayApps as app, i}
-      {@const iconSrc = resolveAppIconSrc(
-        app.app_name,
-        appIcons[getIconCacheKey({ appName: app.app_name, executablePath: app.executable_path })]
-      )}
-      <div class="flex items-center gap-2.5">
-        <div class="w-6 h-6 flex-shrink-0 flex items-center justify-center">
-          {#if iconSrc}
-            <img src={iconSrc} alt="" class="w-5 h-5 rounded-md object-cover" />
-          {:else}
-            <span class="w-5 h-5 flex items-center justify-center rounded bg-slate-100 dark:bg-[#30363d] text-xs text-slate-500 dark:text-[#adbac7]">{i + 1}</span>
-          {/if}
+    <div class="app-usage-chart__rows">
+      {#each displayApps as app, i}
+        {@const iconSrc = resolveAppIconSrc(
+          app.app_name,
+          appIcons[getIconCacheKey({ appName: app.app_name, executablePath: app.executable_path })]
+        )}
+        <div class="app-usage-chart__row">
+          <span class="app-usage-chart__heading">
+            <span class="app-usage-chart__icon">
+              {#if iconSrc}
+                <img src={iconSrc} alt="" class="h-5 w-5 rounded-md object-cover" />
+              {:else}
+                <span>{i + 1}</span>
+              {/if}
+            </span>
+            <span class="app-usage-chart__copy">
+              <span class="app-usage-chart__name">{app.app_name}</span>
+              <span class="app-usage-chart__meta">{t('overview.appActivityCount', { count: app.count || 0 })}</span>
+            </span>
+          </span>
+          <span class="app-usage-chart__track">
+            <span
+              class="app-usage-chart__bar"
+              style="width: {Math.max((app.duration / maxDuration) * 100, 2)}%; background-color: {colors[i % colors.length]}; opacity: 0.8"
+            ></span>
+          </span>
+          <span class="app-usage-chart__duration">{formatDuration(app.duration)}</span>
         </div>
-        <span class="w-24 text-xs text-slate-700 dark:text-[#adbac7] truncate flex-shrink-0">{app.app_name}</span>
-        <div class="flex-1 h-4 bg-slate-100 dark:bg-[#30363d]/50 rounded-full overflow-hidden">
-          <div
-            class="h-full rounded-full transition-all duration-500"
-            style="width: {Math.max((app.duration / maxDuration) * 100, 2)}%; background-color: {colors[i % colors.length]}; opacity: 0.8"
-          ></div>
-        </div>
-        <span class="text-xs text-slate-500 dark:text-[#7d8590] min-w-[5.5rem] text-right flex-shrink-0 whitespace-nowrap tabular-nums">{formatDuration(app.duration)}</span>
-      </div>
-    {/each}
+      {/each}
+    </div>
   {/if}
 
-  {#if hasMore}
-    <button
-      class="w-full text-center text-xs text-slate-400 hover:text-primary-600 dark:text-[#636c76] dark:hover:text-primary-400 py-1 transition-colors"
-      on:click={() => expanded = !expanded}
-    >
-      {expanded ? t('overview.appUsageCollapse') : t('overview.appUsageExpandAll', { count: data.length })}
-    </button>
-  {/if}
+  <div class="app-usage-chart__footer">
+    <span>{t('overview.appsFooter', { count: data.length })}</span>
+    {#if hasMore}
+      <span aria-hidden="true">·</span>
+      <button type="button" on:click={() => expanded = !expanded}>
+        {expanded ? t('overview.appUsageCollapse') : t('overview.viewAll')}
+      </button>
+    {/if}
+  </div>
 </div>

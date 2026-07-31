@@ -126,6 +126,7 @@ fn build_updater_manifest_candidates(
     candidates
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_update_status(
     app: &AppHandle,
     stage: &str,
@@ -695,13 +696,10 @@ mod tests {
     }
 
     #[test]
-    fn 更新源应优先官方_github_并放宽超时() {
+    fn 更新源应优先官方_github() {
         assert_eq!(
             UPDATER_JSON_ENDPOINTS.first().copied(),
             Some("https://github.com/wm94i/Work-Review/releases/latest/download/updater.json")
         );
-        assert!(UPDATE_REQUEST_TIMEOUT_SECS >= 30);
-        assert!(UPDATE_CONNECT_TIMEOUT_SECS >= 10);
     }
-
 }

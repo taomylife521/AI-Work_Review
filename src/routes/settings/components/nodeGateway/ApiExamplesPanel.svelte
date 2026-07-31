@@ -4,7 +4,6 @@
   import { createEventDispatcher } from 'svelte';
 
   export let localStatus = { enabled: false, baseUrl: '', tokenPreview: '' };
-  export let saving = false;
 
   const dispatch = createEventDispatcher();
   let examplesExpanded = false;

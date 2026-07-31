@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { emitTo, listen } from '@tauri-apps/api/event';
-  import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { getCurrentWindow, currentMonitor } from '@tauri-apps/api/window';
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import AvatarCanvas from '../../lib/components/Avatar/AvatarCanvas.svelte';
   import AvatarFollowupCard from '../../lib/components/Avatar/AvatarFollowupCard.svelte';
@@ -27,6 +27,7 @@
     avatarOpacity: 0.82,
     avatarPreset: 'original-standard',
     avatarPersona: 'assistant',
+    avatarBodyHidden: false,
   };
   let inputActivity = {
     keyboardActive: false,
@@ -40,6 +41,8 @@
     lastMouseInputAtMs: 0,
   };
   let bubbleSource = null;
+  // 气泡边缘锚点：窗口靠近屏幕右侧时气泡向左展开，避免靠右下角时被裁剪（#137 诉求一）
+  let bubbleFlipLeft = false;
   let bubble = null;
   let bubbleTimer = null;
   let followup = null;
@@ -629,6 +632,24 @@
     }, 240);
   }
 
+  // 根据窗口在屏幕中的水平位置决定气泡朝向：靠近右侧时气泡向左展开，
+  // 避免桌宠缩小并贴右下角时气泡向右溢出被裁（#137 诉求一）。
+  async function refreshBubbleEdge() {
+    try {
+      const [position, monitor] = await Promise.all([
+        nativeWindow.outerPosition(),
+        currentMonitor(),
+      ]);
+      if (!monitor) return;
+      const monitorRight = monitor.position.x + monitor.size.width;
+      // 窗口右半部分越过显示器中线 → 视为靠近右侧，气泡翻转朝左
+      const windowCenterX = position.x + 138; // 基准宽 276 的一半作近似中心
+      bubbleFlipLeft = windowCenterX > (monitor.position.x + monitorRight) / 2;
+    } catch (e) {
+      // 取不到显示器信息时保持默认（右锚点），不影响主流程
+    }
+  }
+
   function scheduleNextMotionStep() {
     clearTimeout(motionTimer);
     if (document.hidden) {
@@ -654,6 +675,9 @@
     unsubscribeLocale = locale.subscribe((nextLocale) => {
       applyLocaleToDocument(nextLocale);
     });
+
+    // 初始计算一次气泡朝向（窗口已定位后再读位置）
+    setTimeout(refreshBubbleEdge, 0);
     if (!document.hidden) {
       scheduleNextMotionStep();
     }
@@ -774,6 +798,7 @@
 
       unlistenMoved = await nativeWindow.onMoved(({ payload: position }) => {
         scheduleAvatarPositionSave(position);
+        refreshBubbleEdge();
       });
 
       // Windows 拖拽到桌面顶部附近时，系统可能短暂调整窗口尺寸。
@@ -808,12 +833,13 @@
 
 <div role="presentation" class="relative h-screen w-screen overflow-visible bg-transparent select-none" on:mousedown={(e) => { if (e.target.closest('button, a, section, .avatar-popover-anchor, [role="button"]')) return; startAvatarDrag(e); }}>
   <div class="absolute inset-x-0 top-0 h-[86px] overflow-visible">
-    <AvatarPopover {bubble} onClose={dismissBubble} />
+    <AvatarPopover {bubble} flipLeft={bubbleFlipLeft} onClose={dismissBubble} />
   </div>
 
   <AvatarFollowupCard
     followup={followup}
     copy={followupCopy}
+    flipLeft={bubbleFlipLeft}
     onTimeline={openFollowupTimeline}
     onFocus={startFollowupFocus}
     onRemember={rememberFollowup}
@@ -821,18 +847,20 @@
     onDismiss={dismissFollowup}
   />
 
-  <div class="absolute inset-x-0 bottom-0 top-[78px] flex items-end justify-center overflow-visible">
-    <div class="h-full w-[82%]">
-      <AvatarCanvas
-        {state}
-        {inputActivity}
-        {transitionClass}
-        {motionBeat}
-        on:avatarpointerdown={startAvatarDrag}
-        on:avataractivate={openMainWindow}
-      />
+  {#if !state.avatarBodyHidden}
+    <div class="absolute inset-x-0 bottom-0 top-[78px] flex items-end justify-center overflow-visible">
+      <div class="h-full w-[82%]">
+        <AvatarCanvas
+          {state}
+          {inputActivity}
+          {transitionClass}
+          {motionBeat}
+          on:avatarpointerdown={startAvatarDrag}
+          on:avataractivate={openMainWindow}
+        />
+      </div>
     </div>
-  </div>
+  {/if}
 </div>
 
 <style>

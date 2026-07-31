@@ -145,10 +145,18 @@ pub fn status_payload(status: &str, reason: &str, detail: Option<&str>) -> serde
     })
 }
 
-pub async fn api_get(client: &Client, url: &str) -> Option<serde_json::Value> {
-    client
-        .get(url)
-        .timeout(Duration::from_secs(10))
+/// GET 设备 API。token 走 `Authorization: Bearer` 头而非 `?token=` 查询串——
+/// 查询串会进代理与访问日志;服务端两种都支持,改为与 `/reports/generate` POST 一致。
+pub async fn api_get(
+    client: &Client,
+    url: &str,
+    token: Option<&str>,
+) -> Option<serde_json::Value> {
+    let mut request = client.get(url).timeout(Duration::from_secs(10));
+    if let Some(token) = token {
+        request = request.header("Authorization", format!("Bearer {token}"));
+    }
+    request
         .send()
         .await
         .ok()?
@@ -290,7 +298,7 @@ pub async fn handle_cmd(client: &Client, devices: &[DeviceEndpoint], text: &str)
             let mut lines = vec!["🧭 设备列表".to_string(), OUTPUT_DIVIDER.to_string()];
             for (idx, d) in devices.iter().enumerate() {
                 let tag = if d.is_local { " (本机)" } else { "" };
-                let health = api_get(client, &format!("{}/health", d.url)).await;
+                let health = api_get(client, &format!("{}/health", d.url), None).await;
                 let status = match health {
                     Some(h) if h.get("status").and_then(|v| v.as_str()) == Some("ok") => "✅",
                     Some(_) => "⚠️",
@@ -305,8 +313,8 @@ pub async fn handle_cmd(client: &Client, devices: &[DeviceEndpoint], text: &str)
                 Ok(d) => d,
                 Err(reply) => return Some(reply),
             };
-            let url = format!("{}/v1/device?token={}", device.url, device.token);
-            match api_get(client, &url).await {
+            let url = format!("{}/v1/device", device.url);
+            match api_get(client, &url, Some(device.token.as_str())).await {
                 Some(data) => Some(format!(
                     "🖥 设备状态\n{OUTPUT_DIVIDER}\n设备：{}\nID：{}\n名称：{}\n平台：{}\n录制：{}",
                     device.name,
@@ -333,8 +341,8 @@ pub async fn handle_cmd(client: &Client, devices: &[DeviceEndpoint], text: &str)
                 Ok(d) => d,
                 Err(reply) => return Some(reply),
             };
-            let url = format!("{}/v1/reports?token={}&limit=10", device.url, device.token);
-            match api_get(client, &url).await {
+            let url = format!("{}/v1/reports?limit=10", device.url);
+            match api_get(client, &url, Some(device.token.as_str())).await {
                 Some(json) => {
                     let dates = match json.get("dates").and_then(|v| v.as_array()) {
                         Some(d) => d,
@@ -366,8 +374,8 @@ pub async fn handle_cmd(client: &Client, devices: &[DeviceEndpoint], text: &str)
                 Ok(d) => d,
                 Err(reply) => return Some(reply),
             };
-            let url = format!("{}/v1/reports/{}?token={}", device.url, date, device.token);
-            match api_get(client, &url).await {
+            let url = format!("{}/v1/reports/{}", device.url, date);
+            match api_get(client, &url, Some(device.token.as_str())).await {
                 Some(data) => {
                     if let Some(err) = data.get("error") {
                         return Some(format!(

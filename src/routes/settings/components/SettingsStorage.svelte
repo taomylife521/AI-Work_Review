@@ -196,7 +196,11 @@
   async function testRemoteStorage() {
     isTestingRemote = true;
     try {
-      const result = await invoke('test_remote_storage');
+      // 传入表单当前值直接测试：设置需点「保存」才落盘，若测已保存配置，
+      // 用户填完表单未保存就点测试会误报「未配置远程存储」
+      const result = await invoke('test_remote_storage', {
+        remoteStorage: config.remote_storage,
+      });
       showToast(result, 'success');
     } catch (e) {
       showToast(t('settingsStorage.testConnectionFailed', { error: e }), 'error');
@@ -247,7 +251,9 @@
           handleChange();
         }}
         class="switch-track {config.storage.screenshots_enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-[#484f58]'}"
-        aria-pressed={config.storage.screenshots_enabled}
+        role="switch"
+        aria-label={t('settingsStorage.screenshotsEnabled')}
+        aria-checked={config.storage.screenshots_enabled}
       >
         <span class="switch-thumb {config.storage.screenshots_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
       </button>
@@ -260,6 +266,7 @@
         <div class="flex items-center gap-2">
           <input
             type="number"
+            aria-label={t('settingsStorage.pollingInterval')}
             min="5"
             max="600"
             step="5"
@@ -316,6 +323,7 @@
           {#if !keepForever}
             <input
               type="number"
+              aria-label={t('settingsStorage.retentionDays')}
               min="1"
               max="9999"
               step="1"
@@ -490,6 +498,9 @@
           class="switch-track {config.daily_report_auto_export ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-[#484f58]'} {!config.daily_report_export_dir ? 'opacity-60 cursor-not-allowed' : ''}"
           on:click={() => { if (config.daily_report_export_dir) config.daily_report_auto_export = !config.daily_report_auto_export; }}
           disabled={!config.daily_report_export_dir}
+          role="switch"
+          aria-label={t('settingsStorage.autoExport')}
+          aria-checked={config.daily_report_auto_export}
         >
           <span class="switch-thumb {config.daily_report_auto_export ? 'translate-x-5' : 'translate-x-0'}"></span>
         </button>
@@ -550,7 +561,7 @@
           <span class="settings-chip-success">{t('settingsStorage.remoteProviderS3')}</span>
         </div>
 
-        <div class="grid gap-2 grid-cols-2">
+        <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
           <label class="block">
             <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('settingsStorage.s3Endpoint')}</span>
             <input
@@ -573,7 +584,7 @@
           </label>
         </div>
 
-        <div class="grid gap-2 grid-cols-2">
+        <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
           <label class="block">
             <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('settingsStorage.s3AccessKey')}</span>
             <div class="mt-0.5 relative">
@@ -599,6 +610,7 @@
               <button
                 type="button"
                 class="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-[#adbac7]"
+                aria-label={`${t(s3AccessKeyVisible ? 'settingsStorage.hideSecret' : 'settingsStorage.showSecret')}: ${t('settingsStorage.s3AccessKey')}`}
                 on:click={() => (s3AccessKeyVisible = !s3AccessKeyVisible)}
               >
                 {#if s3AccessKeyVisible}
@@ -634,6 +646,7 @@
               <button
                 type="button"
                 class="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-[#adbac7]"
+                aria-label={`${t(s3SecretKeyVisible ? 'settingsStorage.hideSecret' : 'settingsStorage.showSecret')}: ${t('settingsStorage.s3SecretKey')}`}
                 on:click={() => (s3SecretKeyVisible = !s3SecretKeyVisible)}
               >
                 {#if s3SecretKeyVisible}
@@ -646,7 +659,7 @@
           </label>
         </div>
 
-        <div class="grid gap-2 grid-cols-2">
+        <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
           <label class="block">
             <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('settingsStorage.s3Region')}</span>
             <input
@@ -717,7 +730,7 @@
           />
         </label>
 
-        <div class="grid gap-2 grid-cols-2">
+        <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
           <label class="block">
             <span class="text-[11px] text-slate-500 dark:text-[#7d8590]">{t('settingsStorage.webdavUsername')}</span>
             <input
@@ -753,6 +766,7 @@
               <button
                 type="button"
                 class="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-[#adbac7]"
+                aria-label={`${t(webdavPasswordVisible ? 'settingsStorage.hideSecret' : 'settingsStorage.showSecret')}: ${t('settingsStorage.webdavPassword')}`}
                 on:click={() => (webdavPasswordVisible = !webdavPasswordVisible)}
               >
                 {#if webdavPasswordVisible}
@@ -904,6 +918,7 @@
             <div class="flex items-center gap-1.5">
               <input
                 type="number"
+                aria-label={t('settingsStorage.storageLimitLabel')}
                 min="256"
                 max="102400"
                 step="256"
@@ -918,7 +933,7 @@
             </div>
           </div>
 
-          <div class="grid grid-cols-3 gap-3">
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div class="rounded-xl bg-white/70 p-3 text-center ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
               <p class="text-xl font-bold text-slate-900 dark:text-[#e6edf3]">{storageStats.total_files}</p>
               <p class="settings-muted mt-0.5">{t('settingsStorage.screenshotsCount')}</p>

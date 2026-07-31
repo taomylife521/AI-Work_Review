@@ -68,39 +68,77 @@ jobs:
             libfuse2 \
             rpm
 
-      - name: Import macOS code signing certificate
+      - name: Import stable macOS code signing certificate
         if: startsWith(matrix.platform, 'macos')
         env:
           MACOS_CODESIGN_P12: ${{ secrets.MACOS_CODESIGN_P12 }}
           MACOS_CODESIGN_PASSWORD: ${{ secrets.MACOS_CODESIGN_PASSWORD }}
         run: |
           set -euo pipefail
+          CERT_NAME="WorkReview Self-Signed"
+          trap 'rm -f /tmp/codesign.p12 /tmp/codesign-legacy.p12 /tmp/codesign.pem /tmp/codesign-cert.pem' EXIT
+
           if [[ -z "$MACOS_CODESIGN_P12" ]]; then
-            echo "::warning::MACOS_CODESIGN_P12 secret not set, skipping code signing import"
-            exit 0
+            echo "::error::MACOS_CODESIGN_P12 secret is required for stable macOS permissions"
+            exit 1
           fi
           echo "$MACOS_CODESIGN_P12" | base64 -d > /tmp/codesign.p12
           if [[ ! -s /tmp/codesign.p12 ]]; then
-            echo "::warning::Decoded P12 is empty, skipping code signing import"
-            rm -f /tmp/codesign.p12
-            exit 0
+            echo "::error::Decoded macOS signing certificate is empty"
+            exit 1
           fi
+
+          OPENSSL_PREFIX="$(brew --prefix openssl@3 2>/dev/null || true)"
+          if [[ -z "$OPENSSL_PREFIX" || ! -x "$OPENSSL_PREFIX/bin/openssl" ]]; then
+            brew install openssl@3
+            OPENSSL_PREFIX="$(brew --prefix openssl@3)"
+          fi
+          OPENSSL_BIN="$OPENSSL_PREFIX/bin/openssl"
+          if ! "$OPENSSL_BIN" version | grep -q '^OpenSSL 3'; then
+            echo "::error::OpenSSL 3 is required to convert the signing certificate for macOS security"
+            exit 1
+          fi
+          "$OPENSSL_BIN" pkcs12 \
+            -in /tmp/codesign.p12 \
+            -legacy \
+            -nodes \
+            -passin pass:"$MACOS_CODESIGN_PASSWORD" \
+            -out /tmp/codesign.pem
+          "$OPENSSL_BIN" pkcs12 \
+            -export \
+            -legacy \
+            -in /tmp/codesign.pem \
+            -passout pass:"$MACOS_CODESIGN_PASSWORD" \
+            -out /tmp/codesign-legacy.p12
+          chmod 600 /tmp/codesign.pem /tmp/codesign-legacy.p12
+
           security create-keychain -p actions ci-keychain 2>/dev/null || true
           security unlock-keychain -p actions ci-keychain
-          if ! security import /tmp/codesign.p12 \
+          if ! security import /tmp/codesign-legacy.p12 \
             -k ci-keychain \
             -P "$MACOS_CODESIGN_PASSWORD" \
             -T /usr/bin/codesign 2>&1; then
-            echo "::warning::Certificate import failed, skipping code signing. Verify MACOS_CODESIGN_P12 and MACOS_CODESIGN_PASSWORD secrets."
-            rm -f /tmp/codesign.p12
-            exit 0
+            echo "::error::Certificate import failed. Verify MACOS_CODESIGN_P12 and MACOS_CODESIGN_PASSWORD secrets."
+            exit 1
           fi
+
+          security find-certificate -c "$CERT_NAME" -p ci-keychain > /tmp/codesign-cert.pem
+          security add-trusted-cert -r trustRoot -p codeSign -k ci-keychain /tmp/codesign-cert.pem
           security set-key-partition-list -S apple-tool:,apple:,codesign -s -k actions ci-keychain
           default_keychain="$(security default-keychain -d user | sed 's/["]//g')"
           security list-keychains -d user -s ci-keychain "$default_keychain"
-          rm -f /tmp/codesign.p12
+
+          identity_hash="$(security find-identity -v -p codesigning ci-keychain | awk -v expected="\"$CERT_NAME\"" 'index($0, expected) { print $2; exit }')"
+          if [[ -z "$identity_hash" ]]; then
+            echo "::error::Imported certificate is not a valid '$CERT_NAME' code-signing identity"
+            exit 1
+          fi
+
+          rm -f /tmp/codesign.p12 /tmp/codesign-legacy.p12 /tmp/codesign.pem /tmp/codesign-cert.pem
           echo "MACOS_CODESIGN_AVAILABLE=1" >> "$GITHUB_ENV"
-          echo "Code signing certificate imported"
+          echo "MACOS_CODESIGN_AUTHORITY=$CERT_NAME" >> "$GITHUB_ENV"
+          echo "APPLE_SIGNING_IDENTITY=$identity_hash" >> "$GITHUB_ENV"
+          echo "Using stable macOS signing identity: $CERT_NAME ($identity_hash)"
 
       - name: Install frontend dependencies
         run: npm ci
@@ -122,12 +160,35 @@ jobs:
         run: |
           set -euo pipefail
 
-          # CI 中统一使用 ad-hoc 身份避免固定证书导致的跨 runner 构建不稳定
-          if [[ "${{ matrix.platform }}" == macos* ]]; then
-            export APPLE_SIGNING_IDENTITY="-"
+          if [[ "${{ matrix.platform }}" == macos* && "${MACOS_CODESIGN_AVAILABLE:-}" != "1" ]]; then
+            echo "::error::Refusing to build a macOS release without the stable signing identity"
+            exit 1
           fi
 
           npm run tauri build -- ${{ matrix.args }}
+
+      - name: Verify stable macOS code signature
+        if: startsWith(matrix.platform, 'macos')
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="$(find target -type d -path "*/release/bundle/macos/*.app" -print -quit)"
+          if [[ -z "$app_path" ]]; then
+            echo "::error::macOS app bundle not found for signature verification"
+            exit 1
+          fi
+
+          signature_info="$(codesign -dvvv --requirements - "$app_path" 2>&1)"
+          printf '%s\n' "$signature_info"
+          if grep -q 'Signature=adhoc' <<< "$signature_info"; then
+            echo "::error::macOS release is ad-hoc signed; TCC permissions would reset after updates"
+            exit 1
+          fi
+          if ! grep -Fq "Authority=$MACOS_CODESIGN_AUTHORITY" <<< "$signature_info"; then
+            echo "::error::macOS release was not signed by $MACOS_CODESIGN_AUTHORITY"
+            exit 1
+          fi
+          codesign --verify --deep --strict --verbose=2 "$app_path"
 
       - name: List build output
         if: always()

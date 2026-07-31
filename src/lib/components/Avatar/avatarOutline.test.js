@@ -115,7 +115,7 @@ test('状态气泡应采用贴头短气泡，减少白卡感和视觉侵入', ()
   const windowSource = readFileSync(new URL('../../../routes/avatar/AvatarWindow.svelte', import.meta.url), 'utf8');
 
   assert.doesNotMatch(source, /Array\.from\(bubble\.message\.replace\(\/\\s\+\/g, ''\)\)/);
-  assert.match(source, /class="avatar-popover-anchor absolute right-\[6%\] top-\[8px\]"/);
+  assert.match(source, /avatar-popover-anchor absolute \$\{flipLeft \? 'left-\[6%\]' : 'right-\[6%\]'\} top-\[8px\]/);
   assert.doesNotMatch(source, /writing-mode: vertical-rl/);
   assert.match(source, /compactBubbleMessage/);
   assert.match(source, /bubblePanelStyle = compactBubbleMessage/);
@@ -151,8 +151,8 @@ test('休息提醒气泡应支持常驻显示和手动关闭', () => {
   assert.match(source, /<button[\s\S]*type="button"[\s\S]*on:click=\{onClose\}/);
   assert.match(source, /aria-label=\{t\('avatar\.dismissReminder'\)\}/);
   assert.match(source, /class="absolute inset-0 rounded-\[16px\]"/);
-  assert.match(source, /class="bubble-tail-dot absolute/);
-  assert.match(windowSource, /<AvatarPopover \{bubble\} onClose=\{dismissBubble\} \/>/);
+  assert.match(source, /bubble-tail-dot absolute \$\{flipLeft/);
+  assert.match(windowSource, /<AvatarPopover \{bubble\} flipLeft=\{bubbleFlipLeft\} onClose=\{dismissBubble\} \/>/);
   assert.match(windowSource, /if \(!payload\?\.persistent\)/);
 });
 

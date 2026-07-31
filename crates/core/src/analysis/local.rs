@@ -116,7 +116,7 @@ impl LocalAnalyzer {
                 text.split(|c: char| !c.is_alphanumeric() && c != '-')
                     .filter(|word| {
                         let len = word.chars().count();
-                        len >= 2 && len <= 20
+                        (2..=20).contains(&len)
                     })
                     .take(3)
                     .map(|item| item.to_string())

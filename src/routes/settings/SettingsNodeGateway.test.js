@@ -45,6 +45,25 @@ test('节点设置组件应提供本地 API 开关和 token 管理', async () =>
   assert.match(source, /invoke\('reveal_localhost_api_token'\)/);
   assert.match(source, /invoke\('rotate_localhost_api_token'\)/);
   assert.match(source, /nodeGatewayPage\.localApi/);
+  assert.match(source, /aria-label=\{t\('nodeGatewayPage\.apiHostLabel'\)\}/);
+  assert.match(source, /aria-label=\{t\('nodeGatewayPage\.apiPortLabel'\)\}/);
+});
+
+test('节点子面板的二元开关应提供本地化 switch 语义', async () => {
+  const sources = await Promise.all([
+    'LocalApiPanel.svelte',
+    'McpServerPanel.svelte',
+    'TelegramBotPanel.svelte',
+    'BotCredentialsPanel.svelte',
+  ].map((file) => readFile(new URL(`./components/nodeGateway/${file}`, import.meta.url), 'utf8')));
+
+  for (const source of sources) {
+    assert.match(source, /role="switch"/);
+    assert.match(source, /aria-label=/);
+    assert.match(source, /aria-checked=\{/);
+  }
+  assert.match(sources[2], /nodeGatewayPage\.(?:showSecret|hideSecret)/);
+  assert.match(sources[3], /nodeGatewayPage\.(?:showSecret|hideSecret)/);
 });
 
 test('Telegram Bot 状态应在页面加载后轮询并在销毁时清理定时器', async () => {

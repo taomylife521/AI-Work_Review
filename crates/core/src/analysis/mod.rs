@@ -57,6 +57,7 @@ pub struct GeneratedReport {
 
 /// AI分析器 trait
 /// 使用 async_trait 宏使 trait 支持 dyn 兼容
+#[allow(clippy::too_many_arguments)]
 #[async_trait]
 pub trait Analyzer: Send + Sync {
     /// 生成日报
@@ -107,6 +108,7 @@ pub fn append_custom_prompt_for_locale(
 }
 
 /// 创建分析器
+#[allow(clippy::too_many_arguments)]
 pub fn create_analyzer(
     mode: AiMode,
     provider: AiProvider,
@@ -580,8 +582,7 @@ pub fn generate_activity_timeline(
         };
 
         lines.push(format!(
-            "| {}-{} | {} | {} | {} |",
-            start_dt, dt, duration_str, app_name, title
+            "| {start_dt}-{dt} | {duration_str} | {app_name} | {title} |"
         ));
     }
 
@@ -597,10 +598,10 @@ pub fn generate_activity_timeline(
     };
 
     let count_label = match locale {
-        AppLocale::ZhCn => format!("（{}条记录）", count),
-        AppLocale::ZhTw => format!("（{}條記錄）", count),
-        AppLocale::En => format!(" ({} records)", count),
-        AppLocale::Ar => format!(" ({} سجلات)", count),
+        AppLocale::ZhCn => format!("（{count}条记录）"),
+        AppLocale::ZhTw => format!("（{count}條記錄）"),
+        AppLocale::En => format!(" ({count} records)"),
+        AppLocale::Ar => format!(" ({count} سجلات)"),
     };
 
     format!(

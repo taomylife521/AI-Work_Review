@@ -13,9 +13,8 @@ test('编辑式强调面板应共用统一的冷色 surface token，而不是各
   assert.match(appCss, /\.overview-lead-card\s*\{[\s\S]*var\(--editorial-surface-featured\)/);
   assert.match(appCss, /\.overview-panel-featured\s*\{[\s\S]*var\(--editorial-surface-featured\)/);
   assert.match(appCss, /\.overview-section-card\s*\{[\s\S]*var\(--editorial-surface-subtle\)/);
-  assert.match(appCss, /\.overview-browser-dialog\s*\{[\s\S]*var\(--editorial-surface-featured\)/);
   assert.match(appCss, /\.about-brand-card\s*\{[\s\S]*var\(--editorial-surface-featured\)/);
   assert.match(appCss, /\.about-trust-card\s*\{[\s\S]*var\(--editorial-surface-subtle\)/);
   assert.match(timelineSource, /\.timeline-editorial-board\s*\{[\s\S]*var\(--editorial-surface-featured\)/);
-  assert.match(timelineSource, /\.timeline-detail-dialog\s*\{[\s\S]*var\(--editorial-surface-featured\)/);
+  assert.match(timelineSource, /\.timeline-detail-drawer\s*\{[\s\S]*var\(--editorial-surface-featured\)/);
 });

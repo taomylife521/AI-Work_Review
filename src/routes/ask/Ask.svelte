@@ -6,6 +6,8 @@
   import DOMPurify from 'dompurify';
   import { assistantStore, BASIC_ASSISTANT_MODEL_ID } from '../../lib/stores/assistant.js';
   import { buildHistoryPayload } from './historyPayload.js';
+  import { MODEL_PROVIDER_DISPLAY_NAMES, resolveModelOptionLabel } from './modelPresentation.js';
+  import { selectStarterPrompts } from './starterPromptPresentation.js';
   import { createRequestEventGate } from './requestEventGate.js';
   import { reduceStreamEvent } from './streamEvent.js';
   import { formatDurationLocalized, locale, t, tm, translateCategoryLabel } from '$lib/i18n/index.js';
@@ -30,8 +32,21 @@
   $: sending = assistantState.sending ?? false;
   $: messages = assistantState.messages ?? [];
   $: currentLocale = $locale;
-  $: starterPrompts = (currentLocale, dynamicPrompts.length ? dynamicPrompts : (tm('ask.starterPrompts') || []));
+  let starterPrompts = [];
   let dynamicPrompts = [];
+  let starterPromptLocale = '';
+  let starterPromptRequestId = 0;
+
+  $: if (currentLocale && currentLocale !== starterPromptLocale) {
+    const shouldRefreshDynamicPrompts = starterPromptLocale !== '';
+    // 语言切换时立即丢弃旧语言问题，并让仍在执行的动态请求失效。
+    invalidateStarterPromptRequest();
+    dynamicPrompts = [];
+    refreshStarterPrompts([]);
+    if (shouldRefreshDynamicPrompts) {
+      void refreshDynamicPrompts();
+    }
+  }
 
   // 模型选择器
   let modelProfiles = [];
@@ -39,70 +54,10 @@
   let modelSelectEl;
   let modelSelectWidth = 'auto';
   let modelMeasureEl;
+  let currentModelLabel = '';
+  $: currentModelLabel = resolveModelOptionLabel(selectedModelId, modelProfiles, currentLocale, t);
 
-  const providerDisplayNames = {
-    ollama: {
-      'zh-CN': 'Ollama (本地)',
-      en: 'Ollama (Local)',
-      'zh-TW': 'Ollama（本機）',
-    },
-    openai: {
-      'zh-CN': 'OpenAI 兼容',
-      en: 'OpenAI Compatible',
-      'zh-TW': 'OpenAI 相容',
-    },
-    siliconflow: {
-      'zh-CN': '硅基流动',
-      en: 'SiliconFlow',
-      'zh-TW': '矽基流動',
-    },
-    deepseek: {
-      'zh-CN': 'DeepSeek',
-      en: 'DeepSeek',
-      'zh-TW': 'DeepSeek',
-    },
-    qwen: {
-      'zh-CN': '通义千问',
-      en: 'Qwen',
-      'zh-TW': '通義千問',
-    },
-    zhipu: {
-      'zh-CN': '智谱清言',
-      en: 'Zhipu',
-      'zh-TW': '智譜清言',
-    },
-    moonshot: {
-      'zh-CN': 'Kimi',
-      en: 'Moonshot Kimi',
-      'zh-TW': 'Kimi',
-    },
-    doubao: {
-      'zh-CN': '豆包',
-      en: 'Doubao',
-      'zh-TW': '豆包',
-    },
-    minimax: {
-      'zh-CN': 'MiniMax',
-      en: 'MiniMax',
-      'zh-TW': 'MiniMax',
-    },
-    gemini: {
-      'zh-CN': 'Google Gemini',
-      en: 'Google Gemini',
-      'zh-TW': 'Google Gemini',
-    },
-    claude: {
-      'zh-CN': 'Anthropic Claude',
-      en: 'Anthropic Claude',
-      'zh-TW': 'Anthropic Claude',
-    },
-    openrouter: { 'zh-CN': 'OpenRouter', en: 'OpenRouter', 'zh-TW': 'OpenRouter' },
-    groq: { 'zh-CN': 'Groq', en: 'Groq', 'zh-TW': 'Groq' },
-    xai: { 'zh-CN': 'xAI Grok', en: 'xAI Grok', 'zh-TW': 'xAI Grok' },
-    mistral: { 'zh-CN': 'Mistral', en: 'Mistral', 'zh-TW': 'Mistral' },
-    lmstudio: { 'zh-CN': 'LM Studio (本地)', en: 'LM Studio (Local)', 'zh-TW': 'LM Studio（本機）' },
-    custom: { 'zh-CN': '自定义接口', en: 'Custom endpoint', 'zh-TW': '自訂介面' },
-  };
+  const providerDisplayNames = MODEL_PROVIDER_DISPLAY_NAMES;
 
   function localizedProviderName(providerId) {
     return providerDisplayNames[providerId]?.[currentLocale]
@@ -131,28 +86,19 @@
     return '';
   }
 
-  // 当前选中项的显示文本（用于测量 select 收起态宽度）
-  function currentModelOptionLabel() {
-    if (selectedModelId === BASIC_ASSISTANT_MODEL_ID) {
-      return t('ask.basicTemplate');
-    }
-    const profile = modelProfiles.find((p) => p.id === selectedModelId);
-    return profile ? displayModelProfileName(profile) || t('ask.aiEnhanced') : '';
-  }
-
   // Measure collapsed select width: text width + padding(px-3=24) + arrow(pr-8=32) + border(2) ≈ text + 46.
   // Use a hidden mirror span with the select's font props to measure precisely,
   // avoiding width:max-content which sizes to the longest option.
   function measureModelSelectWidth() {
     if (!modelMeasureEl) return;
-    modelMeasureEl.textContent = currentModelOptionLabel() || '';
+    modelMeasureEl.textContent = currentModelLabel || '';
     const textWidth = modelMeasureEl.offsetWidth;
     const clamped = Math.max(textWidth + 46, 72); // min 72px, max aligns with max-w-[260px]
     modelSelectWidth = Math.min(clamped, 260) + 'px';
   }
 
   // Re-measure when selection / profile list / locale changes
-  $: measureModelSelectWidth(selectedModelId, modelProfiles, currentLocale);
+  $: measureModelSelectWidth(currentModelLabel);
 
   onMount(async () => {
     unsubscribeAssistant = assistantStore.subscribe((state) => {
@@ -209,8 +155,11 @@
     await scrollToBottom('auto', 3);
     composer?.focus();
 
-    // 配了 AI 模型时，基于当前工作记录动态生成 starter prompts（替代固定 4 条）
-    refreshDynamicPrompts();
+    // 先随机展示本地问题；配置 AI 模型时再合并动态问题重新抽取。
+    if (starterPrompts.length === 0) {
+      refreshStarterPrompts();
+    }
+    void refreshDynamicPrompts();
 
     // P3：加载会话列表；DB 为空且 localStorage 有旧历史时做一次性导入
     await loadConversations();
@@ -410,13 +359,17 @@
   function handleModelChange(event) {
     selectedModelId = event.currentTarget.value;
     assistantStore.setSelectedModelId(selectedModelId);
-    refreshDynamicPrompts();
+    dynamicPrompts = [];
+    refreshStarterPrompts([]);
+    void refreshDynamicPrompts();
   }
 
   async function clearConversation() {
+    if (sending) return;
     // "新对话"：不删除旧会话，只解绑并清空当前视图；下次发送时自动落库新会话
     assistantStore.setConversation(null, []);
     error = null;
+    refreshStarterPrompts();
     await tick();
     await scrollToBottom('auto', 2);
     composer?.focus();
@@ -436,6 +389,39 @@
   /** 迁移期把未翻译的 key 存进过标题的历史数据，显示时兜底翻译。 */
   function displayConversationTitle(title) {
     return title === 'ask.importedConversation' ? t('ask.importedConversation') : title;
+  }
+
+  $: currentConversation = conversations.find((item) => item.id === conversationId);
+  $: currentConversationTitle = currentConversation?.title
+    ? displayConversationTitle(currentConversation.title)
+    : t('ask.newConversationSubtitle');
+
+  function toolSummaryText(message) {
+    const steps = message.steps || [];
+    const pending = steps.find((step) => step.confirmStatus === 'pending');
+    if (pending) return t('ask.toolsNeedsConfirmation');
+
+    const running = steps.find((step) => step.status === 'running');
+    if (running) return t('ask.toolsRunning', { label: running.label });
+
+    const failedCount = steps.filter((step) => step.ok === false).length;
+    if (failedCount > 0) return t('ask.toolsFailed', { count: failedCount });
+
+    return t('ask.toolsCompleted', { count: steps.length });
+  }
+
+  function toolSummaryState(message) {
+    const steps = message.steps || [];
+    if (steps.some((step) => step.confirmStatus === 'pending')) return 'pending';
+    if (steps.some((step) => step.status === 'running')) return 'running';
+    if (steps.some((step) => step.ok === false)) return 'failed';
+    return 'done';
+  }
+
+  function shouldExpandToolSummary(message) {
+    return (message.steps || []).some(
+      (step) => step.confirmStatus === 'pending' || step.status === 'running'
+    );
   }
 
   async function loadConversations() {
@@ -493,6 +479,7 @@
   }
 
   async function deleteConversation(id) {
+    if (sending) return;
     try {
       await invoke('delete_assistant_conversation', { conversationId: id });
       if (conversationId === id) {
@@ -745,25 +732,48 @@
   }
 
   function handleComposerKeydown(event) {
+    // 中文等输入法确认候选词时会触发 Enter，组合输入期间不得提交。
+    if (event.isComposing || event.keyCode === 229) return;
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       submitQuestion();
     }
   }
 
+  function invalidateStarterPromptRequest() {
+    starterPromptRequestId += 1;
+  }
+
+  function refreshStarterPrompts(extraPrompts = dynamicPrompts) {
+    const localPrompts = tm('ask.starterPrompts') || [];
+    starterPrompts = selectStarterPrompts({
+      localPrompts,
+      dynamicPrompts: extraPrompts,
+      previousPrompts: starterPrompts,
+      count: 4,
+    });
+    starterPromptLocale = currentLocale;
+  }
+
   async function refreshDynamicPrompts() {
-    // 没配 AI 模型时用固定 starter（i18n），配了才动态生成
+    const requestId = ++starterPromptRequestId;
+
+    // 未配置 AI 模型时直接使用本地问题池，避免欢迎态等待网络结果。
     if (selectedModelId === BASIC_ASSISTANT_MODEL_ID) {
       dynamicPrompts = [];
+      refreshStarterPrompts([]);
       return;
     }
     const profile = modelProfiles.find((p) => p.id === selectedModelId);
     if (!profile) {
       dynamicPrompts = [];
+      refreshStarterPrompts([]);
       return;
     }
     try {
       const stats = await invoke('get_today_stats');
+      if (requestId !== starterPromptRequestId || destroyed) return;
+
       const recentApps = (stats?.app_usage || []).slice(0, 3).map((a) => a.app_name).join(t('common.listSeparator'));
       const topCategory = translateCategoryLabel(stats?.category_usage?.[0]?.category || '');
       const workMinutes = Math.round((stats?.work_time_duration || 0) / 60);
@@ -781,13 +791,17 @@
         prompt: userPrompt,
       });
 
+      if (requestId !== starterPromptRequestId || destroyed) return;
       const parsed = JSON.parse(result);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        dynamicPrompts = parsed.filter((p) => typeof p === 'string' && p.trim()).slice(0, 4);
-      }
+      dynamicPrompts = Array.isArray(parsed)
+        ? parsed.filter((prompt) => typeof prompt === 'string' && prompt.trim())
+        : [];
+      refreshStarterPrompts(dynamicPrompts);
     } catch (e) {
-      console.warn('动态 starter 生成失败，用固定:', e);
+      if (requestId !== starterPromptRequestId || destroyed) return;
+      console.warn('动态 starter 生成失败，改用本地问题池:', e);
       dynamicPrompts = [];
+      refreshStarterPrompts([]);
     }
   }
 
@@ -811,128 +825,200 @@
   }}
 />
 
-<div class="page-shell ask-workbench-shell h-full" data-locale={currentLocale}>
-  <div class="ask-workbench-frame flex h-[calc(100vh-7rem)] flex-col overflow-hidden">
-    <div bind:this={chatBody} class="flex-1 overflow-y-auto px-4 pb-40 pt-10" on:scroll={syncStickToBottom}>
+<div
+  class="page-shell ask-workbench-shell h-full"
+  data-locale={currentLocale}
+>
+  <div class="ask-workbench-frame flex h-full min-h-0 flex-col overflow-hidden">
+    <div class="page-header page-axis-operation">
+      <div class="page-title-group">
+        <div class="page-title-badge" aria-hidden="true">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 10h8M8 14h4m-6 6h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+        </div>
+        <div class="page-title-copy">
+          <h2>{t('sidebar.nav.ask')}</h2>
+          <p>{currentConversationTitle}</p>
+        </div>
+      </div>
+
+      <div class="ask-header-actions">
+        <button
+          type="button"
+          class="ask-header-action ask-header-history"
+          on:click={openConversationDrawer}
+          aria-label={t('ask.conversationHistory')}
+          title={t('ask.conversationHistory')}
+        >
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 8v4l2.5 1.5M4.8 6.8A8 8 0 1 1 4 15.5M4.8 6.8V3.5m0 3.3H8" />
+          </svg>
+          <span>{t('ask.conversationHistory')}</span>
+        </button>
+        <button
+          type="button"
+          class="ask-header-action ask-header-action-primary ask-header-new"
+          on:click={clearConversation}
+          disabled={sending || (!hasConversation && conversationId == null)}
+          aria-label={t('ask.newConversation')}
+          title={t('ask.newConversation')}
+        >
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" d="M12 5v14M5 12h14" />
+          </svg>
+          <span>{t('ask.newConversation')}</span>
+        </button>
+      </div>
+    </div>
+
+    <div bind:this={chatBody} class="ask-chat-scroll flex-1 min-h-0 overflow-y-auto" on:scroll={syncStickToBottom}>
       {#if !hasConversation}
-        <div class="ask-welcome-panel mx-auto flex max-w-4xl flex-col items-center text-center">
-          <span class="ask-kicker">{t('ask.title')}</span>
-          <h1 class="mb-2 text-2xl font-semibold tracking-tight text-slate-900 dark:text-[#e6edf3]">{t('ask.title')}</h1>
-          <p class="mb-10 text-sm text-slate-500 dark:text-[#7d8590]">{t('ask.subtitle')}</p>
-          <div class="ask-starter-grid grid w-full max-w-3xl gap-3 sm:grid-cols-2">
-            {#each starterPrompts as prompt}
+        <section class="ask-welcome-panel page-axis-reading" aria-labelledby="ask-welcome-title">
+          <div class="ask-welcome-product-mark" aria-hidden="true">
+            <img src="/icons/128x128.png" alt="" />
+          </div>
+          <div class="ask-welcome-copy">
+            <h2 id="ask-welcome-title">{t('ask.welcomeTitle')}</h2>
+            <p>{t('ask.welcomeBrief')}</p>
+          </div>
+          <div class="ask-starter-grid">
+            {#each starterPrompts.slice(0, 4) as prompt, promptIndex}
               <button
-                class="ask-starter-card rounded-[28px] bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(248,250,252,0.88))] px-5 py-4 text-left text-sm font-medium leading-6 text-slate-700 ring-1 ring-inset ring-slate-200/80 shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition hover:-translate-y-0.5 hover:text-slate-900 hover:ring-indigo-300/80 hover:shadow-[0_12px_28px_rgba(79,70,229,0.10)] active:scale-[0.98] dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.78),rgba(15,23,42,0.62))] dark:text-[#c9d1d9] dark:ring-[#30363d]/80 dark:shadow-none dark:hover:text-[#e6edf3] dark:hover:ring-indigo-500/60"
+                class="ask-starter-card"
                 on:click={() => submitQuestion(prompt)}
                 disabled={sending}
               >
-                {prompt}
+                <span>{prompt}</span>
               </button>
             {/each}
           </div>
-        </div>
+        </section>
       {:else}
-        <div class="ask-thread-shell mx-auto flex min-h-full max-w-4xl flex-col gap-10">
+        <div class="ask-thread-shell page-axis-reading flex min-h-full flex-col">
           {#each messages as message, messageIndex}
-            <div class={message.role === 'user' ? 'flex w-full min-w-0 justify-end' : 'flex w-full min-w-0 justify-start'}>
-              <div
-                in:fly={{ y: 10, duration: 240 }}
+            <div class={message.role === 'user' ? 'ask-message-row ask-message-row-user' : 'ask-message-row ask-message-row-assistant'}>
+              <article
+                in:fly={{ y: 8, duration: 200 }}
                 class={message.role === 'user'
-                  ? 'ask-message-card ask-message-card-user min-w-0 max-w-[78%] rounded-[28px] rounded-br-lg bg-gradient-to-br from-indigo-50 to-slate-50 px-5 py-4 text-slate-900 ring-1 ring-inset ring-indigo-200/70 shadow-sm dark:shadow-none dark:from-indigo-950/60 dark:to-[#161b22] dark:text-[#e6edf3] dark:ring-indigo-800/50'
-                  : 'ask-message-card ask-message-card-assistant min-w-0 w-full max-w-[90%] text-slate-900 dark:text-[#e6edf3]'}
+                  ? 'ask-message-card ask-message-card-user'
+                  : 'ask-message-card ask-assistant-response'}
+                aria-busy={message.role === 'assistant' && Boolean(message.streaming)}
               >
                 {#if message.role === 'assistant'}
+                  <div class="ask-response-identity">
+                    <span class="ask-assistant-mark ask-assistant-mark-small" aria-hidden="true">
+                      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M6.8 5.5h7.7a4 4 0 0 1 4 4v2.8a4 4 0 0 1-4 4h-3.6l-3.6 2.5.7-2.5H6.8a4 4 0 0 1-4-4V9.5a4 4 0 0 1 4-4Z" />
+                        <path stroke-linecap="round" stroke-width="1.6" d="M18.2 3v3.2M16.6 4.6h3.2" />
+                      </svg>
+                    </span>
+                    <span>{t('ask.title')}</span>
+                  </div>
+
                   {#if message.steps?.length}
-                    <div class="mb-3 flex flex-col gap-1">
-                      {#each message.steps as step, si}
-                        <details class="group/step rounded-lg bg-slate-50/60 dark:bg-[#161b22]/30 overflow-hidden" open={step.confirmStatus === 'pending' || undefined}>
-                          <summary
-                            class="flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-500 dark:text-[#7d8590] cursor-pointer select-none list-none transition-colors hover:bg-slate-100/60 dark:hover:bg-[#21262d]/40"
-                            in:fly={{ x: -4, duration: 160 }}
-                          >
-                            {#if step.confirmStatus === 'pending'}
-                              <span class="inline-block h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-                            {:else if step.status === 'running'}
-                              <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-500 dark:border-indigo-900/60 dark:border-t-indigo-400"></span>
-                            {:else if step.ok === false}
-                              <span class="inline-block h-1.5 w-1.5 rounded-full bg-rose-500"></span>
-                            {:else if step.ok === true}
-                              <span class="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
-                            {:else}
-                              <span class="inline-block h-1.5 w-1.5 rounded-full bg-slate-400"></span>
-                            {/if}
-                            <span class="font-medium">{step.label}</span>
-                            {#if step.confirmStatus === 'pending'}
-                              <span class="text-amber-600 dark:text-amber-400">· {t('ask.actionPending')}</span>
-                            {:else if step.confirmStatus === 'denied'}
-                              <span class="text-slate-400 dark:text-[#636c76]">· {t('ask.actionDenied')}</span>
-                            {:else if step.status === 'done' && step.ok === false}
-                              <span class="text-rose-500 dark:text-rose-400">· {t('ask.stepFailed')}</span>
-                            {:else if step.status === 'done' && step.tool === 'search_memory' && step.ok === true && step.hits != null}
-                              <span class="text-slate-400 dark:text-[#636c76]">· {step.hits} {t('ask.hits')}</span>
-                            {/if}
-                            {#if step.references?.length}
-                              <svg class="w-3 h-3 ml-auto shrink-0 text-slate-400 transition-transform group-open/step:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
-                            {/if}
-                          </summary>
-                          {#if step.confirmId && step.summary}
-                            <div class="px-2.5 pb-2 pt-1.5 border-t border-amber-200/60 dark:border-amber-800/40 bg-amber-50/50 dark:bg-amber-950/20">
-                              <p class="text-xs leading-relaxed text-slate-700 dark:text-[#adbac7]">{step.summary}</p>
+                    <details
+                      class="ask-tool-summary group/tool"
+                      data-state={toolSummaryState(message)}
+                      open={shouldExpandToolSummary(message) || undefined}
+                    >
+                      <summary>
+                        <span class="ask-tool-status-dot" aria-hidden="true"></span>
+                        <span class="min-w-0 flex-1 truncate">{toolSummaryText(message)}</span>
+                        <span class="ask-tool-expand-label">{t('ask.showSteps')}</span>
+                        <svg class="h-3.5 w-3.5 shrink-0 transition-transform group-open/tool:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m6 9 6 6 6-6" />
+                        </svg>
+                      </summary>
+
+                      <div class="ask-tool-step-list">
+                        {#each message.steps as step, si}
+                          <div class="ask-tool-step" data-state={step.confirmStatus === 'pending' ? 'pending' : step.status === 'running' ? 'running' : step.ok === false ? 'failed' : 'done'} in:fly={{ x: -4, duration: 160 }}>
+                            <div class="ask-tool-step-head">
+                              <span class="ask-tool-step-dot" aria-hidden="true"></span>
+                              <span class="min-w-0 flex-1 font-medium">{step.label}</span>
                               {#if step.confirmStatus === 'pending'}
-                                <div class="mt-2 flex items-center gap-2">
-                                  <button
-                                    class="rounded-lg bg-indigo-500 px-3 py-1 text-xs font-medium text-white transition hover:bg-indigo-600 active:scale-95"
-                                    on:click={() => respondConfirm(message.id, step, true)}
-                                  >
-                                    {t('ask.approveAction')}
-                                  </button>
-                                  <button
-                                    class="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-100 active:scale-95 dark:border-[#30363d] dark:text-[#adbac7] dark:hover:bg-[#21262d]"
-                                    on:click={() => respondConfirm(message.id, step, false)}
-                                  >
-                                    {t('ask.denyAction')}
-                                  </button>
-                                </div>
-                              {:else if step.confirmStatus === 'approved'}
-                                <p class="mt-1 text-[11px] text-emerald-600 dark:text-emerald-400">{t('ask.actionApproved')}</p>
+                                <span class="ask-tool-step-meta">{t('ask.actionPending')}</span>
                               {:else if step.confirmStatus === 'denied'}
-                                <p class="mt-1 text-[11px] text-slate-500 dark:text-[#7d8590]">{t('ask.actionDeniedNote')}</p>
+                                <span class="ask-tool-step-meta">{t('ask.actionDenied')}</span>
+                              {:else if step.status === 'done' && step.ok === false}
+                                <span class="ask-tool-step-meta">{t('ask.stepFailed')}</span>
+                              {:else if step.status === 'done' && step.tool === 'search_memory' && step.ok === true && step.hits != null}
+                                <span class="ask-tool-step-meta">{step.hits} {t('ask.hits')}</span>
                               {/if}
                             </div>
-                          {/if}
-                          {#if step.references?.length}
-                            <div class="px-2.5 pb-2 pt-1 space-y-1 border-t border-slate-200/60 dark:border-[#30363d]/40">
-                              {#each step.references as ref}
-                                <div class="text-[11px] leading-relaxed text-slate-500 dark:text-[#7d8590]">
-                                  {#if ref.app_name}<span class="font-medium text-slate-600 dark:text-[#adbac7]">{ref.app_name}</span> · {/if}
-                                  <span>{ref.title}</span>
-                                  <span class="text-slate-400 dark:text-[#636c76]">— {ref.date}</span>
-                                </div>
-                              {/each}
-                            </div>
-                          {/if}
-                        </details>
-                      {/each}
-                    </div>
+
+                            {#if step.confirmId && step.summary}
+                              <div class="ask-confirm-panel">
+                                <p>{step.summary}</p>
+                                {#if step.confirmStatus === 'pending'}
+                                  <div class="ask-confirm-actions">
+                                    <button
+                                      class="ask-confirm-primary"
+                                      on:click={() => respondConfirm(message.id, step, true)}
+                                    >
+                                      {t('ask.approveAction')}
+                                    </button>
+                                    <button
+                                      class="ask-confirm-secondary"
+                                      on:click={() => respondConfirm(message.id, step, false)}
+                                    >
+                                      {t('ask.denyAction')}
+                                    </button>
+                                  </div>
+                                {:else if step.confirmStatus === 'approved'}
+                                  <p class="ask-confirm-result ask-confirm-result-approved">{t('ask.actionApproved')}</p>
+                                {:else if step.confirmStatus === 'denied'}
+                                  <p class="ask-confirm-result">{t('ask.actionDeniedNote')}</p>
+                                {/if}
+                              </div>
+                            {/if}
+
+                            {#if step.references?.length}
+                              <div class="ask-tool-reference-list">
+                                {#each step.references as ref}
+                                  <div>
+                                    {#if ref.app_name}<span class="font-medium">{ref.app_name}</span> · {/if}
+                                    <span>{ref.title}</span>
+                                    <span class="ask-tool-reference-date">— {ref.date}</span>
+                                  </div>
+                                {/each}
+                              </div>
+                            {/if}
+                          </div>
+                        {/each}
+                      </div>
+                    </details>
                   {/if}
+
                   <div class="markdown-body assistant-markdown min-w-0 max-w-none">
                     {#if message.streaming}
-                      <div class="streaming-content">{#if message.content}{@html renderStreamingMarkdown(message.content, messageIndex)}{:else}<p class="text-slate-400 dark:text-[#7d8590]">{t('ask.thinking')}</p>{/if}<span class="ml-0.5 inline-block animate-pulse text-slate-400 dark:text-[#7d8590] align-text-bottom">▍</span></div>
+                      <div class="streaming-content">
+                        {#if message.content}
+                          {@html renderStreamingMarkdown(message.content, messageIndex)}
+                        {:else}
+                          <p class="ask-thinking-state">{t('ask.thinking')}</p>
+                        {/if}
+                        <span class="ask-streaming-cursor" aria-hidden="true">▍</span>
+                      </div>
                     {:else}
                       {@html renderMarkdown(message.content)}
                     {/if}
                   </div>
 
                   {#if message.references?.length}
-                    <details class="mt-6 rounded-[24px] bg-slate-50/74 px-4 py-3 ring-1 ring-inset ring-slate-200/60 dark:bg-[#0d1117]/34 dark:ring-[#21262d]/70">
-                      <summary class="cursor-pointer list-none text-sm font-medium text-slate-500 dark:text-[#7d8590]">
-                        {t('ask.references', { count: message.references.length })}
+                    <details class="ask-reference-trail">
+                      <summary aria-label={t('ask.referenceTrail', { count: message.references.length })}>
+                        <span>{t('ask.referenceTrail', { count: message.references.length })}</span>
+                        <span class="ask-reference-line" aria-hidden="true"></span>
+                        <svg class="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m6 9 6 6 6-6" />
+                        </svg>
                       </summary>
-
-                      <div class="mt-3 space-y-2">
+                      <div class="ask-reference-list">
                         {#each message.references as item}
-                          <div class="ask-reference-card rounded-[20px] bg-white/88 px-3 py-3 ring-1 ring-inset ring-slate-200/70 dark:bg-[#161b22]/80 dark:ring-[#21262d]">
-                            <div class="flex flex-wrap items-center gap-2 text-xs text-slate-400 dark:text-[#636c76]">
+                          <article class="ask-reference-item">
+                            <div class="ask-reference-meta">
                               <span>{sourceLabel(item.sourceType)}</span>
                               <span>{item.date}</span>
                               {#if item.appName}
@@ -942,47 +1028,30 @@
                                 <span>{formatDurationLocalized(item.duration)}</span>
                               {/if}
                             </div>
-                            <div class="mt-1 text-sm font-medium text-slate-900 dark:text-[#e6edf3]">{item.title}</div>
+                            <h3>{item.title}</h3>
                             {#if item.excerpt}
-                              <div class="mt-1 text-sm leading-6 text-slate-500 dark:text-[#7d8590]">{item.excerpt}</div>
+                              <p>{item.excerpt}</p>
                             {/if}
-                          </div>
+                          </article>
                         {/each}
                       </div>
                     </details>
                   {/if}
                 {:else}
-                  <p class="whitespace-pre-wrap break-words text-[15px] font-medium leading-7 tracking-[0.01em]">{message.content}</p>
+                  <p class="whitespace-pre-wrap break-words">{message.content}</p>
                 {/if}
-              </div>
+              </article>
             </div>
           {/each}
 
-          <!-- Loading bubble -->
-          {#if sending}
-            <div class="flex justify-start">
-              <div class="rounded-[24px] bg-slate-50/80 px-5 py-4 ring-1 ring-inset ring-slate-200/50 dark:bg-[#21262d]/60 dark:ring-[#30363d]/50">
-                <div class="flex items-center gap-1.5">
-                  <span class="inline-block h-2 w-2 animate-pulse rounded-full bg-slate-400 dark:bg-[#636c76]"></span>
-                  <span class="inline-block h-2 w-2 animate-pulse rounded-full bg-slate-400 dark:bg-[#636c76]" style="animation-delay: 0.2s"></span>
-                  <span class="inline-block h-2 w-2 animate-pulse rounded-full bg-slate-400 dark:bg-[#636c76]" style="animation-delay: 0.4s"></span>
-                </div>
-              </div>
-            </div>
-          {/if}
-
-          <!-- Error callout -->
           {#if error}
-            <div
-              class="flex items-start gap-3 rounded-[24px] border border-rose-200 bg-rose-50/80 px-5 py-4 dark:border-rose-900/60 dark:bg-rose-950/30"
-              in:fly={{ y: -8, duration: 220 }}
-            >
-              <svg class="mt-0.5 h-5 w-5 shrink-0 text-rose-500 dark:text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <div class="ask-error-callout" role="alert" in:fly={{ y: -8, duration: 220 }}>
+              <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
               </svg>
               <div class="min-w-0 flex-1">
-                <p class="text-sm font-medium text-rose-700 dark:text-rose-300">{t('ask.requestFailed')}</p>
-                <p class="mt-1 text-sm text-rose-600 dark:text-rose-400">{error}</p>
+                <p class="font-medium">{t('ask.requestFailed')}</p>
+                <p>{error}</p>
               </div>
             </div>
           {/if}
@@ -992,27 +1061,44 @@
       {/if}
     </div>
 
-    <div class="pointer-events-none sticky bottom-0 bg-gradient-to-t from-slate-50 via-slate-50/90 to-transparent px-4 pb-4 pt-8 dark:from-[#0d1117] dark:via-[#010409]/84">
-      <div class="pointer-events-auto mx-auto max-w-4xl">
-        <div class="ask-composer-shell rounded-[28px] border border-slate-200/70 bg-white/94 px-4 py-3 shadow-[0_12px_32px_rgba(15,23,42,0.08)] backdrop-blur dark:border-[#30363d]/70 dark:bg-[#161b22]/88 dark:shadow-[0_12px_32px_rgba(2,6,23,0.32)]">
-          <textarea
-            bind:this={composer}
-            bind:value={input}
-            rows="1"
-            class="max-h-[220px] min-h-[26px] w-full resize-none bg-transparent text-[15px] leading-7 text-slate-900 outline-none placeholder:text-slate-400 dark:text-[#e6edf3] dark:placeholder:text-slate-500"
-            placeholder={t('ask.placeholder')}
-            on:input={resizeComposer}
-            on:keydown={handleComposerKeydown}
-          />
+    <div class="ask-composer-dock">
+      <div class="ask-composer-shell page-axis-reading">
+        <textarea
+          bind:this={composer}
+          bind:value={input}
+          rows="1"
+          class="ask-composer-input"
+          placeholder={t('ask.placeholder')}
+          aria-label={t('ask.placeholder')}
+          on:input={resizeComposer}
+          on:keydown={handleComposerKeydown}
+        />
 
-          <div class="mt-3 flex items-center justify-between gap-3 border-t border-slate-200/60 pt-2.5 dark:border-[#30363d]/60">
-            <div class="flex min-w-0 items-center gap-2">
+        <div class="ask-composer-toolbar">
+          <div class="ask-composer-controls">
+            <details class="ask-context-menu">
+              <summary aria-label={t('ask.recordContext')} title={t('ask.recordContext')}>
+                <span class="ask-context-live" aria-hidden="true"></span>
+                <span>{t('ask.recordContext')}</span>
+                <svg class="h-3 w-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m6 9 6 6 6-6" />
+                </svg>
+              </summary>
+              <div class="ask-context-popover">
+                <div>
+                  <span>{t('ask.contextScope')}</span>
+                </div>
+                <p>{t('ask.contextSources')}</p>
+              </div>
+            </details>
+
+            <div class="ask-composer-model-group">
               <span bind:this={modelMeasureEl} class="invisible pointer-events-none absolute left-0 top-0 -z-10 whitespace-nowrap text-[11px] font-medium" aria-hidden="true"></span>
               <select
                 bind:this={modelSelectEl}
                 bind:value={selectedModelId}
                 on:change={handleModelChange}
-                class="h-8 max-w-[260px] cursor-pointer appearance-none rounded-lg border border-slate-200/80 bg-slate-100/90 px-3 pr-8 text-[11px] font-medium text-slate-700 outline-none transition hover:bg-slate-200/70 focus:ring-2 focus:ring-slate-300 dark:border-[#30363d]/80 dark:bg-[#21262d]/70 dark:text-[#adbac7] dark:hover:bg-[#30363d]/80 dark:focus:ring-primary-600"
+                class="ask-model-select"
                 style="width: {modelSelectWidth}; background-image: url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E&quot;); background-repeat: no-repeat; background-position: right 10px center;"
                 aria-label={t('ask.modelSelector')}
               >
@@ -1021,58 +1107,37 @@
                   <option value={profile.id}>{displayModelProfileName(profile) || t('ask.aiEnhanced')}</option>
                 {/each}
               </select>
-
-              {#if sending}
-                <button
-                  type="button"
-                  class="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-rose-200 px-2.5 py-1 text-[11px] font-medium text-rose-500 transition hover:bg-rose-50 dark:border-rose-900/60 dark:text-rose-400 dark:hover:bg-rose-950/30"
-                  on:click={stopCurrentRequest}
-                >
-                  <span class="inline-block h-2 w-2 rounded-[2px] bg-current"></span>
-                  {t('ask.stopGenerating')}
-                </button>
-              {:else}
-                <button
-                  type="button"
-                  class="shrink-0 rounded-full px-2.5 py-1 text-[11px] text-slate-400 transition hover:bg-slate-100/80 hover:text-slate-700 dark:text-[#636c76] dark:hover:bg-[#21262d]/70 dark:hover:text-[#adbac7]"
-                  on:click={clearConversation}
-                  disabled={!hasConversation && conversationId == null}
-                >
-                  {t('ask.newConversation')}
-                </button>
-                <button
-                  type="button"
-                  class="shrink-0 rounded-full px-2.5 py-1 text-[11px] text-slate-400 transition hover:bg-slate-100/80 hover:text-slate-700 dark:text-[#636c76] dark:hover:bg-[#21262d]/70 dark:hover:text-[#adbac7]"
-                  on:click={openConversationDrawer}
-                  disabled={!conversations.length}
-                >
-                  {t('ask.conversationHistory')}
-                </button>
-              {/if}
             </div>
-
-            <button
-              class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 text-white shadow-[0_6px_16px_rgba(79,70,229,0.32)] transition hover:scale-[1.04] hover:from-indigo-400 hover:to-violet-400 active:scale-95 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300 disabled:shadow-none dark:disabled:from-slate-700 dark:disabled:to-slate-700"
-              on:click={() => submitQuestion()}
-              disabled={sending || !input.trim()}
-              aria-label={sending ? t('ask.sending') : t('ask.sendMessage')}
-              title={sending ? t('ask.sending') : t('ask.sendMessage')}
-            >
-              {#if sending}
-                <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                  <circle class="opacity-25" cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5"></circle>
-                  <path class="opacity-90" d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path>
-                </svg>
-              {:else}
-                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none">
-                  <path d="M12 17V7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                  <path d="M8 11L12 7L16 11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                </svg>
-              {/if}
-            </button>
           </div>
+
+          {#if sending}
+            <button
+              type="button"
+              class="ask-send-button ask-send-button-stop"
+              on:click={stopCurrentRequest}
+              aria-label={t('ask.stopGenerating')}
+              title={t('ask.stopGenerating')}
+            >
+              <span class="h-2.5 w-2.5 rounded-[3px] bg-current" aria-hidden="true"></span>
+            </button>
+          {:else}
+            <button
+              type="button"
+              class="ask-send-button"
+              on:click={() => submitQuestion()}
+              disabled={!input.trim()}
+              aria-label={t('ask.sendMessage')}
+              title={t('ask.sendMessage')}
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 17V7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                <path d="M8 11L12 7L16 11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+              </svg>
+            </button>
+          {/if}
         </div>
       </div>
+      <p class="ask-composer-hint">{t('ask.composerHint')}</p>
     </div>
   </div>
 </div>
@@ -1091,16 +1156,17 @@
       role="dialog"
       aria-modal="true"
       aria-label={t('ask.conversationHistory')}
-      class="flex h-full w-80 max-w-[85vw] flex-col border-s border-slate-200/80 bg-white shadow-2xl dark:border-[#30363d] dark:bg-[#161b22]"
+      class="ask-history-drawer flex h-full w-80 max-w-[85vw] flex-col"
       in:fly={{ x: 320, duration: 220 }}
     >
-      <div class="flex items-center justify-between gap-2 border-b border-slate-200/70 px-4 py-3 dark:border-[#30363d]/70">
-        <h3 class="text-sm font-semibold text-slate-900 dark:text-[#e6edf3]">{t('ask.conversationHistory')}</h3>
+      <div class="ask-history-head">
+        <h3>{t('ask.conversationHistory')}</h3>
         <div class="flex items-center gap-1.5">
           <button
             type="button"
-            class="rounded-lg px-2.5 py-1 text-xs font-medium text-indigo-500 transition hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-950/40"
+            class="rounded-lg px-2.5 py-1 text-xs font-medium text-indigo-500 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-indigo-400 dark:hover:bg-indigo-950/40"
             on:click={() => { showConversationList = false; clearConversation(); }}
+            disabled={sending}
           >
             {t('ask.newConversation')}
           </button>
@@ -1116,7 +1182,7 @@
       </div>
       <div class="app-floating-scroll flex-1 overflow-y-auto p-2">
         {#each conversations as conv (conv.id)}
-          <div class="group/conv flex items-center gap-1 rounded-xl px-2.5 py-2 transition hover:bg-slate-100/80 dark:hover:bg-[#21262d]/70 {conv.id === conversationId ? 'bg-indigo-50/80 dark:bg-indigo-950/30' : ''}">
+          <div class="ask-history-item group/conv {conv.id === conversationId ? 'ask-history-item-active' : ''}">
             <button
               type="button"
               class="min-w-0 flex-1 text-start"
@@ -1127,11 +1193,13 @@
             </button>
             <button
               type="button"
-              class="shrink-0 rounded-md p-1 text-slate-300 opacity-0 transition hover:text-rose-500 group-hover/conv:opacity-100 focus-visible:opacity-100 dark:text-[#484f58] dark:hover:text-rose-400"
+              class="ask-history-delete"
               on:click|stopPropagation={() => deleteConversation(conv.id)}
+              disabled={sending}
+              aria-label={t('ask.deleteConversation')}
               title={t('ask.deleteConversation')}
             >
-              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M3 6h18M8 6V4.5A1.5 1.5 0 0 1 9.5 3h5A1.5 1.5 0 0 1 16 4.5V6m2 0-1 14H7L6 6m4 4v6m4-6v6" /></svg>
             </button>
           </div>
         {:else}

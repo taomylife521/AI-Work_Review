@@ -375,23 +375,26 @@ pub async fn index_semantic_memory(
 }
 
 /// 测试嵌入模型连通性：发一条探针文本,返回向量维度与耗时。
-/// 不要求先启用总开关（用户通常想先测通再开启）。
+/// 接收设置页表单的当前值直接测试（而非后端已保存配置）：设置更改需点「保存」
+/// 才落盘，此前命令读已保存配置，填完表单未保存就点「测试模型」会测到旧配置。
+/// 所测即所见；实际索引仍以保存后的配置为准。不要求先启用总开关（用户通常想先测通再开启）。
 #[tauri::command]
 pub async fn test_embedding_model(
-    state: State<'_, Arc<Mutex<AppState>>>,
+    provider: String,
+    endpoint: String,
+    model: String,
+    api_key: Option<String>,
 ) -> Result<serde_json::Value, AppError> {
-    let embedding = {
-        let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-        EmbeddingConfig {
-            provider: s.config.embedding_provider.clone(),
-            endpoint: s.config.embedding_endpoint.trim().trim_end_matches('/').to_string(),
-            model: s.config.embedding_model.clone(),
-            api_key: s.config.embedding_api_key.clone(),
-        }
-    };
-    if embedding.endpoint.is_empty() || embedding.model.is_empty() {
+    let endpoint = endpoint.trim().trim_end_matches('/').to_string();
+    if endpoint.is_empty() || model.is_empty() {
         return Err(AppError::Config("请先填写嵌入服务地址与模型名".to_string()));
     }
+    let embedding = EmbeddingConfig {
+        provider,
+        endpoint,
+        model,
+        api_key,
+    };
 
     let started = std::time::Instant::now();
     let vectors = embed_texts(&embedding, &["connection test".to_string()]).await?;

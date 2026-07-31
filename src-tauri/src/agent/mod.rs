@@ -13,6 +13,5 @@ pub use events::{StreamEvent, StreamEventSender};
 pub use model::Message;
 pub use orchestrator::Orchestrator;
 pub use tools::{
-    ActionBridge, AssistantAction, AssistantRuntime, ConfirmBridge, ConfirmDecision,
-    CurrentContextFn, WebToolsConfig,
+    ActionBridge, AssistantAction, AssistantRuntime, ConfirmBridge, ConfirmDecision, WebToolsConfig,
 };

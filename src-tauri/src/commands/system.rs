@@ -1355,8 +1355,7 @@ mod tests {
             first
                 .map(|p| p.contains("Microsoft Edge.app"))
                 .unwrap_or(false),
-            "浏览器不应因脏 executable_path 显示编译器图标, 实际首位: {:?}",
-            first
+            "浏览器不应因脏 executable_path 显示编译器图标, 实际首位: {first:?}"
         );
     }
 

@@ -12,6 +12,13 @@ test('侧边栏应提供编辑部导航框架', async () => {
   assert.match(source, /sidebar-nav-section/);
   assert.match(source, /sidebar-brand-panel/);
   assert.match(source, /sidebar-status-panel/);
+  assert.match(source, /sidebar-recording-copy/);
+  assert.match(source, /sidebar-recording-toggle/);
+  assert.match(source, /sidebar-recording-toggle-label/);
+  assert.match(source, /sidebar-recording-toggle-icon/);
+  assert.match(source, /sidebar-locale-switch/);
+  assert.match(source, /sidebar-locale-compact-icon/);
+  assert.match(source, /aria-label=\{isPaused \? translate\('sidebar\.resume'\) : translate\('sidebar\.pause'\)\}/);
   assert.match(source, /sidebar-toolbelt/);
   assert.doesNotMatch(source, /sidebar-brand-chip/);
   assert.doesNotMatch(source, /sidebar-nav-index/);
@@ -20,10 +27,18 @@ test('侧边栏应提供编辑部导航框架', async () => {
   assert.match(appCssSource, /\.sidebar-brand-panel\s*\{[\s\S]*border:\s*none;/);
   assert.match(appCssSource, /\.sidebar-status-panel\s*\{[\s\S]*background:\s*transparent;/);
   assert.match(appCssSource, /\.sidebar-status-panel\s*\{[\s\S]*box-shadow:\s*none;/);
+  assert.match(appCssSource, /\.sidebar-recording-toggle-icon,\s*\.sidebar-locale-compact-icon\s*\{[\s\S]*display:\s*none/);
   assert.match(appCssSource, /\.sidebar-nav-section\s*\{[\s\S]*background:\s*transparent;/);
   assert.match(appCssSource, /\.sidebar-nav-section\s*\{[\s\S]*border:\s*none;/);
   assert.match(appCssSource, /\.sidebar-toolbelt\s*\{[\s\S]*background:\s*transparent;/);
   assert.match(appCssSource, /\.sidebar-toolbelt\s*\{[\s\S]*border:\s*none;/);
+  assert.match(appCssSource, /@media \(max-width: 700px\)[\s\S]*\.app-shell \.sidebar-recording-copy\s*\{[\s\S]*display:\s*none/);
+  assert.match(appCssSource, /@media \(max-width: 700px\)[\s\S]*\.app-shell \.sidebar-recording-toggle\s*\{[\s\S]*width:\s*100%/);
+  assert.match(appCssSource, /@media \(max-width: 700px\)[\s\S]*\.app-shell \.sidebar-recording-toggle-label\s*\{[\s\S]*display:\s*none/);
+  assert.match(appCssSource, /@media \(max-width: 700px\)[\s\S]*\.app-shell \.sidebar-recording-toggle-icon\s*\{[\s\S]*display:\s*block/);
+  assert.match(appCssSource, /@media \(max-width: 700px\)[\s\S]*\.app-shell \.sidebar-locale-label,[\s\S]*display:\s*none/);
+  assert.match(appCssSource, /@media \(max-width: 700px\)[\s\S]*\.app-shell \.sidebar-locale-compact-icon\s*\{[\s\S]*display:\s*block/);
+  assert.match(appCssSource, /@media \(max-width: 700px\)[\s\S]*\.app-shell \.sidebar-footer\s*\{[\s\S]*flex-direction:\s*column/);
 });
 
 test('侧边栏品牌区不再渲染副标题装饰文字', async () => {

@@ -28,7 +28,6 @@ mod localhost_api;
 mod monitor;
 mod node_gateway;
 mod ocr;
-mod ocr_logger;
 mod privacy;
 mod remote_upload;
 mod screen_lock;
@@ -497,10 +496,6 @@ fn should_run_startup_cleanup(status: ConfigLoadStatus) -> bool {
 }
 
 fn should_initialize_avatar_input(status: ConfigLoadStatus) -> bool {
-    !status.requires_fail_safe()
-}
-
-fn should_run_duplicate_cleanup(status: ConfigLoadStatus) -> bool {
     !status.requires_fail_safe()
 }
 
@@ -1055,6 +1050,44 @@ pub(crate) fn resolve_activity_classification(
     {
         base_category = "other".to_string();
     }
+
+    // ── 内置域名知识库:浏览器活动按站点内容细分基础分类 ──
+    // 此前浏览器活动一律归 "browser",B 站和 GitHub 在统计里没有区别。
+    // 用户显式规则仍优先:命中 app_category_rules 时 base 已不是 "browser",不会走到这里。
+    let domain_knowledge =
+        browser_url.and_then(work_review_core::knowledge::builtin_domain_category);
+    if base_category == "browser" {
+        if let Some((kb_base, _)) = domain_knowledge {
+            if kb_base != "browser" && config.custom_categories.iter().any(|c| c.key == kb_base) {
+                base_category = kb_base.to_string();
+            }
+        }
+    }
+
+    // ── AI 实体分类缓存:后台任务学习到的未知应用/域名归类(见 entity_classify_task) ──
+    let mut cached_semantic: Option<String> = None;
+    let cache_lookup = match base_category.as_str() {
+        "other" => Some(format!("app:{}", app_name.trim().to_lowercase())),
+        "browser" if domain_knowledge.is_none() => browser_url
+            .map(work_review_core::config::PrivacyConfig::extract_domain)
+            .map(|d| d.split(':').next().unwrap_or("").to_string())
+            .filter(|d| !d.is_empty())
+            .map(|d| format!("domain:{d}")),
+        _ => None,
+    };
+    if let Some(cache_key) = cache_lookup {
+        let cached = entity_category_cache()
+            .read()
+            .ok()
+            .and_then(|m| m.get(&cache_key).cloned());
+        if let Some((cached_base, semantic)) = cached {
+            if config.custom_categories.iter().any(|c| c.key == cached_base) {
+                base_category = cached_base;
+                cached_semantic = Some(semantic);
+            }
+        }
+    }
+
     let mut classification = activity_classifier::classify_activity_with_base_category(
         app_name,
         window_title,
@@ -1070,6 +1103,22 @@ pub(crate) fn resolve_activity_classification(
             .any(|c| c.key == classification.semantic_category)
     {
         classification.semantic_category = "未知活动".to_string();
+    }
+
+    // 知识库/AI 缓存的语义提示:仅在打分器置信度不高时兜底;
+    // 用户 website_semantic_rules 在下方应用,仍拥有最终覆盖权
+    let semantic_hint =
+        cached_semantic.or_else(|| domain_knowledge.map(|(_, semantic)| semantic.to_string()));
+    if let Some(hint) = semantic_hint {
+        if classification.confidence < 70
+            && config
+                .custom_semantic_categories
+                .iter()
+                .any(|c| c.key == hint)
+        {
+            classification.semantic_category = hint;
+            classification.confidence = 70;
+        }
     }
 
     if let Some(semantic_category) =
@@ -1118,11 +1167,7 @@ fn should_confirm_idle(
     // 创意类应用（PS/C4D/Blender）、AI 网页阅读、代码思考等场景下，画面可能长时间
     // 几乎不变但用户确实在工作。哈希相似度对这类场景是反信号，故废弃其"确认空闲"作用。
     // 关闭截图时无法看画面，回退到"键鼠超时即空闲"（保留原行为）。
-    if screenshots_enabled {
-        false
-    } else {
-        true
-    }
+    !screenshots_enabled
 }
 
 fn previous_app_backfill_duration(
@@ -1138,8 +1183,22 @@ fn previous_app_backfill_duration(
     }
 }
 
-fn should_persist_merge_update(effective_duration: i64, keep_record_active: bool) -> bool {
-    effective_duration > 0 || keep_record_active
+fn should_persist_merge_update(effective_duration: i64) -> bool {
+    effective_duration > 0
+}
+
+const ACTIVITY_MERGE_GAP_SECS: i64 = 600;
+
+fn should_merge_contiguous_activity(
+    app_changed: bool,
+    app_name: &str,
+    current_timestamp: i64,
+    latest_timestamp: i64,
+) -> bool {
+    !app_changed
+        && app_name != "Unknown"
+        && current_timestamp >= latest_timestamp
+        && current_timestamp - latest_timestamp <= ACTIVITY_MERGE_GAP_SECS
 }
 
 fn resolve_previous_activity_to_backfill(
@@ -1148,9 +1207,7 @@ fn resolve_previous_activity_to_backfill(
     previous_browser_url: Option<&str>,
     previous_window_title: Option<&str>,
 ) -> Option<database::Activity> {
-    let Some(previous_app_name) = previous_app_name else {
-        return None;
-    };
+    let previous_app_name = previous_app_name?;
 
     let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
 
@@ -1186,6 +1243,7 @@ fn resolve_previous_activity_to_backfill(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn persist_previous_activity_backfill(
     database: &Database,
     config: &AppConfig,
@@ -1203,9 +1261,7 @@ fn persist_previous_activity_backfill(
     }
 
     if let Some(previous_activity) = previous_activity {
-        let Some(previous_id) = previous_activity.id else {
-            return None;
-        };
+        let previous_id = previous_activity.id?;
 
         let _ = database.merge_activity(
             previous_id,
@@ -1275,11 +1331,7 @@ fn persist_previous_activity_backfill(
     match database.insert_activity(&activity) {
         Ok(activity_id) => {
             log::debug!(
-                "⏱️ 新建上一应用回补: {} +{}s (id={}, 切换到 {})",
-                previous_app_name,
-                duration_delta,
-                activity_id,
-                current_app_name
+                "⏱️ 新建上一应用回补: {previous_app_name} +{duration_delta}s (id={activity_id}, 切换到 {current_app_name})"
             );
             Some(activity_id)
         }
@@ -1290,6 +1342,7 @@ fn persist_previous_activity_backfill(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn backfill_previous_activity_if_needed(
     state: &Arc<Mutex<AppState>>,
     previous_activity: Option<&database::Activity>,
@@ -1443,6 +1496,7 @@ fn avatar_activity_decision(
     avatar_opacity: f64,
     avatar_preset: &str,
     avatar_persona: &str,
+    avatar_body_hidden: bool,
 ) -> AvatarActivityDecision {
     if !avatar_enabled {
         return AvatarActivityDecision {
@@ -1452,6 +1506,7 @@ fn avatar_activity_decision(
                 avatar_opacity,
                 avatar_preset,
                 avatar_persona,
+                avatar_body_hidden,
             )),
         };
     }
@@ -1464,6 +1519,7 @@ fn avatar_activity_decision(
                 avatar_opacity,
                 avatar_preset,
                 avatar_persona,
+                avatar_body_hidden,
             )),
         };
     }
@@ -1612,6 +1668,7 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
             avatar_opacity,
             avatar_preset,
             avatar_persona,
+            avatar_body_hidden,
             is_recording,
             is_paused,
             break_reminder_enabled,
@@ -1625,6 +1682,7 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
                 state_guard.config.avatar_opacity,
                 state_guard.config.avatar_preset.clone(),
                 state_guard.config.avatar_persona.clone(),
+                state_guard.config.avatar_body_hidden,
                 state_guard.is_recording,
                 state_guard.is_paused,
                 state_guard.config.break_reminder_enabled,
@@ -1644,6 +1702,7 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
             avatar_opacity,
             &avatar_preset,
             &avatar_persona,
+            avatar_body_hidden,
         );
         let poll_interval_ms = avatar_monitor_poll_interval_ms_for_platform(
             cfg!(target_os = "macos"),
@@ -1800,6 +1859,7 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
             avatar_opacity,
             &avatar_preset,
             &avatar_persona,
+            avatar_body_hidden,
         );
 
         let window_signature = format!(
@@ -2382,6 +2442,12 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                 &active_window.window_title,
                 active_window.browser_url.as_deref(),
             );
+            // 窗口标题与 OCR 文本同等过滤后再向下游传递(入库/事件/分类)：
+            // 邮件主题、IM 会话名里常出现邮箱/手机号等敏感信息,此前只过滤 OCR 文本。
+            // 隐私判定(上方)与逐 tick 变化检测(last_* 变量)仍使用原始标题。
+            active_window.window_title = state_guard
+                .privacy_filter
+                .filter_text(&active_window.window_title);
             // elapsed_secs 是距离上次截图的真实秒数，确保时长不丢失
             let duration = elapsed_secs.max(1) as i64;
             (action, duration)
@@ -2412,6 +2478,26 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                     "完全跳过: {} - {}",
                     active_window.app_name,
                     active_window.window_title
+                );
+                // 切到忽略应用不应吞掉上一应用的最后一段经过时间：
+                // 与 Anonymize/Record 路径一致,先回补给上一活动再跳过本条
+                let skip_is_confirmed_idle =
+                    should_confirm_idle(input_idle, input_idle_seconds, false, false);
+                let previous_effective_duration = previous_app_backfill_duration(
+                    app_changed,
+                    duration_to_record,
+                    was_input_idle,
+                    skip_is_confirmed_idle,
+                );
+                backfill_previous_activity_if_needed(
+                    &state,
+                    previous_activity_to_backfill.as_ref(),
+                    previous_app_name.as_deref(),
+                    previous_window_title.as_deref(),
+                    previous_browser_url.as_deref(),
+                    previous_effective_duration,
+                    current_timestamp,
+                    &active_window.app_name,
                 );
                 None
             }
@@ -2533,31 +2619,25 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                     }
                 };
 
-                // "Unknown" 进程名不做合并：无法区分是哪个进程，强制新建
-                // 防止所有识别失败的进程时长累积到同一条记录导致统计失真
-                // 时间间隔超过 10 分钟也不合并：上午/下午用同一个 app 属于不同工作段
-                const MERGE_GAP_SECS: i64 = 600;
+                // 只合并当前连续会话。切回此前使用过的应用/页面必须新建记录，
+                // 否则累计 duration 配合新 timestamp 会把中间会话覆盖成重叠区间。
                 let is_merge = if let Some(ref latest) = latest_activity {
-                    let mut merge = active_window.app_name != "Unknown"
-                        && (current_timestamp - latest.timestamp) <= MERGE_GAP_SECS;
+                    let mut merge = should_merge_contiguous_activity(
+                        app_changed,
+                        &active_window.app_name,
+                        current_timestamp,
+                        latest.timestamp,
+                    );
 
                     // 如果由于某种原因 browser_url 获取失败，但它确实是一个浏览器
                     // 我们必须更严格地判断合并条件，否则不同标签页的切换会被错误合并。
                     if merge
                         && active_window.browser_url.is_none()
                         && monitor::is_browser_app(&active_window.app_name)
+                        && (latest.window_title != active_window.window_title
+                            || latest.browser_url.is_some())
                     {
-                        // 条件 1: 窗口标题不同 → 一定不是同一个标签页，不合并
-                        if latest.window_title != active_window.window_title {
-                            merge = false;
-                        }
-                        // 条件 2: 已有记录有 URL 但当前没有 → URL 采集失败，不合并
-                        // 防止把时长归到错误的 URL 上
-                        else if latest.browser_url.is_some()
-                            && active_window.browser_url.is_none()
-                        {
-                            merge = false;
-                        }
+                        merge = false;
                     }
 
                     merge
@@ -2642,8 +2722,8 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                         adjusted_duration
                     };
 
-                    // 合并记录（不更新 screenshot_path，保留活动创建时的原始截图）
-                    // 即使 effective_duration 为 0，也需要更新时间戳以保持记录活跃
+                    // 截图仍用于 OCR；duration 为 0 时不能推进 timestamp，
+                    // 否则已有区间会整体向后漂移。OCR 在下方独立更新。
                     let (latest_archive_path, ocr_input_path, temporary_ocr_source_path) =
                         if let Some(ref screenshot) = screenshot_result {
                             (
@@ -2664,7 +2744,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                     let persisted_screenshot_path = previous_screenshot_path.clone();
                     let mut persisted_duration = latest.duration;
 
-                    if should_persist_merge_update(effective_duration, true) {
+                    if should_persist_merge_update(effective_duration) {
                         let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
                         match state_guard.database.merge_activity(
                             latest_id,
@@ -2991,8 +3071,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                                                 let ap = archive_path.clone();
                                                 let rp = relative_path.clone();
                                                 tokio::spawn(async move {
-                                                    let client = reqwest::Client::new();
-                                                    match remote_upload::upload_screenshot(&client, &remote_cfg, &ap, &rp).await {
+                                                    match remote_upload::upload_screenshot(&remote_cfg, &ap, &rp).await {
                                                         Ok(url) => {
                                                             log::info!("远程上传成功: {url}");
                                                             if let Ok(g) = st.lock() {
@@ -3228,7 +3307,12 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
 /// 小时摘要生成任务
 /// 每小时检查一次，为上一个完整小时生成摘要
 /// 为指定日期和小时生成并保存摘要
-pub(crate) fn generate_and_save_summary(state: &Arc<Mutex<AppState>>, date: &str, hour: i32) {
+/// 计算某小时的摘要（不落库）。该小时无活动或查询失败时返回 None。
+pub(crate) fn build_hourly_summary(
+    state: &Arc<Mutex<AppState>>,
+    date: &str,
+    hour: i32,
+) -> Option<database::HourlySummary> {
     use analysis::hourly::{generate_fallback_summary, HourlyStats};
 
     let activities = {
@@ -3241,7 +3325,7 @@ pub(crate) fn generate_and_save_summary(state: &Arc<Mutex<AppState>>, date: &str
             let stats = HourlyStats::from_activities(date, hour, acts);
             let summary = generate_fallback_summary(&stats);
 
-            let hourly_summary = database::HourlySummary {
+            Some(database::HourlySummary {
                 id: None,
                 date: date.to_string(),
                 hour,
@@ -3253,24 +3337,32 @@ pub(crate) fn generate_and_save_summary(state: &Arc<Mutex<AppState>>, date: &str
                     serde_json::to_string(&stats.representative_screenshots).unwrap_or_default(),
                 ),
                 created_at: chrono::Local::now().timestamp(),
-            };
-
-            let save_result = {
-                let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
-                state_guard.database.save_hourly_summary(&hourly_summary)
-            };
-
-            match save_result {
-                Ok(_) => log::info!("小时摘要保存成功: {date} {hour}:00"),
-                Err(e) => log::error!("保存小时摘要失败: {e}"),
-            }
+            })
         }
         Ok(_) => {
             log::debug!("该小时无活动数据: {date} {hour}:00");
+            None
         }
         Err(e) => {
             log::error!("获取小时活动数据失败: {e}");
+            None
         }
+    }
+}
+
+pub(crate) fn generate_and_save_summary(state: &Arc<Mutex<AppState>>, date: &str, hour: i32) {
+    let Some(hourly_summary) = build_hourly_summary(state, date, hour) else {
+        return;
+    };
+
+    let save_result = {
+        let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
+        state_guard.database.save_hourly_summary(&hourly_summary)
+    };
+
+    match save_result {
+        Ok(_) => log::info!("小时摘要保存成功: {date} {hour}:00"),
+        Err(e) => log::error!("保存小时摘要失败: {e}"),
     }
 }
 
@@ -3392,6 +3484,422 @@ fn install_crash_handler() {
     }));
 }
 
+/// 远程存储补传任务：定期扫描「本地有截图但远程 URL 缺失」的近期活动并补传。
+/// 实时上传失败只有一次轻量重试（见 remote_upload），断网/服务不可用超过该窗口的
+/// 截图会永久缺失——本任务作为兜底，每 10 分钟补传一批。
+/// 窗口限定近 72 小时：更早的缺口多半是远程存储当时未启用或本地文件已被保留策略清理，
+/// 反复重试没有意义。
+async fn remote_upload_backfill_task(state: Arc<Mutex<AppState>>) {
+    const INITIAL_DELAY_SECS: u64 = 60;
+    const SWEEP_INTERVAL_SECS: u64 = 10 * 60;
+    const BACKFILL_WINDOW_SECS: i64 = 72 * 60 * 60;
+    const BATCH_LIMIT: u32 = 20;
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(INITIAL_DELAY_SECS)).await;
+
+    loop {
+        let (remote_cfg, data_dir, pending) = {
+            let guard = state.lock().unwrap_or_else(|e| e.into_inner());
+            let remote_cfg = guard.config.remote_storage.clone();
+            if remote_cfg.provider == work_review_core::config::RemoteStorageProvider::None {
+                (remote_cfg, std::path::PathBuf::new(), Vec::new())
+            } else {
+                let since = chrono::Local::now().timestamp() - BACKFILL_WINDOW_SECS;
+                let pending = guard
+                    .database
+                    .get_activities_missing_screenshot_url(since, BATCH_LIMIT)
+                    .unwrap_or_else(|e| {
+                        log::warn!("查询待补传截图失败: {e}");
+                        Vec::new()
+                    });
+                (remote_cfg, guard.data_dir.clone(), pending)
+            }
+        };
+
+        let mut uploaded = 0u32;
+        for (activity_id, relative_path) in pending {
+            // 历史数据可能存过绝对路径，跳过以免拼出畸形的远程对象键
+            if std::path::Path::new(&relative_path).is_absolute() {
+                continue;
+            }
+            let local_path = data_dir.join(&relative_path);
+            if !local_path.exists() {
+                continue; // 本地文件已被保留策略清理，无从补传
+            }
+            match remote_upload::upload_screenshot(&remote_cfg, &local_path, &relative_path).await
+            {
+                Ok(url) => {
+                    let updated = {
+                        let guard = state.lock().unwrap_or_else(|e| e.into_inner());
+                        guard
+                            .database
+                            .update_activity_screenshot_url(activity_id, &url)
+                    };
+                    match updated {
+                        Ok(()) => uploaded += 1,
+                        Err(e) => log::warn!(
+                            "补传后写回 screenshot_url 失败（活动 {activity_id}）: {e}"
+                        ),
+                    }
+                }
+                Err(e) => log::warn!("补传截图失败（活动 {activity_id}）: {e}"),
+            }
+            // 温和限速，避免补传批次挤占正常上传与前台网络
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        }
+        if uploaded > 0 {
+            log::info!("截图补传完成：本轮补传 {uploaded} 张");
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_secs(SWEEP_INTERVAL_SECS)).await;
+    }
+}
+
+/// AI 实体分类缓存的进程内查询表（entity_key → (基础分类, 语义分类)）。
+/// 启动时从数据库载入,entity_classify_task 学习到新实体后同步更新,
+/// 采集循环里的 resolve_activity_classification 只读查询。
+pub(crate) fn entity_category_cache(
+) -> &'static std::sync::RwLock<std::collections::HashMap<String, (String, String)>> {
+    static CACHE: OnceCell<
+        std::sync::RwLock<std::collections::HashMap<String, (String, String)>>,
+    > = OnceCell::new();
+    CACHE.get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::new()))
+}
+
+/// 调用文本模型对一批实体做归类,返回 (entity_key, 基础分类, 语义分类)。
+async fn classify_entities_with_model(
+    model: &work_review_core::config::ModelConfig,
+    entities: &[String],
+    category_options: &str,
+    semantic_options: &str,
+) -> Option<Vec<(String, String, String)>> {
+    let list = entities
+        .iter()
+        .map(|e| format!("- {e}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let prompt = format!(
+        "你是活动分类助手。以下实体来自个人时间追踪软件,格式为 kind:名称(app 表示桌面应用,domain 表示网站域名)。\n\
+         请为每个实体选择最贴切的基础分类 key 与语义分类名,只能从给定选项中选。\n\
+         判定必须保守:只有名称有明确证据(明显是视频/游戏/音乐/购物等)才可归入娱乐或消遣类分类;\n\
+         看起来像开发工具、软件项目名、专有名词或含义不明的实体,宁可跳过也不要猜——\n\
+         对没有把握的实体,base 填 \"skip\",本轮不学习该实体。\n\n\
+         基础分类(key: 名称)：{category_options}\n语义分类：{semantic_options}\n\n实体：\n{list}\n\n\
+         只输出 JSON 数组,不要任何其他文字。元素形如 {{\"key\":\"app:xxx\",\"base\":\"development\",\"semantic\":\"编码开发\"}}"
+    );
+
+    let endpoint = model.endpoint.trim().trim_end_matches('/');
+    let url = if endpoint.ends_with("/chat/completions") {
+        endpoint.to_string()
+    } else {
+        format!("{endpoint}/chat/completions")
+    };
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .build()
+        .ok()?;
+    let mut request = client.post(&url).json(&serde_json::json!({
+        "model": model.model,
+        "messages": [{ "role": "user", "content": prompt }],
+        "temperature": 0,
+        "stream": false,
+    }));
+    if let Some(key) = model.api_key.as_deref().filter(|k| !k.trim().is_empty()) {
+        request = request.header("Authorization", format!("Bearer {key}"));
+    }
+
+    let response = request.send().await.ok()?;
+    if !response.status().is_success() {
+        log::warn!("实体分类模型调用失败: HTTP {}", response.status());
+        return None;
+    }
+    let value: serde_json::Value = response.json().await.ok()?;
+    let content = value["choices"][0]["message"]["content"].as_str()?;
+    let content = content
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+    let parsed: Vec<serde_json::Value> = serde_json::from_str(content).ok()?;
+    Some(
+        parsed
+            .into_iter()
+            .filter_map(|item| {
+                Some((
+                    item["key"].as_str()?.to_string(),
+                    item["base"].as_str()?.to_string(),
+                    item["semantic"].as_str()?.to_string(),
+                ))
+            })
+            .collect(),
+    )
+}
+
+/// AI 实体分类学习任务：定期把"仍未识别"的应用与域名交给文本模型归类一次,
+/// 写入缓存供采集即时查询,并回溯修正近 14 天的历史记录——分类随使用越来越准,
+/// 不再依赖用户手动加规则。未配置文本模型时静默空转;内置知识库与用户显式规则始终优先
+/// （候选收集阶段已排除两者覆盖的实体）。
+async fn entity_classify_task(state: Arc<Mutex<AppState>>) {
+    const INITIAL_DELAY_SECS: u64 = 180;
+    const SWEEP_INTERVAL_SECS: u64 = 30 * 60;
+    const LOOKBACK_SECS: i64 = 3 * 24 * 60 * 60;
+    const RETRO_SECS: i64 = 14 * 24 * 60 * 60;
+    const MIN_TOTAL_DURATION_SECS: i64 = 600;
+    const BATCH_LIMIT: usize = 12;
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(INITIAL_DELAY_SECS)).await;
+
+    loop {
+        let now = chrono::Local::now().timestamp();
+        let (
+            model,
+            category_options,
+            semantic_options,
+            valid_bases,
+            valid_semantics,
+            app_rule_names,
+            website_rule_domains,
+            app_candidates,
+            url_durations,
+        ) = {
+            let guard = state.lock().unwrap_or_else(|e| e.into_inner());
+            let model = guard.config.text_model.clone();
+            let category_options = guard
+                .config
+                .custom_categories
+                .iter()
+                .filter(|c| c.key != "browser")
+                .map(|c| format!("{}: {}", c.key, c.name))
+                .collect::<Vec<_>>()
+                .join("、");
+            let semantic_options = guard
+                .config
+                .custom_semantic_categories
+                .iter()
+                .map(|c| c.key.clone())
+                .collect::<Vec<_>>()
+                .join("、");
+            let valid_bases: std::collections::HashSet<String> = guard
+                .config
+                .custom_categories
+                .iter()
+                .map(|c| c.key.clone())
+                .collect();
+            let valid_semantics: std::collections::HashSet<String> = guard
+                .config
+                .custom_semantic_categories
+                .iter()
+                .map(|c| c.key.clone())
+                .collect();
+            let app_rule_names: Vec<String> = guard
+                .config
+                .app_category_rules
+                .iter()
+                .map(|r| r.app_name.to_lowercase())
+                .filter(|r| !r.is_empty())
+                .collect();
+            let website_rule_domains: Vec<String> = guard
+                .config
+                .website_semantic_rules
+                .iter()
+                .map(|r| r.domain.to_lowercase())
+                .filter(|r| !r.is_empty())
+                .collect();
+            let app_candidates = guard
+                .database
+                .get_unclassified_app_candidates(now - LOOKBACK_SECS, MIN_TOTAL_DURATION_SECS, 20)
+                .unwrap_or_default();
+            let url_durations = guard
+                .database
+                .get_browser_url_durations(now - LOOKBACK_SECS)
+                .unwrap_or_default();
+            (
+                model,
+                category_options,
+                semantic_options,
+                valid_bases,
+                valid_semantics,
+                app_rule_names,
+                website_rule_domains,
+                app_candidates,
+                url_durations,
+            )
+        };
+
+        if model.endpoint.trim().is_empty() || model.model.trim().is_empty() {
+            tokio::time::sleep(tokio::time::Duration::from_secs(SWEEP_INTERVAL_SECS)).await;
+            continue;
+        }
+
+        let cached_keys: std::collections::HashSet<String> = entity_category_cache()
+            .read()
+            .map(|m| m.keys().cloned().collect())
+            .unwrap_or_default();
+
+        // 应用候选:排除已学过与用户规则已覆盖的
+        let mut entities: Vec<String> = Vec::new();
+        for app in app_candidates {
+            let app_lower = app.to_lowercase();
+            let key = format!("app:{app_lower}");
+            if cached_keys.contains(&key)
+                || app_rule_names.iter().any(|r| app_lower.contains(r.as_str()))
+            {
+                continue;
+            }
+            entities.push(key);
+            if entities.len() >= BATCH_LIMIT {
+                break;
+            }
+        }
+
+        // 域名候选:聚合累计时长,排除知识库/用户规则/已学过的
+        let mut domain_totals: std::collections::HashMap<String, i64> =
+            std::collections::HashMap::new();
+        for (url, duration) in url_durations {
+            let domain = work_review_core::config::PrivacyConfig::extract_domain(&url);
+            let domain = domain.split(':').next().unwrap_or("").to_string();
+            if !domain.is_empty() {
+                *domain_totals.entry(domain).or_insert(0) += duration;
+            }
+        }
+        let mut domain_candidates: Vec<(String, i64)> = domain_totals
+            .into_iter()
+            .filter(|(domain, total)| {
+                *total >= MIN_TOTAL_DURATION_SECS
+                    && work_review_core::knowledge::builtin_domain_category(domain).is_none()
+                    && !cached_keys.contains(&format!("domain:{domain}"))
+                    && !website_rule_domains.iter().any(|rule| {
+                        work_review_core::config::PrivacyConfig::domain_matches(domain, rule)
+                    })
+            })
+            .collect();
+        domain_candidates.sort_by(|a, b| b.1.cmp(&a.1));
+        for (domain, _) in domain_candidates {
+            if entities.len() >= BATCH_LIMIT {
+                break;
+            }
+            entities.push(format!("domain:{domain}"));
+        }
+
+        if entities.is_empty() {
+            tokio::time::sleep(tokio::time::Duration::from_secs(SWEEP_INTERVAL_SECS)).await;
+            continue;
+        }
+
+        let Some(results) =
+            classify_entities_with_model(&model, &entities, &category_options, &semantic_options)
+                .await
+        else {
+            log::warn!("实体自动归类本轮失败,下轮重试");
+            tokio::time::sleep(tokio::time::Duration::from_secs(SWEEP_INTERVAL_SECS)).await;
+            continue;
+        };
+
+        let mut learned = 0usize;
+        for (key, base, semantic) in results {
+            // 模型对没把握的实体返回 "skip":不学习、不缓存,留待将来有更多上下文再判
+            if base == "skip" {
+                continue;
+            }
+            // 只接受本批实体、且分类必须在现有集合内("browser" 不作为学习目标)
+            if !entities.contains(&key)
+                || base == "browser"
+                || !valid_bases.contains(&base)
+                || !valid_semantics.contains(&semantic)
+            {
+                continue;
+            }
+
+            let persisted = {
+                let guard = state.lock().unwrap_or_else(|e| e.into_inner());
+                guard.database.upsert_entity_category(&key, &base, &semantic)
+            };
+            if let Err(e) = persisted {
+                log::warn!("写入实体分类缓存失败({key}): {e}");
+                continue;
+            }
+            if let Ok(mut map) = entity_category_cache().write() {
+                map.insert(key.clone(), (base.clone(), semantic.clone()));
+            }
+
+            // 回溯修正近 14 天历史记录,让统计"自己变准"
+            let updated = if let Some(app) = key.strip_prefix("app:") {
+                let guard = state.lock().unwrap_or_else(|e| e.into_inner());
+                guard
+                    .database
+                    .reclassify_app_activities(app, &base, &semantic, now - RETRO_SECS)
+                    .unwrap_or(0)
+            } else if let Some(domain) = key.strip_prefix("domain:") {
+                let rows = {
+                    let guard = state.lock().unwrap_or_else(|e| e.into_inner());
+                    guard
+                        .database
+                        .get_browser_activity_urls(now - RETRO_SECS)
+                        .unwrap_or_default()
+                };
+                let ids: Vec<i64> = rows
+                    .into_iter()
+                    .filter(|(_, url)| {
+                        let row_domain =
+                            work_review_core::config::PrivacyConfig::extract_domain(url);
+                        row_domain.split(':').next().unwrap_or("") == domain
+                    })
+                    .map(|(id, _)| id)
+                    .collect();
+                let guard = state.lock().unwrap_or_else(|e| e.into_inner());
+                guard
+                    .database
+                    .reclassify_activities_by_ids(&ids, &base, &semantic)
+                    .unwrap_or(0)
+            } else {
+                0
+            };
+
+            learned += 1;
+            log::info!("实体自动归类: {key} → {base}/{semantic}（回溯修正 {updated} 条）");
+        }
+        if learned > 0 {
+            log::info!("实体分类自动学习完成: 本轮学习 {learned} 个实体");
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_secs(SWEEP_INTERVAL_SECS)).await;
+    }
+}
+
+/// 存储清理周期任务：保留天数与容量上限此前只在启动时执行一次,
+/// 应用常驻数周就完全不生效——这里每 6 小时补跑一次。
+/// 配置损坏(fail-safe)时与启动路径一致,跳过清理以保护历史数据。
+async fn storage_cleanup_task(state: Arc<Mutex<AppState>>) {
+    const SWEEP_INTERVAL_SECS: u64 = 6 * 60 * 60;
+
+    loop {
+        // 启动清理已在 main 里执行过,首轮直接等一个周期
+        tokio::time::sleep(tokio::time::Duration::from_secs(SWEEP_INTERVAL_SECS)).await;
+
+        let (data_dir, storage_config, allowed) = {
+            let guard = state.lock().unwrap_or_else(|e| e.into_inner());
+            (
+                guard.data_dir.clone(),
+                guard.config.storage.clone(),
+                should_run_startup_cleanup(guard.config_load_status),
+            )
+        };
+        if !allowed {
+            continue;
+        }
+
+        // 用独立实例在阻塞线程执行,避免清理期间占用 AppState 锁阻塞采集循环
+        let manager = StorageManager::new(&data_dir, storage_config);
+        match tokio::task::spawn_blocking(move || manager.cleanup()).await {
+            Ok(Ok(_)) => log::debug!("周期存储清理完成"),
+            Ok(Err(e)) => log::warn!("周期存储清理失败: {e}"),
+            Err(e) => log::warn!("周期存储清理任务异常: {e}"),
+        }
+    }
+}
+
 /// Linux: 注入 WebKit/Wayland 兼容性环境变量，规避 webkit2gtk 在 Wayland（尤其
 /// KDE Plasma / NVIDIA）下启动即崩的问题（"Error 71 (Protocol error) dispatching
 /// to Wayland display"，上游 Tauri #10702 / GTK WebKitGTK）。必须在 GTK/WebKit
@@ -3478,9 +3986,31 @@ async fn main() {
     let db_path = data_dir.join("workreview.db");
     let database = Database::new(&db_path).expect("初始化数据库失败");
 
-    // 首次启动或升级后重建 FTS 索引，确保历史数据可被全文检索
-    if let Err(e) = database.rebuild_fts_index() {
-        log::warn!("FTS 索引重建失败（不影响核心功能）: {e}");
+    // 版本变化检测（首次启动同样视为变化）：FTS 重建门控与下方录屏权限引导复用
+    let current_version = env!("CARGO_PKG_VERSION").to_string();
+    let is_version_changed = config.last_app_version.as_deref() != Some(&current_version);
+
+    // 首次启动或升级后重建 FTS 索引，确保历史数据可被全文检索。
+    // 平时启动跳过：全量重建成本随库体积线性增长,而 FTS 触发器已维持增量同步
+    if is_version_changed {
+        if let Err(e) = database.rebuild_fts_index() {
+            log::warn!("FTS 索引重建失败（不影响核心功能）: {e}");
+        }
+    }
+
+    // 载入 AI 实体分类缓存到内存查询表（采集循环即时查询,零额外 IO）
+    match database.load_entity_category_cache() {
+        Ok(entries) => {
+            if !entries.is_empty() {
+                log::info!("载入实体分类缓存 {} 条", entries.len());
+            }
+            if let Ok(mut map) = entity_category_cache().write() {
+                for (key, base, semantic) in entries {
+                    map.insert(key, (base, semantic));
+                }
+            }
+        }
+        Err(e) => log::warn!("载入实体分类缓存失败: {e}"),
     }
 
     // 初始化隐私过滤器
@@ -3490,8 +4020,6 @@ async fn main() {
     let screenshot_service = ScreenshotService::new(&data_dir, &config.storage);
 
     // 版本更新后重置 macOS 录屏权限引导标记，确保更新后能重新弹窗
-    let current_version = env!("CARGO_PKG_VERSION").to_string();
-    let is_version_changed = config.last_app_version.as_deref() != Some(&current_version);
     if is_version_changed {
         #[cfg(target_os = "macos")]
         if config.last_app_version.is_some() {
@@ -3566,6 +4094,7 @@ async fn main() {
     let initial_avatar_opacity = config.avatar_opacity;
     let initial_avatar_preset = config.avatar_preset.clone();
     let initial_avatar_persona = config.avatar_persona.clone();
+    let initial_avatar_body_hidden = config.avatar_body_hidden;
 
     // 配置损坏时使用默认存储策略会误删历史数据，因此故障安全启动必须跳过清理。
     if should_run_startup_cleanup(config_load_status) {
@@ -3595,6 +4124,7 @@ async fn main() {
             initial_avatar_opacity,
             &initial_avatar_preset,
             &initial_avatar_persona,
+            initial_avatar_body_hidden,
         ),
         avatar_generating_report: false,
         generating_report: false,
@@ -3704,6 +4234,9 @@ async fn main() {
             let state_clone = state.inner().clone();
             let state_clone2 = state.inner().clone();
             let state_clone3 = state.inner().clone();
+            let state_clone4 = state.inner().clone();
+            let state_clone5 = state.inner().clone();
+            let state_clone6 = state.inner().clone();
             let state_for_tray = state.inner().clone();
             let app_handle = app.handle().clone();
             let screenshot_app_handle = app.handle().clone();
@@ -3711,6 +4244,7 @@ async fn main() {
             let (
                 avatar_enabled,
                 avatar_scale,
+                avatar_body_hidden,
                 avatar_position,
                 avatar_state,
                 config_load_status,
@@ -3719,6 +4253,7 @@ async fn main() {
                 (
                     state_guard.config.avatar_enabled,
                     state_guard.config.avatar_scale,
+                    state_guard.config.avatar_body_hidden,
                     state_guard.config.avatar_x.zip(state_guard.config.avatar_y),
                     state_guard.avatar_state.clone(),
                     state_guard.config_load_status,
@@ -3731,6 +4266,7 @@ async fn main() {
                 avatar_scale,
                 avatar_position,
                 false,
+                avatar_body_hidden,
             ) {
                 log::warn!("初始化桌宠窗口失败: {e}");
             } else if avatar_enabled {
@@ -3915,32 +4451,20 @@ async fn main() {
                 hourly_summary_task(state_clone2).await;
             });
 
-            // 启动时清理当天的重复记录。配置损坏时保留数据库和截图现场，不执行删除。
-            {
-                let state_guard = state.inner().lock().unwrap_or_else(|e| e.into_inner());
-                if should_run_duplicate_cleanup(state_guard.config_load_status) {
-                    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-                    match state_guard.database.cleanup_duplicate_activities(&today) {
-                        Ok((deleted, paths)) => {
-                            if deleted > 0 {
-                                log::warn!("🧹 启动清理: 删除 {deleted} 条重复记录");
-                                // 删除对应的截图文件
-                                for p in paths {
-                                    let path = state_guard.data_dir.join(&p);
-                                    if path.exists() {
-                                        let _ = std::fs::remove_file(&path);
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => log::error!("清理重复记录失败: {e}"),
-                    }
-                } else {
-                    log::warn!("配置损坏，已跳过重复活动与截图清理以保护历史数据");
-                }
+            // 启动远程截图补传任务（每 10 分钟扫描一次，兜底断网期间漏传的截图）
+            tauri::async_runtime::spawn(async move {
+                remote_upload_backfill_task(state_clone4).await;
+            });
 
-                // decorations 配置由 tauri.conf.json 控制，用户可通过设置中的开关动态修改
-            }
+            // 启动存储清理周期任务（每 6 小时，保留策略不再只在启动时生效一次）
+            tauri::async_runtime::spawn(async move {
+                storage_cleanup_task(state_clone5).await;
+            });
+
+            // 启动实体分类学习任务（每 30 分钟，自动归类未知应用/域名并回溯修正）
+            tauri::async_runtime::spawn(async move {
+                entity_classify_task(state_clone6).await;
+            });
 
             sync_effective_dock_visibility(app.handle());
 
@@ -3959,6 +4483,9 @@ async fn main() {
             autostart::is_autostart_enabled,
             commands::get_today_stats,
             commands::get_overview_stats,
+            commands::get_overview_domains,
+            commands::get_overview_domain_detail,
+            commands::get_range_daily_totals,
             commands::get_daily_stats,
             commands::get_timeline,
             commands::get_hourly_app_breakdown,
@@ -4088,6 +4615,8 @@ async fn main() {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::field_reassign_with_default)]
+
     use super::{
         advance_break_reminder, avatar_activity_decision, avatar_monitor_poll_interval_ms,
         avatar_monitor_poll_interval_ms_for_platform, avatar_proactive_ai_should_run,
@@ -4101,10 +4630,9 @@ mod tests {
         screen_lock_check_interval_ms_for_platform, should_confirm_idle,
         should_emit_avatar_backlog_nudge, should_hide_main_window_on_setup,
         should_initialize_avatar_input, should_initialize_startup_permissions,
-        should_persist_merge_update, should_prevent_exit,
+        should_merge_contiguous_activity, should_persist_merge_update, should_prevent_exit,
         should_probe_browser_url_before_change_detection, should_request_screen_capture_permission,
-        should_run_duplicate_cleanup, should_run_startup_cleanup, should_skip_system_window,
-        tray_recording_toggle_action,
+        should_run_startup_cleanup, should_skip_system_window, tray_recording_toggle_action,
         tray_recording_toggle_label, AvatarNudgeRuntime, BreakReminderRuntime, BreakReminderSignal,
         MainWindowCloseBehavior, RecordingToggleAction,
     };
@@ -4222,10 +4750,18 @@ mod tests {
     }
 
     #[test]
-    fn 合并活动即使本轮不累计时长也应刷新记录() {
-        assert!(should_persist_merge_update(120, true));
-        assert!(should_persist_merge_update(0, true));
-        assert!(!should_persist_merge_update(0, false));
+    fn 零增量不应推进合并记录终点() {
+        assert!(should_persist_merge_update(120));
+        assert!(!should_persist_merge_update(0));
+    }
+
+    #[test]
+    fn 只有未切换的连续活动可以合并() {
+        assert!(should_merge_contiguous_activity(false, "Code", 1_500, 1_000));
+        assert!(!should_merge_contiguous_activity(true, "Code", 1_500, 1_000));
+        assert!(!should_merge_contiguous_activity(false, "Unknown", 1_500, 1_000));
+        assert!(!should_merge_contiguous_activity(false, "Code", 1_601, 1_000));
+        assert!(!should_merge_contiguous_activity(false, "Code", 999, 1_000));
     }
 
     #[test]
@@ -4443,7 +4979,7 @@ mod tests {
     #[test]
     fn 暂停录制时桌宠应回到待命状态() {
         let decision =
-            avatar_activity_decision(true, true, true, 0.82, "keyboard-focus", "assistant");
+            avatar_activity_decision(true, true, true, 0.82, "keyboard-focus", "assistant", false);
 
         assert!(!decision.should_continue);
         assert_eq!(
@@ -4453,6 +4989,7 @@ mod tests {
                 0.82,
                 "keyboard-focus",
                 "assistant",
+                false,
             ))
         );
     }
@@ -4460,7 +4997,7 @@ mod tests {
     #[test]
     fn 停止录制时桌宠应回到待命状态() {
         let decision =
-            avatar_activity_decision(true, false, false, 0.82, "minimal-office", "assistant");
+            avatar_activity_decision(true, false, false, 0.82, "minimal-office", "assistant", false);
 
         assert!(!decision.should_continue);
         assert_eq!(
@@ -4470,6 +5007,7 @@ mod tests {
                 0.82,
                 "minimal-office",
                 "assistant",
+                false,
             ))
         );
     }
@@ -4827,11 +5365,10 @@ mod tests {
     }
 
     #[test]
-    fn 配置损坏时应跳过键鼠采集和重复数据清理() {
+    fn 配置损坏时应跳过键鼠采集() {
         assert!(!should_initialize_avatar_input(
             ConfigLoadStatus::Corrupted
         ));
-        assert!(!should_run_duplicate_cleanup(ConfigLoadStatus::Corrupted));
 
         for status in [
             ConfigLoadStatus::Loaded,
@@ -4839,7 +5376,6 @@ mod tests {
             ConfigLoadStatus::RecoveredFromBackup,
         ] {
             assert!(should_initialize_avatar_input(status));
-            assert!(should_run_duplicate_cleanup(status));
         }
     }
 

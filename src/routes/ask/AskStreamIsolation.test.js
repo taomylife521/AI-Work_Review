@@ -52,3 +52,18 @@ test('Ask 使用请求级 sending，后台请求跨页面存活且旧 finally �
   );
   assert.doesNotMatch(askSource, /assistantStore\.setSending\(/);
 });
+
+test('Ask 生成期间禁止清空或删除会话，但仍允许打开历史抽屉', () => {
+  const clearConversation = askSource.match(/async function clearConversation\(\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
+  const deleteConversation = askSource.match(/async function deleteConversation\(id\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
+  const headerNewButton = askSource.match(/class="ask-header-action ask-header-action-primary ask-header-new"[\s\S]*?<\/button>/)?.[0] ?? '';
+  const drawerNewButton = askSource.match(/class="rounded-lg px-2\.5 py-1 text-xs[\s\S]*?<\/button>/)?.[0] ?? '';
+  const deleteButton = askSource.match(/class="ask-history-delete"[\s\S]*?<\/button>/)?.[0] ?? '';
+
+  assert.match(clearConversation, /if \(sending\) return;/);
+  assert.match(deleteConversation, /if \(sending\) return;/);
+  assert.match(headerNewButton, /disabled=\{sending \|\| \(!hasConversation && conversationId == null\)\}/);
+  assert.match(drawerNewButton, /disabled=\{sending\}/);
+  assert.match(deleteButton, /disabled=\{sending\}/);
+  assert.doesNotMatch(askSource, /class="ask-header-action ask-header-history"[\s\S]{0,240}disabled=\{sending\}/);
+});

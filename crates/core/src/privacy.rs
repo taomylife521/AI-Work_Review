@@ -73,22 +73,15 @@ impl PrivacyFilter {
     }
 
     /// 检查 URL 域名是否在黑名单中
-    /// 如果匹配，返回 Skip；否则返回 Record
+    /// 如果匹配，返回 Skip；否则返回 Record。
+    /// 复用统计侧的 `matches_excluded_domain`（含合并域名兼容匹配）——
+    /// 此前采集侧只做精确/后缀匹配,比统计侧窄:统计里被隐藏的域名
+    /// 实际仍在被截图与 OCR。两侧必须是同一套语义。
     pub fn check_url_privacy(&self, url: Option<&str>) -> PrivacyAction {
         if let Some(url) = url {
-            if !url.is_empty() {
-                let domain = PrivacyConfig::extract_domain(url);
-
-                for excluded in &self.config.excluded_domains {
-                    let excluded_domain = PrivacyConfig::extract_domain(excluded);
-
-                    if !domain.is_empty() && !excluded_domain.is_empty() {
-                        if PrivacyConfig::domain_matches(&domain, &excluded_domain) {
-                            log::debug!("URL 域名 {domain} 匹配黑名单 {excluded_domain}, 跳过记录");
-                            return PrivacyAction::Skip;
-                        }
-                    }
-                }
+            if !url.is_empty() && matches_excluded_domain(url, &self.config.excluded_domains) {
+                log::debug!("URL 命中排除域名名单，跳过记录");
+                return PrivacyAction::Skip;
             }
         }
         PrivacyAction::Record
@@ -274,6 +267,8 @@ pub fn apply_excluded_domains_to_stats(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::field_reassign_with_default)]
+
     use super::*;
     use crate::config::AppPrivacyRule;
 
@@ -339,6 +334,30 @@ mod tests {
         assert!(!matches_ignored_app("Google Chrome", &canary_only));
         // 空条目不应导致忽略一切
         assert!(!matches_ignored_app("VS Code", &[String::new()]));
+    }
+
+    #[test]
+    fn 采集侧域名排除应与统计侧同一套匹配() {
+        let mut config = PrivacyConfig::default();
+        config.excluded_domains = vec!["example.com".to_string()];
+        let filter = PrivacyFilter::from_config(&config);
+
+        // 精确与子域名后缀命中(与统计侧 matches_excluded_domain 同语义)
+        assert_eq!(
+            filter.check_url_privacy(Some("https://example.com/page")),
+            PrivacyAction::Skip
+        );
+        assert_eq!(
+            filter.check_url_privacy(Some("https://sub.example.com/page")),
+            PrivacyAction::Skip
+        );
+        // 未命中与空值照常记录
+        assert_eq!(
+            filter.check_url_privacy(Some("https://other.com")),
+            PrivacyAction::Record
+        );
+        assert_eq!(filter.check_url_privacy(None), PrivacyAction::Record);
+        assert_eq!(filter.check_url_privacy(Some("")), PrivacyAction::Record);
     }
 
     #[test]

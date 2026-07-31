@@ -36,8 +36,8 @@ struct TgChat {
     id: i64,
 }
 
-const TELEGRAM_POLL_MAX_ERRORS: u32 = 3;
 const TELEGRAM_POLL_RETRY_SECONDS: u64 = 3;
+const TELEGRAM_POLL_RETRY_MAX_SECONDS: u64 = 60;
 const BINDING_COMMAND: &str = "start";
 const BIND_COMMAND: &str = "bind";
 
@@ -238,7 +238,10 @@ async fn run(
             let msg = if e.is_connect() || e.is_timeout() {
                 "无法连接 Telegram API（可能需要代理/VPN）".to_string()
             } else {
-                format!("连接失败: {e}")
+                format!(
+                    "连接失败: {}",
+                    redact_telegram_token(&e.to_string(), bot_token)
+                )
             };
             log::error!("Telegram Bot {msg}");
             set_error(shared, msg);
@@ -272,24 +275,27 @@ async fn run(
                                 status,
                                 body.description.as_deref(),
                             );
-                            if should_abort_polling(status, body.error_code, consecutive_errors) {
+                            if should_abort_polling(status, body.error_code) {
                                 set_error(shared, msg.clone());
                                 log::error!(
-                                    "Telegram Bot 连续 {consecutive_errors} 次轮询异常，停止轮询: {msg}"
+                                    "Telegram Bot 轮询遇到不可恢复错误，停止轮询: {msg}"
                                 );
                                 return;
                             }
+                            let wait = poll_backoff_seconds(consecutive_errors);
+                            set_transient_error(shared, &msg);
                             log::warn!(
-                                "Telegram Bot 轮询异常(第{consecutive_errors}次): {msg}，{TELEGRAM_POLL_RETRY_SECONDS}秒后重试"
+                                "Telegram Bot 轮询异常(第{consecutive_errors}次): {msg}，{wait}秒后重试"
                             );
-                            tokio::time::sleep(std::time::Duration::from_secs(
-                                TELEGRAM_POLL_RETRY_SECONDS,
-                            ))
-                            .await;
+                            tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
                             continue;
                         }
 
-                        consecutive_errors = 0;
+                        if consecutive_errors > 0 {
+                            consecutive_errors = 0;
+                            // 从瞬态故障中恢复,清除状态面板上的错误提示
+                            set_running(shared, true);
+                        }
                         if let Some(updates) = body.result {
                             for u in updates {
                                 offset = u.update_id + 1;
@@ -322,8 +328,7 @@ async fn run(
                                     }
 
                                     let reply = if let Some(text) = text {
-                                        // 消息原文可能含敏感内容，降为 debug 级别
-                                        log::debug!("TG Bot 收到消息: {text}");
+                                        log::debug!("TG Bot 收到命令: {cmd}");
                                         if let Some(progress) = progress_text_for_command(&cmd) {
                                             send_chat_action(
                                                 &client,
@@ -348,33 +353,36 @@ async fn run(
                     }
                     Err(e) => {
                         consecutive_errors += 1;
-                        if consecutive_errors >= TELEGRAM_POLL_MAX_ERRORS {
-                            let msg = format!("轮询响应解析失败: {e}");
+                        // 响应体解析失败但 HTTP 状态可用:鉴权/冲突类仍需停机,其余退避重试
+                        if should_abort_polling(status, None) {
+                            let msg = format!("轮询响应解析失败(HTTP {status}): {e}");
                             set_error(shared, msg.clone());
-                            log::error!("Telegram Bot {msg}");
+                            log::error!("Telegram Bot {msg}，停止轮询");
                             return;
                         }
-                        tokio::time::sleep(std::time::Duration::from_secs(
-                            TELEGRAM_POLL_RETRY_SECONDS,
-                        ))
-                        .await;
+                        let wait = poll_backoff_seconds(consecutive_errors);
+                        set_transient_error(shared, &format!("轮询响应解析失败: {e}"));
+                        log::warn!(
+                            "Telegram Bot 轮询响应解析失败(第{consecutive_errors}次): {e}，{wait}秒后重试"
+                        );
+                        tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
                     }
                 }
             }
             Err(e) => {
                 consecutive_errors += 1;
-                if consecutive_errors >= TELEGRAM_POLL_MAX_ERRORS {
-                    let msg = if e.is_connect() || e.is_timeout() {
-                        "无法连接 Telegram API（可能需要代理/VPN）".to_string()
-                    } else {
-                        format!("轮询失败: {e}")
-                    };
-                    set_error(shared, msg);
-                    log::error!("Telegram Bot 连续 {consecutive_errors} 次失败，停止轮询");
-                    return;
-                }
-                tokio::time::sleep(std::time::Duration::from_secs(TELEGRAM_POLL_RETRY_SECONDS))
-                    .await;
+                let msg = if e.is_connect() || e.is_timeout() {
+                    "无法连接 Telegram API（可能需要代理/VPN）".to_string()
+                } else {
+                    format!(
+                        "轮询失败: {}",
+                        redact_telegram_token(&e.to_string(), bot_token)
+                    )
+                };
+                let wait = poll_backoff_seconds(consecutive_errors);
+                set_transient_error(shared, &msg);
+                log::warn!("Telegram Bot {msg}(第{consecutive_errors}次)，{wait}秒后重试");
+                tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
             }
         }
     }
@@ -388,7 +396,12 @@ async fn consume_pending_updates(client: &Client, bot_token: &str) -> Result<i64
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
-        .map_err(|e| format!("请求失败: {e}"))?;
+        .map_err(|e| {
+            format!(
+                "请求失败: {}",
+                redact_telegram_token(&e.to_string(), bot_token)
+            )
+        })?;
 
     let status = resp.status();
     let body = resp
@@ -623,7 +636,10 @@ async fn send_text(client: &Client, bot_token: &str, chat_id: i64, text: &str) {
     {
         Ok(r) if r.status().is_success() => {}
         Ok(r) => log::warn!("Telegram sendMessage 失败 (HTTP {})", r.status()),
-        Err(e) => log::warn!("Telegram sendMessage 错误: {e}"),
+        Err(e) => log::warn!(
+            "Telegram sendMessage 错误: {}",
+            redact_telegram_token(&e.to_string(), bot_token)
+        ),
     }
 }
 
@@ -638,25 +654,32 @@ async fn send_chat_action(client: &Client, bot_token: &str, chat_id: i64, action
     {
         Ok(r) if r.status().is_success() => {}
         Ok(r) => log::warn!("Telegram sendChatAction 失败 (HTTP {})", r.status()),
-        Err(e) => log::warn!("Telegram sendChatAction 错误: {e}"),
+        Err(e) => log::warn!(
+            "Telegram sendChatAction 错误: {}",
+            redact_telegram_token(&e.to_string(), bot_token)
+        ),
     }
 }
 
-fn should_abort_polling(
-    status: StatusCode,
-    error_code: Option<i64>,
-    consecutive_errors: u32,
-) -> bool {
+/// 仅鉴权/冲突类错误需要停止轮询（401/403 token 无效、409 webhook 冲突）。
+/// 网络抖动、5xx、429 等瞬态错误交给调用方按 poll_backoff_seconds 退避重试——
+/// 此前连续 3 次失败即永久停机,笔记本睡眠唤醒后 Wi-Fi 未就绪约 9 秒就会静默失联。
+fn should_abort_polling(status: StatusCode, error_code: Option<i64>) -> bool {
     if matches!(
         status,
         StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN | StatusCode::CONFLICT
     ) {
         return true;
     }
-    if matches!(error_code, Some(401) | Some(403) | Some(409)) {
-        return true;
+    matches!(error_code, Some(401) | Some(403) | Some(409))
+}
+
+fn redact_telegram_token(message: &str, bot_token: &str) -> String {
+    if bot_token.is_empty() {
+        message.to_string()
+    } else {
+        message.replace(bot_token, "[REDACTED]")
     }
-    consecutive_errors >= TELEGRAM_POLL_MAX_ERRORS
 }
 
 fn format_telegram_http_error(
@@ -683,6 +706,20 @@ fn set_error(shared: &Arc<std::sync::Mutex<SharedBotStatus>>, msg: String) {
     }
 }
 
+/// 记录瞬态错误但保持 running=true：轮询仍在退避重试,
+/// 状态面板显示最近一次错误而非"已停止"。恢复后由 set_running 清除。
+fn set_transient_error(shared: &Arc<std::sync::Mutex<SharedBotStatus>>, msg: &str) {
+    if let Ok(mut s) = shared.lock() {
+        s.last_error = Some(msg.to_string());
+    }
+}
+
+/// 瞬态失败的退避间隔：3s 起步逐次翻倍,封顶 60s。
+fn poll_backoff_seconds(consecutive_errors: u32) -> u64 {
+    let shift = consecutive_errors.saturating_sub(1).min(5);
+    (TELEGRAM_POLL_RETRY_SECONDS << shift).min(TELEGRAM_POLL_RETRY_MAX_SECONDS)
+}
+
 fn set_running(shared: &Arc<std::sync::Mutex<SharedBotStatus>>, running: bool) {
     if let Ok(mut s) = shared.lock() {
         s.running = running;
@@ -703,8 +740,23 @@ mod tests {
     }
 
     #[test]
+    fn 网络类失败应退避重试而非停机() {
+        assert!(!should_abort_polling(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Some(500)
+        ));
+        assert!(!should_abort_polling(StatusCode::TOO_MANY_REQUESTS, Some(429)));
+        assert!(should_abort_polling(StatusCode::UNAUTHORIZED, Some(401)));
+
+        assert_eq!(poll_backoff_seconds(1), 3);
+        assert_eq!(poll_backoff_seconds(2), 6);
+        assert_eq!(poll_backoff_seconds(4), 24);
+        assert_eq!(poll_backoff_seconds(10), 60);
+    }
+
+    #[test]
     fn 轮询冲突应立即中止并提示() {
-        assert!(should_abort_polling(StatusCode::CONFLICT, Some(409), 1));
+        assert!(should_abort_polling(StatusCode::CONFLICT, Some(409)));
         let message = format_telegram_http_error(
             "轮询失败",
             StatusCode::CONFLICT,
@@ -712,6 +764,16 @@ mod tests {
         );
         assert!(message.contains("HTTP 409"));
         assert!(message.contains("webhook"));
+    }
+
+    #[test]
+    fn 传输错误不得把_bot_token_写入日志或状态() {
+        let token = "123456:secret-token";
+        let error = format!("request failed for https://api.telegram.org/bot{token}/getUpdates");
+        let redacted = redact_telegram_token(&error, token);
+
+        assert!(!redacted.contains(token));
+        assert!(redacted.contains("bot[REDACTED]/getUpdates"));
     }
 
     #[test]

@@ -103,9 +103,13 @@ struct SessionAccumulator {
 }
 
 impl SessionAccumulator {
+    // 全仓库统一语义：activity.timestamp 是记录区间的**终点**，真实区间为
+    // [timestamp - duration, timestamp]（与统计裁剪、时间线一致）。
+    // 此前按 [timestamp, timestamp+duration] 计算，所有会话整体后移一个
+    // duration，起止时间显示错位，跨午夜时 date 归属也会错日。
     fn from_activity(activity: Activity) -> Self {
-        let start_timestamp = activity.timestamp;
-        let end_timestamp = activity.timestamp + activity.duration.max(1);
+        let end_timestamp = activity.timestamp;
+        let start_timestamp = activity.timestamp - activity.duration.max(1);
         Self {
             activities: vec![activity],
             start_timestamp,
@@ -115,13 +119,12 @@ impl SessionAccumulator {
     }
 
     fn can_merge(&self, next: &Activity) -> bool {
-        next.timestamp - self.end_timestamp <= SESSION_GAP_SECONDS
+        // next 的区间起点与当前会话终点的间隔;区间重叠时为负值,同样合并
+        next.timestamp - next.duration.max(1) - self.end_timestamp <= SESSION_GAP_SECONDS
     }
 
     fn push(&mut self, activity: Activity) {
-        self.end_timestamp = self
-            .end_timestamp
-            .max(activity.timestamp + activity.duration.max(1));
+        self.end_timestamp = self.end_timestamp.max(activity.timestamp);
         self.total_duration += activity.duration.max(1);
         self.activities.push(activity);
     }
@@ -238,7 +241,7 @@ pub fn build_work_sessions(activities: &[Activity]) -> Vec<WorkSession> {
         sessions.push(acc.finalize(sessions.len()));
     }
 
-    sessions.sort_by(|a, b| b.start_timestamp.cmp(&a.start_timestamp));
+    sessions.sort_by_key(|b| Reverse(b.start_timestamp));
     sessions
 }
 
@@ -336,8 +339,7 @@ pub fn generate_weekly_review(
     }
     if deep_work_sessions > 0 {
         highlights.push(format!(
-            "出现 {} 段超过 45 分钟的连续专注时段。",
-            deep_work_sessions
+            "出现 {deep_work_sessions} 段超过 45 分钟的连续专注时段。"
         ));
     }
     if highlights.is_empty() {
@@ -376,9 +378,9 @@ pub fn generate_weekly_review(
         "- 总投入时长：{}\n",
         format_duration(total_duration)
     ));
-    markdown.push_str(&format!("- 活跃天数：{} 天\n", active_days));
-    markdown.push_str(&format!("- session 数量：{} 段\n", session_count));
-    markdown.push_str(&format!("- 深度工作段：{} 段\n\n", deep_work_sessions));
+    markdown.push_str(&format!("- 活跃天数：{active_days} 天\n"));
+    markdown.push_str(&format!("- session 数量：{session_count} 段\n"));
+    markdown.push_str(&format!("- 深度工作段：{deep_work_sessions} 段\n\n"));
 
     markdown.push_str("## 重点工作\n\n");
     if top_intents.is_empty() {
@@ -680,7 +682,7 @@ fn classify_session(
         add_score(&mut matches, "学习调研", 4, "会话主要发生在浏览器");
     }
     if lower_title.contains("pr") || lower_title.contains("review") {
-        add_score(&mut matches, "代码评审", 8, format!("标题包含 {}", title));
+        add_score(&mut matches, "代码评审", 8, format!("标题包含 {title}"));
     }
     if domain_text.contains("github.com") {
         add_score(&mut matches, "编码开发", 6, "包含 github.com");
@@ -720,7 +722,7 @@ fn score_intent(label: &str, corpus: &str, patterns: &[&str], score_per_hit: i32
     for pattern in patterns {
         if corpus.contains(pattern) {
             score += score_per_hit;
-            evidence.push(format!("命中关键词 {}", pattern));
+            evidence.push(format!("命中关键词 {pattern}"));
         }
     }
 
@@ -981,6 +983,18 @@ mod tests {
             semantic_confidence: None,
             screenshot_url: None,
         }
+    }
+
+    #[test]
+    fn 会话区间应以活动时间戳为终点回推() {
+        // timestamp 是区间终点:600 秒的活动应回推出 [ts-600, ts]
+        let activities = vec![activity(1_700_000_600, "Code", "编辑文件", 600, None, None)];
+
+        let sessions = build_work_sessions(&activities);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].start_timestamp, 1_700_000_000);
+        assert_eq!(sessions[0].end_timestamp, 1_700_000_600);
+        assert_eq!(sessions[0].duration, 600);
     }
 
     #[test]

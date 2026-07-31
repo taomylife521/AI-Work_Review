@@ -401,8 +401,9 @@
         on:click={toggleAvatarMode}
         class="switch-track {avatarToggleUi.trackClass} {avatarToggleUi.buttonClass}"
         disabled={avatarSaving}
+        role="switch"
         aria-label={avatarToggleUi.ariaLabel}
-        aria-pressed={config.avatar_enabled}
+        aria-checked={config.avatar_enabled}
       >
         <span class="switch-thumb {avatarToggleUi.thumbClass}"></span>
       </button>
@@ -547,9 +548,31 @@
         type="button"
         on:click={() => { config.avatar_click_through = !config.avatar_click_through; }}
         class="switch-track {config.avatar_click_through ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'}"
-        aria-pressed={config.avatar_click_through}
+        role="switch"
+        aria-label={t('settingsAppearance.avatarClickThrough')}
+        aria-checked={config.avatar_click_through}
       >
         <span class="switch-thumb {config.avatar_click_through ? 'translate-x-5' : 'translate-x-0'}"></span>
+      </button>
+    </div>
+
+    <hr class="border-slate-200 dark:border-[#30363d]" />
+
+    <div class="flex items-center justify-between gap-4">
+      <div>
+        <div class="settings-text">{t('settingsAppearance.avatarBodyHidden')}</div>
+        <div class="settings-muted mt-1 text-xs">{t('settingsAppearance.avatarBodyHiddenDescription')}</div>
+      </div>
+      <button
+        type="button"
+        on:click={() => { config.avatar_body_hidden = !config.avatar_body_hidden; }}
+        class="switch-track {config.avatar_body_hidden ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'} {!config.avatar_enabled ? 'cursor-not-allowed opacity-50' : ''}"
+        disabled={!config.avatar_enabled}
+        role="switch"
+        aria-label={t('settingsAppearance.avatarBodyHidden')}
+        aria-checked={config.avatar_body_hidden}
+      >
+        <span class="switch-thumb {config.avatar_body_hidden ? 'translate-x-5' : 'translate-x-0'}"></span>
       </button>
     </div>
 
@@ -568,7 +591,9 @@
         on:click={toggleBreakReminder}
         class="switch-track {config.break_reminder_enabled && config.avatar_enabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'} {!config.avatar_enabled ? 'cursor-not-allowed opacity-50' : ''}"
         disabled={!config.avatar_enabled}
-        aria-pressed={config.break_reminder_enabled}
+        role="switch"
+        aria-label={t('settingsAppearance.breakReminder')}
+        aria-checked={config.break_reminder_enabled}
       >
         <span class="switch-thumb {config.break_reminder_enabled && config.avatar_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
       </button>
@@ -613,7 +638,8 @@
         on:click={toggleAvatarProactiveAi}
         class="switch-track {config.avatar_proactive_ai_enabled && config.avatar_enabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'} {!config.avatar_enabled ? 'cursor-not-allowed opacity-50' : ''}"
         disabled={!config.avatar_enabled}
-        aria-pressed={config.avatar_proactive_ai_enabled}
+        role="switch"
+        aria-checked={config.avatar_proactive_ai_enabled}
         aria-label={t('settingsAppearance.avatarProactiveAi')}
       >
         <span class="switch-thumb {config.avatar_proactive_ai_enabled && config.avatar_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>

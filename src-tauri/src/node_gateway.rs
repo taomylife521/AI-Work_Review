@@ -157,7 +157,7 @@ fn platform_label() -> &'static str {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{ensure_node_identity_for_path, resolve_node_device_name, NodeIdentity};
+    use super::{ensure_node_identity_for_path, resolve_node_device_name};
 
     fn temp_identity_path(label: &str) -> PathBuf {
         let unique = format!("work-review-node-gateway-{label}-{}", uuid::Uuid::new_v4());

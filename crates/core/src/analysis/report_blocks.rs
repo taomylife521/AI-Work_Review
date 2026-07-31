@@ -771,6 +771,7 @@ mod tests {
             browser_duration: 0,
             url_usage: vec![],
             domain_usage: vec![],
+            domain_total_count: 0,
             browser_usage: vec![],
             work_time_duration: 3600,
             overtime_duration: 0,
@@ -810,6 +811,7 @@ mod tests {
             ],
             browser_duration: 1800,
             url_usage: vec![],
+            domain_total_count: 1,
             domain_usage: vec![DomainUsage {
                 domain: "github.com".to_string(),
                 duration: 1500,
@@ -885,6 +887,7 @@ mod tests {
             browser_duration: 0,
             url_usage: vec![],
             domain_usage: vec![],
+            domain_total_count: 0,
             browser_usage: vec![],
             work_time_duration: 0,
             overtime_duration: 0,

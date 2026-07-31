@@ -66,7 +66,8 @@ test('应用应提供 A/B/C 三套可持久化界面风格并作用到根壳层'
   assert.match(appCssSource, /\.app-shell\.ui-style-c\b/);
   assert.match(appCssSource, /\.app-shell\.ui-style-a\s+\.app-shell-ambient\s*\{[^}]*display:\s*none/);
   assert.match(appCssSource, /\.app-shell\.ui-style-a\s+\.page-card,\s*[\s\S]*?\.app-shell\.ui-style-a\s+\.page-card-soft\s*\{[\s\S]*?box-shadow:\s*none/);
-  assert.match(appCssSource, /\.dark\s+\.app-shell\.ui-style-a\s+\.page-card,\s*[\s\S]*?\.dark\s+\.app-shell\.ui-style-a\s+\.page-card-soft\s*\{[^}]*border-color:\s*rgba\(71,\s*85,\s*105,\s*0\.5\)/);
+  assert.match(appCssSource, /\.dark\s+\.app-shell\.ui-style-a\s*\{[^}]*--surface-border-subtle:\s*rgba\(48,\s*54,\s*61,\s*0\.58\)[^}]*--surface-border-default:\s*rgba\(48,\s*54,\s*61,\s*0\.82\)/);
+  assert.doesNotMatch(appCssSource, /\.dark\s+\.app-shell\.ui-style-a\s+\.page-card,\s*[\s\S]*?\.dark\s+\.app-shell\.ui-style-a\s+\.page-card-soft\s*\{[^}]*border-color:/);
   assert.match(appCssSource, /\.app-shell\.ui-style-a\s+\.overview-lead-card\s*\{[\s\S]*?display:\s*contents/);
   assert.match(appCssSource, /\.app-shell\.ui-style-c\s+\.app-shell-stage\s*\{[\s\S]*?grid-template-columns:\s*12rem minmax\(0,\s*1fr\)/);
   assert.match(appCssSource, /\.app-shell\.ui-style-c\s+\.overview-summary-grid\s*\{[\s\S]*?gap:\s*0\.5rem/);

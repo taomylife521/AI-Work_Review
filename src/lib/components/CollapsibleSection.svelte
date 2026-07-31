@@ -22,6 +22,7 @@
   <button
     type="button"
     class="flex w-full items-center justify-between gap-3 text-left"
+    aria-expanded={open}
     on:click={toggle}
   >
     <div class="min-w-0">

@@ -3,7 +3,6 @@
   import { createEventDispatcher } from 'svelte';
 
   export let config;
-  export let dataDir;
   export let saving = false;
   export let mcpDbPath = '';
   export let mcpConfigPath = '';
@@ -57,6 +56,9 @@
       on:click={toggle}
       disabled={saving}
       class="switch-track {config.mcp_server_enabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'} {saving ? 'opacity-60 cursor-not-allowed' : ''}"
+      role="switch"
+      aria-label={t('nodeGatewayPage.mcpServer')}
+      aria-checked={config.mcp_server_enabled}
     >
       <span class="switch-thumb {config.mcp_server_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
     </button>

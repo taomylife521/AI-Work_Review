@@ -9,6 +9,8 @@
   const dispatch = createEventDispatcher();
   $: currentLocale = $locale;
   let privacyLevels = [];
+  let keywordCount = 0;
+  let domainCount = 0;
   
   // 内联输入状态
   let showAppInput = false;
@@ -25,11 +27,11 @@
   let showDomainInput = false;
   let newDomain = '';
 
-  // 隐私级别定义 - 使用文字标签避免 emoji 渲染异常
+  // 三种策略只表达记录方式，不使用大面积语义色。
   const privacyLevelConfigs = [
-    { value: 'full', labelKey: 'settingsPrivacy.full', descKey: 'settingsPrivacy.fullDesc', textClass: 'settings-text-success', chipClass: 'settings-chip-success', activeClass: 'settings-segment-success' },
-    { value: 'anonymized', labelKey: 'settingsPrivacy.anonymized', descKey: 'settingsPrivacy.anonymizedDesc', textClass: 'settings-text-warn', chipClass: 'settings-chip-warn', activeClass: 'settings-segment-warn' },
-    { value: 'ignored', labelKey: 'settingsPrivacy.ignored', descKey: 'settingsPrivacy.ignoredDesc', textClass: 'settings-text-danger', chipClass: 'settings-chip-danger', activeClass: 'settings-segment-danger' },
+    { value: 'full', labelKey: 'settingsPrivacy.full', descKey: 'settingsPrivacy.fullDesc' },
+    { value: 'anonymized', labelKey: 'settingsPrivacy.anonymized', descKey: 'settingsPrivacy.anonymizedDesc' },
+    { value: 'ignored', labelKey: 'settingsPrivacy.ignored', descKey: 'settingsPrivacy.ignoredDesc' },
   ];
   $: {
     currentLocale;
@@ -38,6 +40,28 @@
       label: t(level.labelKey),
       desc: t(level.descKey),
     }));
+  }
+  $: keywordCount = config?.privacy?.excluded_keywords?.length || 0;
+  $: domainCount = config?.privacy?.excluded_domains?.length || 0;
+
+  function getPrivacyLevel(levelValue) {
+    return privacyLevels.find((level) => level.value === levelValue) || privacyLevels[0];
+  }
+
+  function toggleAppRuleEditor() {
+    const opening = !showAppInput;
+    showAppInput = opening;
+    appSearchQuery = '';
+    showAllRecentApps = false;
+    showAllRunningApps = false;
+    if (opening) dispatch('refresh-apps');
+  }
+
+  function cancelAppRuleEditor() {
+    showAppInput = false;
+    selectedApp = '';
+    batchSelectedApps = new Set();
+    appSearchQuery = '';
   }
 
   function addAppRule() {
@@ -123,31 +147,44 @@
   }
 </script>
 
-<div class="settings-card mb-5" data-locale={currentLocale}>
+<div class="settings-card settings-privacy" data-locale={currentLocale}>
   <h3 class="settings-card-title">{t('settingsPrivacy.title')}</h3>
-  <p class="settings-card-desc">{t('settingsPrivacy.description')}</p>
-  
-  <div class="settings-section">
-    <!-- 应用规则 -->
-    <div>
-      <div class="flex items-center justify-between mb-1">
-        <span class="settings-text">
-          {t('settingsPrivacy.appRules')}
-        </span>
+  <p class="settings-card-desc settings-privacy-intro">
+    {t('settingsPrivacy.storageAndTransferDescription')}
+  </p>
+
+  <div class="settings-section settings-privacy-sections">
+    <section
+      class="settings-block settings-privacy-app-rules"
+      aria-labelledby="settings-privacy-app-rules-title"
+    >
+      <div class="settings-privacy-section-header flex items-start justify-between gap-4">
+        <div class="min-w-0">
+          <h4 id="settings-privacy-app-rules-title" class="settings-text">
+            {t('settingsPrivacy.appRules')}
+          </h4>
+          <p class="settings-muted mt-1">{t('settingsPrivacy.appRulesHint')}</p>
+        </div>
         <button
-          on:click={() => { const opening = !showAppInput; showAppInput = opening; if (opening) dispatch('refresh-apps'); appSearchQuery = ''; showAllRecentApps = false; showAllRunningApps = false; } }
-          class="settings-link-action text-sm"
+          type="button"
+          on:click={toggleAppRuleEditor}
+          class="settings-link-action settings-privacy-add-rule shrink-0"
+          aria-expanded={showAppInput}
+          aria-controls="settings-privacy-rule-editor"
         >
           {showAppInput ? t('settingsPrivacy.collapse') : t('settingsPrivacy.addRule')}
         </button>
       </div>
-      <p class="settings-muted mb-3">{t('settingsPrivacy.appRulesHint')}</p>
 
       {#if showAppInput}
-        <div class="settings-panel mb-3 animate-fadeIn">
-          <!-- 应用名称输入 -->
-          <div class="settings-field mb-3">
-            <label for="app-name-input" class="settings-label">{t('settingsPrivacy.appInputLabel')}</label>
+        <div
+          id="settings-privacy-rule-editor"
+          class="settings-privacy-rule-editor animate-fadeIn space-y-4 pt-3"
+        >
+          <div class="settings-field">
+            <label for="app-name-input" class="settings-label">
+              {t('settingsPrivacy.appInputLabel')}
+            </label>
             <input
               id="app-name-input"
               type="text"
@@ -156,115 +193,121 @@
               placeholder={t('settingsPrivacy.appPlaceholder')}
             />
           </div>
-          <!-- 策略选择：分段按钮 -->
-          <div class="settings-field mb-3">
-            <span class="settings-label">{t('settingsPrivacy.strategy')}</span>
-            <div class="flex rounded-lg overflow-hidden border border-slate-200 dark:border-[#484f58]">
+
+          {#if recentApps.length > 0 || runningApps.length > 0}
+            <div class="settings-privacy-app-picker space-y-3">
+              <input
+                type="search"
+                bind:value={appSearchQuery}
+                class="control-input"
+                placeholder={t('settingsPrivacy.searchApps')}
+                aria-label={t('settingsPrivacy.searchApps')}
+              />
+
+              {#if runningApps.length > 0}
+                <div class="settings-privacy-app-source">
+                  <span class="settings-subtle block mb-1.5">
+                    {t('settingsPrivacy.runningApps')}
+                  </span>
+                  <div class="flex flex-wrap gap-1.5">
+                    {#each runningApps
+                      .filter(app => !appSearchQuery || app.toLowerCase().includes(appSearchQuery.toLowerCase()))
+                      .slice(0, showAllRunningApps ? undefined : 8) as app}
+                      <button
+                        type="button"
+                        on:click={() => toggleBatchApp(app)}
+                        class="settings-chip-button {batchSelectedApps.has(app) ? 'settings-chip-button-active' : ''}"
+                        aria-pressed={batchSelectedApps.has(app)}
+                      >
+                        {batchSelectedApps.has(app) ? '✓ ' : ''}{app}
+                      </button>
+                    {/each}
+                  </div>
+                  {#if runningApps.length > 8 && !appSearchQuery}
+                    <button
+                      type="button"
+                      on:click={() => showAllRunningApps = !showAllRunningApps}
+                      class="settings-link-action mt-1"
+                    >
+                      {showAllRunningApps
+                        ? t('settingsPrivacy.collapse')
+                        : `+${runningApps.length - 8} ${t('settingsPrivacy.moreApps')}`}
+                    </button>
+                  {/if}
+                </div>
+              {/if}
+
+              {#if recentApps.length > 0}
+                <div class="settings-privacy-app-source">
+                  <span class="settings-subtle block mb-1.5">
+                    {t('settingsPrivacy.historyApps')}
+                  </span>
+                  <div class="flex flex-wrap gap-1.5">
+                    {#each recentApps
+                      .filter(app => !appSearchQuery || app.toLowerCase().includes(appSearchQuery.toLowerCase()))
+                      .slice(0, showAllRecentApps ? undefined : 12) as app}
+                      <button
+                        type="button"
+                        on:click={() => toggleBatchApp(app)}
+                        class="settings-chip-button {batchSelectedApps.has(app) ? 'settings-chip-button-active' : ''}"
+                        aria-pressed={batchSelectedApps.has(app)}
+                      >
+                        {batchSelectedApps.has(app) ? '✓ ' : ''}{app}
+                      </button>
+                    {/each}
+                  </div>
+                  {#if recentApps.length > 12 && !appSearchQuery}
+                    <button
+                      type="button"
+                      on:click={() => showAllRecentApps = !showAllRecentApps}
+                      class="settings-link-action mt-1"
+                    >
+                      {showAllRecentApps
+                        ? t('settingsPrivacy.collapse')
+                        : `+${recentApps.length - 12} ${t('settingsPrivacy.moreApps')}`}
+                    </button>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+          {/if}
+
+          <div class="settings-field">
+            <span id="settings-privacy-strategy-label" class="settings-label">
+              {t('settingsPrivacy.strategy')}
+            </span>
+            <div
+              class="settings-privacy-strategy-segments flex overflow-hidden rounded-lg border border-slate-200 dark:border-[#484f58]"
+              role="radiogroup"
+              aria-labelledby="settings-privacy-strategy-label"
+            >
               {#each privacyLevels as level}
                 <button
+                  type="button"
                   on:click={() => selectedLevel = level.value}
-                  class="segment-btn
-                         {selectedLevel === level.value
-                           ? level.activeClass
-                           : 'settings-segment-idle'}"
+                  class="settings-segment-base {selectedLevel === level.value ? 'settings-segment-active' : ''}"
+                  role="radio"
+                  aria-checked={selectedLevel === level.value}
                 >
                   {level.label}
                 </button>
               {/each}
             </div>
-            <p class="text-xs mt-1.5 {privacyLevels.find(l => l.value === selectedLevel)?.textClass || 'settings-subtle'}">
-              {privacyLevels.find(l => l.value === selectedLevel)?.desc || ''}
+            <p class="settings-muted">
+              {getPrivacyLevel(selectedLevel)?.desc || ''}
             </p>
           </div>
-          
-          <!-- 快捷选择 -->
-          {#if recentApps.length > 0 || runningApps.length > 0}
-          <div class="settings-block">
-            <!-- 搜索过滤 -->
-            {#if recentApps.length + runningApps.length > 10}
-            <div class="mb-2">
-              <input
-                type="text"
-                bind:value={appSearchQuery}
-                class="control-input text-xs"
-                placeholder={t('settingsPrivacy.searchApps')}
-              />
-            </div>
-            {/if}
 
-            {#if runningApps.length > 0}
-            <div class="mb-2">
-              <span class="settings-subtle block mb-1.5">{t('settingsPrivacy.runningApps')}</span>
-              <div class="flex flex-wrap gap-1.5">
-                {#each runningApps
-                  .filter(app => !appSearchQuery || app.toLowerCase().includes(appSearchQuery.toLowerCase()))
-                  .slice(0, showAllRunningApps ? undefined : 8) as app}
-                  <button
-                    on:click={() => toggleBatchApp(app)}
-                    class="settings-chip-button
-                           {batchSelectedApps.has(app)
-                             ? 'settings-chip-button-active'
-                             : ''}"
-                  >
-                    {batchSelectedApps.has(app) ? '✓ ' : ''}{app}
-                  </button>
-                {/each}
-              </div>
-              {#if runningApps.length > 8 && !appSearchQuery}
-                <button
-                  on:click={() => showAllRunningApps = !showAllRunningApps}
-                  class="text-xs text-primary-600 hover:text-primary-600 mt-1"
-                >
-                  {showAllRunningApps
-                    ? t('settingsPrivacy.collapse')
-                    : `+${runningApps.length - 8} ${t('settingsPrivacy.moreApps')}`}
-                </button>
-              {/if}
-            </div>
-            {/if}
-
-            {#if recentApps.length > 0}
-            <div>
-              <span class="settings-subtle block mb-1.5">{t('settingsPrivacy.historyApps')}</span>
-              <div class="flex flex-wrap gap-1.5">
-                {#each recentApps
-                  .filter(app => !appSearchQuery || app.toLowerCase().includes(appSearchQuery.toLowerCase()))
-                  .slice(0, showAllRecentApps ? undefined : 12) as app}
-                  <button
-                    on:click={() => toggleBatchApp(app)}
-                    class="settings-chip-button
-                           {batchSelectedApps.has(app)
-                             ? 'settings-chip-button-active'
-                             : ''}"
-                  >
-                    {batchSelectedApps.has(app) ? '✓ ' : ''}{app}
-                  </button>
-                {/each}
-              </div>
-              {#if recentApps.length > 12 && !appSearchQuery}
-                <button
-                  on:click={() => showAllRecentApps = !showAllRecentApps}
-                  class="text-xs text-primary-600 hover:text-primary-600 mt-1"
-                >
-                  {showAllRecentApps
-                    ? t('settingsPrivacy.collapse')
-                    : `+${recentApps.length - 12} ${t('settingsPrivacy.moreApps')}`}
-                </button>
-              {/if}
-            </div>
-            {/if}
-          </div>
-          {/if}
-
-          <!-- 操作按钮 -->
-          <div class="settings-actions mt-4">
+          <div class="settings-actions settings-privacy-rule-editor-actions">
             <button
-              on:click={() => { showAppInput = false; selectedApp = ''; }}
+              type="button"
+              on:click={cancelAppRuleEditor}
               class="settings-action-secondary"
             >
               {t('common.cancel')}
             </button>
             <button
+              type="button"
               on:click={addAppRule}
               class="settings-action-primary"
               disabled={!selectedApp && batchSelectedApps.size === 0}
@@ -277,160 +320,170 @@
         </div>
       {/if}
 
-      <!-- 已有规则列表：按隐私级别分组，chip 紧凑布局 -->
       {#if config.privacy.app_rules.length > 0}
-        <div class="space-y-3">
-          {#each privacyLevels as level}
-            {@const groupRules = config.privacy.app_rules
-              .map((r, i) => ({ ...r, _idx: i }))
-              .filter(r => r.level === level.value)}
-            {#if groupRules.length > 0}
-              <div>
-                <span class="text-xs font-medium {level.textClass} mb-1 block">{level.label}</span>
-                <div class="flex flex-wrap gap-1.5">
-                  {#each groupRules as rule}
-                    <div class="settings-chip-neutral group">
-                      <span>{rule.app_name}</span>
-                      <button
-                        on:click={() => removeAppRule(rule._idx)}
-                        class="ml-1.5 text-slate-400 dark:text-[#7d8590] hover:text-red-500 dark:hover:text-red-400 opacity-50 group-hover:opacity-100 transition-opacity"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  {/each}
-                </div>
-              </div>
-            {/if}
+        <ul class="settings-privacy-rule-list mt-3 divide-y divide-slate-200/70 dark:divide-[#30363d]/70">
+          {#each config.privacy.app_rules as rule, i}
+            <li class="settings-privacy-rule-row flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5">
+              <span class="settings-privacy-rule-app settings-text min-w-0 flex-1">{rule.app_name}</span>
+              <span class="settings-privacy-rule-policy settings-muted inline-flex items-center gap-1.5">
+                <span class="settings-privacy-status-dot" aria-hidden="true"></span>
+                {getPrivacyLevel(rule.level)?.label || rule.level}
+              </span>
+              <button
+                type="button"
+                on:click={() => removeAppRule(i)}
+                class="settings-link-danger settings-privacy-rule-delete shrink-0"
+                aria-label={`${t('settingsPrivacy.delete')} ${rule.app_name}`}
+              >
+                {t('settingsPrivacy.delete')}
+              </button>
+            </li>
           {/each}
-        </div>
+        </ul>
       {:else}
         <p class="settings-empty">{t('settingsPrivacy.noRules')}</p>
       {/if}
-    </div>
+    </section>
 
-    <hr class="border-slate-200 dark:border-[#30363d]" />
-
-    <!-- 内容过滤（合并敏感词 + 域名黑名单），默认折叠 -->
-    <div>
+    <section
+      class="settings-block settings-privacy-content-filter"
+      aria-labelledby="settings-privacy-content-filter-title"
+    >
       <button
         type="button"
         on:click={() => showContentFilter = !showContentFilter}
-        class="flex items-center justify-between w-full text-left"
+        class="settings-privacy-content-filter-toggle flex w-full items-start justify-between gap-4 text-start"
+        aria-expanded={showContentFilter}
+        aria-controls="settings-privacy-content-filter-panel"
       >
-        <span class="settings-text block">{t('settingsPrivacy.contentFilter')}</span>
+        <span class="min-w-0">
+          <span id="settings-privacy-content-filter-title" class="settings-text block">
+            {t('settingsPrivacy.contentFilter')}
+          </span>
+          <span class="settings-muted mt-1 block">
+            {t('settingsPrivacy.contentFilterSummary', { keywordCount, domainCount })}
+          </span>
+        </span>
         <svg
-          class="w-4 h-4 text-slate-400 transition-transform {showContentFilter ? 'rotate-180' : ''}"
+          class="mt-0.5 h-4 w-4 shrink-0 text-slate-400 transition-transform {showContentFilter ? 'rotate-180' : ''}"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
+          aria-hidden="true"
         >
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
         </svg>
       </button>
-      <p class="settings-muted mt-1 mb-4">{t('settingsPrivacy.contentFilterDesc')}</p>
+      <p class="settings-muted">{t('settingsPrivacy.contentFilterDesc')}</p>
 
       {#if showContentFilter}
-      <!-- 敏感词 -->
-      <div class="mb-4">
-        <div class="flex items-center justify-between mb-2">
-          <span class="settings-label">{t('settingsPrivacy.keywords')}</span>
-          <button
-            on:click={() => showKeywordInput = !showKeywordInput}
-            class="settings-link-action"
-          >
-            {showKeywordInput ? t('settingsPrivacy.collapse') : t('settingsPrivacy.add')}
-          </button>
-        </div>
-        
-        {#if showKeywordInput}
-          <div class="flex gap-2 mb-2 animate-fadeIn">
-            <input
-              type="text"
-              bind:value={newKeyword}
-              class="control-input flex-1"
-              placeholder={t('settingsPrivacy.keywordPlaceholder')}
-              on:keydown={(e) => e.key === 'Enter' && addKeyword()}
-            />
-            <button
-              on:click={addKeyword}
-              class="settings-action-primary"
-            >
-              {t('common.add')}
-            </button>
-          </div>
-        {/if}
-
-        <div class="flex flex-wrap gap-1.5">
-          {#each config.privacy.excluded_keywords as keyword, i}
-            <div class="settings-chip-neutral group">
-              <span>{keyword}</span>
+        <div
+          id="settings-privacy-content-filter-panel"
+          class="settings-privacy-content-filter-panel space-y-5 pt-3"
+          role="region"
+          aria-labelledby="settings-privacy-content-filter-title"
+        >
+          <div class="settings-privacy-filter-group space-y-2">
+            <div class="flex items-center justify-between gap-3">
+              <span class="settings-label">{t('settingsPrivacy.keywords')}</span>
               <button
-                on:click={() => removeKeyword(i)}
-                class="ml-1.5 text-slate-400 hover:text-red-500 opacity-50 group-hover:opacity-100 transition-opacity"
+                type="button"
+                on:click={() => showKeywordInput = !showKeywordInput}
+                class="settings-link-action"
+                aria-expanded={showKeywordInput}
               >
-                ×
+                {showKeywordInput ? t('settingsPrivacy.collapse') : t('settingsPrivacy.add')}
               </button>
             </div>
-          {/each}
-          {#if config.privacy.excluded_keywords.length === 0}
-            <span class="settings-subtle">{t('settingsPrivacy.noKeywords')}</span>
-          {/if}
-        </div>
-        <!-- 敏感词匹配说明 -->
-        <p class="settings-note">{t('settingsPrivacy.keywordHint')}</p>
-      </div>
 
-      <!-- 域名黑名单 -->
-      <div>
-        <div class="flex items-center justify-between mb-2">
-          <span class="settings-label">{t('settingsPrivacy.domainBlacklist')}</span>
-          <button
-            on:click={() => showDomainInput = !showDomainInput}
-            class="settings-link-action"
-          >
-            {showDomainInput ? t('settingsPrivacy.collapse') : t('settingsPrivacy.add')}
-          </button>
-        </div>
-        
-        {#if showDomainInput}
-          <div class="flex gap-2 mb-2 animate-fadeIn">
-            <input
-              type="text"
-              bind:value={newDomain}
-              class="control-input flex-1"
-              placeholder={t('settingsPrivacy.domainPlaceholder')}
-              on:keydown={(e) => e.key === 'Enter' && addDomain()}
-            />
-            <button
-              on:click={addDomain}
-              class="settings-action-primary"
-            >
-              {t('common.add')}
-            </button>
+            {#if showKeywordInput}
+              <div class="settings-privacy-inline-input flex gap-2 animate-fadeIn">
+                <input
+                  type="text"
+                  bind:value={newKeyword}
+                  class="control-input flex-1"
+                  placeholder={t('settingsPrivacy.keywordPlaceholder')}
+                  aria-label={t('settingsPrivacy.keywordPlaceholder')}
+                  on:keydown={(e) => e.key === 'Enter' && addKeyword()}
+                />
+                <button type="button" on:click={addKeyword} class="settings-action-primary">
+                  {t('common.add')}
+                </button>
+              </div>
+            {/if}
+
+            <div class="settings-privacy-filter-values flex flex-wrap gap-1.5">
+              {#each config.privacy.excluded_keywords as keyword, i}
+                <div class="settings-chip-neutral settings-privacy-filter-value">
+                  <span>{keyword}</span>
+                  <button
+                    type="button"
+                    on:click={() => removeKeyword(i)}
+                    class="settings-link-danger settings-privacy-filter-delete ml-1.5"
+                    aria-label={`${t('settingsPrivacy.delete')} ${keyword}`}
+                  >
+                    ×
+                  </button>
+                </div>
+              {/each}
+              {#if config.privacy.excluded_keywords.length === 0}
+                <span class="settings-subtle">{t('settingsPrivacy.noKeywords')}</span>
+              {/if}
+            </div>
+            <p class="settings-note">{t('settingsPrivacy.keywordHint')}</p>
           </div>
-        {/if}
 
-        <div class="flex flex-wrap gap-1.5">
-          {#each (config.privacy.excluded_domains || []) as domain, i}
-            <div class="settings-chip-danger group">
-              <span>{domain}</span>
+          <div class="settings-privacy-filter-group space-y-2">
+            <div class="flex items-center justify-between gap-3">
+              <span class="settings-label">{t('settingsPrivacy.domainBlacklist')}</span>
               <button
-                on:click={() => removeDomain(i)}
-                class="ml-1.5 text-red-400 hover:text-red-600 opacity-50 group-hover:opacity-100 transition-opacity"
+                type="button"
+                on:click={() => showDomainInput = !showDomainInput}
+                class="settings-link-action"
+                aria-expanded={showDomainInput}
               >
-                ×
+                {showDomainInput ? t('settingsPrivacy.collapse') : t('settingsPrivacy.add')}
               </button>
             </div>
-          {/each}
-          {#if (config.privacy.excluded_domains || []).length === 0}
-            <span class="settings-subtle">{t('settingsPrivacy.noDomains')}</span>
-          {/if}
+
+            {#if showDomainInput}
+              <div class="settings-privacy-inline-input flex gap-2 animate-fadeIn">
+                <input
+                  type="text"
+                  bind:value={newDomain}
+                  class="control-input flex-1"
+                  placeholder={t('settingsPrivacy.domainPlaceholder')}
+                  aria-label={t('settingsPrivacy.domainPlaceholder')}
+                  on:keydown={(e) => e.key === 'Enter' && addDomain()}
+                />
+                <button type="button" on:click={addDomain} class="settings-action-primary">
+                  {t('common.add')}
+                </button>
+              </div>
+            {/if}
+
+            <div class="settings-privacy-filter-values flex flex-wrap gap-1.5">
+              {#each (config.privacy.excluded_domains || []) as domain, i}
+                <div class="settings-chip-neutral settings-privacy-filter-value">
+                  <span>{domain}</span>
+                  <button
+                    type="button"
+                    on:click={() => removeDomain(i)}
+                    class="settings-link-danger settings-privacy-filter-delete ml-1.5"
+                    aria-label={`${t('settingsPrivacy.delete')} ${domain}`}
+                  >
+                    ×
+                  </button>
+                </div>
+              {/each}
+              {#if (config.privacy.excluded_domains || []).length === 0}
+                <span class="settings-subtle">{t('settingsPrivacy.noDomains')}</span>
+              {/if}
+            </div>
+            <p class="settings-note">{t('settingsPrivacy.domainHint')}</p>
+          </div>
         </div>
-        <!-- 域名黑名单格式说明 -->
-        <p class="settings-note">{t('settingsPrivacy.domainHint')}</p>
-      </div>
       {/if}
-    </div>
+    </section>
   </div>
 </div>

@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::sync::{Arc, Mutex};
 use work_review_core::config::AppConfig;
-use work_review_core::database::{Activity, DailyStats, Database, MemorySearchItem};
+use work_review_core::database::{
+    apply_flex_overtime_correction, Activity, DailyStats, Database, MemorySearchItem,
+};
 use work_review_core::policy::{CallSource, Permission, PolicyDecision, PolicyEnforcer};
 use work_review_core::privacy::{
     collect_privacy_filters, matches_excluded_domain, matches_ignored_app,
@@ -45,7 +47,7 @@ fn main() {
     let db = match Database::new(std::path::Path::new(&db_path)) {
         Ok(db) => db,
         Err(e) => {
-            log::error!("无法打开数据库 {}: {}", db_path, e);
+            log::error!("无法打开数据库 {db_path}: {e}");
             std::process::exit(1);
         }
     };
@@ -83,18 +85,16 @@ fn main() {
         let perms: Vec<Permission> = pkg
             .required_permissions
             .iter()
-            .filter_map(|p| {
-                Some(match p {
-                    SkillPermission::ReadActivities => Permission::ReadActivities,
-                    SkillPermission::ReadReports => Permission::ReadReports,
-                    SkillPermission::ReadStats => Permission::ReadStats,
-                    SkillPermission::ReadSessions => Permission::ReadSessions,
-                    SkillPermission::ReadConfig => Permission::ReadConfig,
-                    SkillPermission::WriteReport => Permission::WriteReport,
-                    SkillPermission::WriteConfig => Permission::WriteConfig,
-                    SkillPermission::ExecuteAi => Permission::ExecuteAi,
-                    SkillPermission::ReadDeviceStatus => Permission::ReadDeviceStatus,
-                })
+            .map(|p| match p {
+                SkillPermission::ReadActivities => Permission::ReadActivities,
+                SkillPermission::ReadReports => Permission::ReadReports,
+                SkillPermission::ReadStats => Permission::ReadStats,
+                SkillPermission::ReadSessions => Permission::ReadSessions,
+                SkillPermission::ReadConfig => Permission::ReadConfig,
+                SkillPermission::WriteReport => Permission::WriteReport,
+                SkillPermission::WriteConfig => Permission::WriteConfig,
+                SkillPermission::ExecuteAi => Permission::ExecuteAi,
+                SkillPermission::ReadDeviceStatus => Permission::ReadDeviceStatus,
             })
             .collect();
         policy.register_skill_permissions(&pkg.id, perms);
@@ -156,7 +156,7 @@ fn main() {
         };
         match serde_json::to_string(&response) {
             Ok(output) => {
-                if writeln!(stdout, "{}", output).is_err() || stdout.flush().is_err() {
+                if writeln!(stdout, "{output}").is_err() || stdout.flush().is_err() {
                     log::error!("写 stdout 失败，退出");
                     break;
                 }
@@ -281,10 +281,17 @@ fn localhost_api_base(config: &AppConfig) -> Option<String> {
     Some(format!("http://{host}:{port}"))
 }
 
+/// 低成本委托（live context 等）的快速失败超时。
+const LOCALHOST_QUICK_TIMEOUT_SECS: u64 = 2;
+/// AI 日报生成走完整模型调用链（30~120 秒常见）——此前统一 2 秒超时,
+/// 未缓存的 AI 日报永远委托失败、静默回退本地模板,而主应用侧生成仍在跑完(结果被丢弃)。
+const LOCALHOST_GENERATE_TIMEOUT_SECS: u64 = 120;
+
 fn build_localhost_get_request(
     config: &AppConfig,
     token_path: &std::path::Path,
     path: &str,
+    timeout_secs: u64,
 ) -> Option<ureq::Request> {
     let base = localhost_api_base(config)?;
     let token = read_localhost_api_token(token_path)?;
@@ -292,17 +299,27 @@ fn build_localhost_get_request(
     Some(
         ureq::get(&url)
             .set("Authorization", &format!("Bearer {token}"))
-            .timeout(std::time::Duration::from_secs(2)),
+            .timeout(std::time::Duration::from_secs(timeout_secs)),
     )
 }
 
-/// 尝试 GET 主应用的 localhost API，2 秒超时。失败返回 None（不阻塞 MCP 主流程）。
+/// 尝试 GET 主应用的 localhost API（快速超时）。失败返回 None（不阻塞 MCP 主流程）。
 fn try_localhost_get(
     config: &AppConfig,
     token_path: &std::path::Path,
     path: &str,
 ) -> Option<Value> {
-    let request = build_localhost_get_request(config, token_path, path)?;
+    try_localhost_get_with_timeout(config, token_path, path, LOCALHOST_QUICK_TIMEOUT_SECS)
+}
+
+/// 尝试 GET 主应用的 localhost API，可指定超时。失败返回 None（不阻塞 MCP 主流程）。
+fn try_localhost_get_with_timeout(
+    config: &AppConfig,
+    token_path: &std::path::Path,
+    path: &str,
+    timeout_secs: u64,
+) -> Option<Value> {
+    let request = build_localhost_get_request(config, token_path, path, timeout_secs)?;
     let url = request.url().to_string();
     match request.call() {
         Ok(response) => response.into_json::<Value>().ok(),
@@ -465,7 +482,7 @@ where
             sanitize_result(&mut result);
             result
         }
-        PolicyDecision::Deny => tool_error(&format!("权限被拒绝: 无 {:?} 权限", permission)),
+        PolicyDecision::Deny => tool_error(&format!("权限被拒绝: 无 {permission:?} 权限")),
     }
 }
 
@@ -547,12 +564,18 @@ fn load_daily_stats_for_mcp(
 ) -> work_review_core::error::Result<DailyStats> {
     let segments = state.config.effective_work_segments();
     let (ignored_apps, excluded_domains) = collect_privacy_filters(&state.config);
-    state.db.get_daily_stats_with_segments_filtered(
+    let mut stats = state.db.get_daily_stats_with_segments_filtered(
         date,
         &segments,
         &ignored_apps,
         &excluded_domains,
-    )
+    )?;
+    apply_flex_overtime_correction(
+        &mut stats,
+        state.config.work_time_enabled,
+        state.config.standard_work_hours,
+    );
+    Ok(stats)
 }
 
 fn filter_activities_by_privacy(activities: Vec<Activity>, config: &AppConfig) -> Vec<Activity> {
@@ -708,8 +731,12 @@ fn handle_tool_call(name: &str, args: &Value, state: &Arc<Mutex<AppState>>) -> V
                     encode_query_param(date),
                     encode_query_param(locale_code)
                 );
-                if let Some(resp) = try_localhost_get(&s.config, &s.localhost_api_token_path, &path)
-                {
+                if let Some(resp) = try_localhost_get_with_timeout(
+                    &s.config,
+                    &s.localhost_api_token_path,
+                    &path,
+                    LOCALHOST_GENERATE_TIMEOUT_SECS,
+                ) {
                     if let Some(content) = resp.get("content").and_then(|c| c.as_str()) {
                         return json!({
                             "content": [{ "type": "text", "text": content }]
@@ -741,7 +768,7 @@ fn handle_tool_call(name: &str, args: &Value, state: &Arc<Mutex<AppState>>) -> V
                 Ok(Some(report)) => json!({
                     "content": [{ "type": "text", "text": report.content }]
                 }),
-                Ok(None) => tool_error(&format!("未找到 {} 的报告", date)),
+                Ok(None) => tool_error(&format!("未找到 {date} 的报告")),
                 Err(e) => tool_error(&format!("获取报告失败: {e}")),
             }
         }),
@@ -762,7 +789,7 @@ fn handle_tool_call(name: &str, args: &Value, state: &Arc<Mutex<AppState>>) -> V
                         "is_live": is_live,
                         "hint": format!("用户当前正在使用 {}{}", primary_app,
                             if window_title.is_empty() { String::new() }
-                            else { format!("（{}）", window_title) }),
+                            else { format!("（{window_title}）") }),
                     });
                     return json!({
                         "content": [{
@@ -900,7 +927,7 @@ fn handle_tool_call(name: &str, args: &Value, state: &Arc<Mutex<AppState>>) -> V
             let stats = if let Some(id) = skill_id {
                 match s.skills.get_skill_state(id) {
                     Some(state) => vec![(id, &state.stats)],
-                    None => return tool_error(&format!("技能未找到: {}", id)),
+                    None => return tool_error(&format!("技能未找到: {id}")),
                 }
             } else {
                 s.skills.get_all_stats()
@@ -953,7 +980,7 @@ fn handle_resource_read(uri: &str, state: &Arc<Mutex<AppState>>) -> Value {
     };
     let need_sanitize = match s.policy.check_permission(&source, permission) {
         PolicyDecision::Deny => {
-            return resource_result(uri, &format!("权限被拒绝: 无 {:?} 权限", permission))
+            return resource_result(uri, &format!("权限被拒绝: 无 {permission:?} 权限"))
         }
         PolicyDecision::Allow => false,
         PolicyDecision::AllowSanitized => true,
@@ -1024,15 +1051,15 @@ fn handle_prompt_get(name: &str, args: &Value) -> Value {
     let (desc, text) = match name {
         "daily_review" => {
             let date = args["date"].as_str().unwrap_or(&today);
-            ("每日工作回顾", format!("请帮我回顾 {} 的工作情况。先使用 get_daily_stats 获取统计数据，然后使用 query_timeline 获取时间线，最后给出今日工作总结和改进建议。", date))
+            ("每日工作回顾", format!("请帮我回顾 {date} 的工作情况。先使用 get_daily_stats 获取统计数据，然后使用 query_timeline 获取时间线，最后给出今日工作总结和改进建议。"))
         }
         "weekly_summary" => {
             let week_start = args["week_start"].as_str().unwrap_or(&today);
-            ("每周工作总结", format!("请帮我总结从 {} 开始的这一周的工作。逐日获取统计数据，分析工作模式、效率变化，并给出下周建议。", week_start))
+            ("每周工作总结", format!("请帮我总结从 {week_start} 开始的这一周的工作。逐日获取统计数据，分析工作模式、效率变化，并给出下周建议。"))
         }
         "project_time_audit" => {
             let project = args["project"].as_str().unwrap_or("");
-            ("项目时间审计", format!("请帮我审计项目「{}」的时间投入。使用 search_activities 搜索相关活动，分析时间分布和效率，给出时间管理建议。", project))
+            ("项目时间审计", format!("请帮我审计项目「{project}」的时间投入。使用 search_activities 搜索相关活动，分析时间分布和效率，给出时间管理建议。"))
         }
         _ => ("未知提示词", String::new()),
     };
@@ -1048,6 +1075,8 @@ fn tool_error(message: &str) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::field_reassign_with_default)]
+
     use super::*;
     use work_review_core::privacy::{apply_excluded_domains_to_stats, apply_ignored_apps_to_stats};
 
@@ -1129,8 +1158,13 @@ mod tests {
         config.localhost_api_host = Some("127.0.0.1".to_string());
         config.localhost_api_port = 47_831;
 
-        let request = build_localhost_get_request(&config, &token_path, "/v1/context")
-            .expect("有效配置和 Token 应构造请求");
+        let request = build_localhost_get_request(
+            &config,
+            &token_path,
+            "/v1/context",
+            LOCALHOST_QUICK_TIMEOUT_SECS,
+        )
+        .expect("有效配置和 Token 应构造请求");
         assert_eq!(request.method(), "GET");
         assert_eq!(
             request.header("Authorization"),
@@ -1150,16 +1184,26 @@ mod tests {
         config.localhost_api_enabled = true;
 
         std::fs::write(&token_path, TEST_LOCALHOST_API_TOKEN).expect("应写入初始 Token");
-        let first = build_localhost_get_request(&config, &token_path, "/v1/context")
-            .expect("初始 Token 应构造请求");
+        let first = build_localhost_get_request(
+            &config,
+            &token_path,
+            "/v1/context",
+            LOCALHOST_QUICK_TIMEOUT_SECS,
+        )
+        .expect("初始 Token 应构造请求");
         assert_eq!(
             first.header("Authorization"),
             Some("Bearer wr-local-0123456789abcdef0123456789abcdef")
         );
 
         std::fs::write(&token_path, ROTATED_LOCALHOST_API_TOKEN).expect("应轮换 Token");
-        let second = build_localhost_get_request(&config, &token_path, "/v1/context")
-            .expect("轮换后的 Token 应构造请求");
+        let second = build_localhost_get_request(
+            &config,
+            &token_path,
+            "/v1/context",
+            LOCALHOST_QUICK_TIMEOUT_SECS,
+        )
+        .expect("轮换后的 Token 应构造请求");
         assert_eq!(
             second.header("Authorization"),
             Some("Bearer wr-local-fedcba9876543210fedcba9876543210")
@@ -1175,10 +1219,22 @@ mod tests {
         let mut config = AppConfig::default();
         config.localhost_api_enabled = true;
 
-        assert!(build_localhost_get_request(&config, &token_path, "/v1/context").is_none());
+        assert!(build_localhost_get_request(
+            &config,
+            &token_path,
+            "/v1/context",
+            LOCALHOST_QUICK_TIMEOUT_SECS
+        )
+        .is_none());
 
         std::fs::write(&token_path, " \n ").expect("应写入空 Token");
-        assert!(build_localhost_get_request(&config, &token_path, "/v1/context").is_none());
+        assert!(build_localhost_get_request(
+            &config,
+            &token_path,
+            "/v1/context",
+            LOCALHOST_QUICK_TIMEOUT_SECS
+        )
+        .is_none());
         std::fs::remove_dir_all(dir).expect("应清理临时目录");
     }
 

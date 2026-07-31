@@ -382,7 +382,7 @@ mod tests {
         let timestamp = "1234567890";
         let nonce = "nonce123";
         let encrypt = "encrypted_content";
-        let mut parts = vec![token, timestamp, nonce, encrypt];
+        let mut parts = [token, timestamp, nonce, encrypt];
         parts.sort();
         let joined = parts.join("");
         use sha1::{Digest, Sha1};

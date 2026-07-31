@@ -7,9 +7,8 @@
   import DOMPurify from 'dompurify';
   import { showToast } from '../../lib/stores/toast.js';
   import { confirm } from '../../lib/stores/confirm.js';
-  import CollapsibleSection from '../../lib/components/CollapsibleSection.svelte';
   import { cache } from '../../lib/stores/cache.js';
-  import { formatLocalizedDate, formatLocalizedTime, formatDurationLocalized, locale, t, tm } from '$lib/i18n/index.js';
+  import { formatLocalizedDate, formatLocalizedTime, formatDurationLocalized, locale, t, tm, translateCategoryLabel } from '$lib/i18n/index.js';
   import { formatUserError } from '$lib/utils/errorDisplay.js';
   import { shouldShowPromptAppliedToast } from './reportPromptFeedback.js';
   import { resolveReportMeta } from './reportMeta.js';
@@ -33,12 +32,20 @@
     return `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
   }
 
+  // ISO 日期偏移工具（KPI 上周同日基线共用）
+  function shiftIsoDate(dateValue, offsetDays) {
+    const next = new Date(`${dateValue}T12:00:00`);
+    next.setDate(next.getDate() + offsetDays);
+    return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`;
+  }
+
   let report = null;
   let loading = false;
   let generating = false;
   let error = null;
   let selectedDate = getLocalDateString();
   let freshStats = null;
+  let lastWeekStats = null; // 上周同日基线（KPI 参照系;加载失败保持 null,不显示 delta）
   let isYesterdayReport = false; // 标记是否显示的是昨日日报
   let showPresetModal = false;
   let presetSaving = false;
@@ -52,6 +59,10 @@
   let exportInProgress = false;
   let promptSaving = false;
   let cacheData = null;
+  // ── 2026-07 日报改版：页头动作收敛为「导出 ▾」菜单 + 生成设置抽屉 ──
+  let showExportMenu = false;
+  let showGenerateDrawer = false;
+  let categoryList = []; // 分类色板（数据对照面板构成条着色,与概览同源）
   const unsubscribeCache = cache.subscribe(v => {
     cacheData = v;
     // 首次或缓存有值时，立即从缓存恢复配置（避免页面切换闪烁）
@@ -91,27 +102,31 @@
   async function loadReport(previousReport = null) {
     const requestId = ++reportRequestId;
     freshStats = null;
+    lastWeekStats = null;
 
-    // 并行加载实时统计
+    // 并行加载实时统计 + 上周同日基线（KPI 参照系）
     invoke('get_daily_stats', { date: selectedDate })
       .then(stats => { if (requestId === reportRequestId) freshStats = stats; })
+      .catch(() => {});
+    invoke('get_daily_stats', { date: shiftIsoDate(selectedDate, -7) })
+      .then(stats => { if (requestId === reportRequestId) lastWeekStats = stats; })
       .catch(() => {});
 
     // 乐观更新：先显示缓存数据
     let cacheData;
     const unsubscribe = cache.subscribe(c => { cacheData = c; });
     unsubscribe();
-    
+
     if (cacheData.reports[currentReportCacheKey]?.data) {
       report = cacheData.reports[currentReportCacheKey].data;
       isYesterdayReport = false;
       loading = false;
-      
+
       // 缓存有效则直接返回
       if (cache.isValid(cacheData.reports[currentReportCacheKey], 'reports')) {
         return;
       }
-      
+
       // 后台静默刷新
       try {
         const savedReport = await invoke('get_saved_report', { date: selectedDate, locale: currentLocale });
@@ -190,6 +205,10 @@
       report = savedReport || { date: selectedDate, content: '', created_at: Date.now() / 1000 };
       isYesterdayReport = false;
       cache.setReport(currentReportCacheKey, report);
+      // 历史周条即时点亮当天（无需重新探测整周）
+      if (savedReport && selectedDate in weekReportStatus) {
+        weekReportStatus = { ...weekReportStatus, [selectedDate]: true };
+      }
 
       if (
         shouldShowPromptAppliedToast({
@@ -265,6 +284,24 @@
     }
   }
 
+  /** 导出菜单项：导出当日 Markdown（先关菜单再走既有导出管线）。 */
+  function handleExportCurrent() {
+    showExportMenu = false;
+    exportReportMarkdown();
+  }
+
+  /** 导出菜单项（新增）：复制全文——喂周报 / IM 的最短路径,不落盘。 */
+  async function copyReportContent() {
+    if (!report?.content) return;
+    showExportMenu = false;
+    try {
+      await navigator.clipboard.writeText(report.content);
+      showToast(t('report.copySuccess'), 'success');
+    } catch (e) {
+      showToast(t('report.copyFailed'), 'error');
+    }
+  }
+
   // ===== 批量日报合并导出 =====
   let showBatchExportModal = false;
   let batchExporting = false;
@@ -311,10 +348,17 @@
   }
 
   function openBatchExportModal() {
+    showExportMenu = false;
     // 默认填本月范围，省一步点击
     if (!batchStartDate || !batchEndDate) {
       applyBatchPreset('thisMonth');
     }
+    showBatchExportModal = true;
+  }
+
+  /** 历史周条尾部入口：预填本周范围直接进合并导出（导出与历史在同一处闭环）。 */
+  function openWeekBatchExport() {
+    applyBatchPreset('thisWeek');
     showBatchExportModal = true;
   }
 
@@ -392,7 +436,6 @@
   // 结构化编辑：将 markdown 按 ## 标题拆分为段落
   let editingSection = -1; // 当前正在编辑的段落索引
   let editingContent = ''; // 编辑中的内容
-  let showBlockManager = false; // 段落管理弹层
 
   function startEditSection(sections, index) {
     editingSection = index;
@@ -510,7 +553,210 @@
 
   $: reportMeta = resolveReportMeta(report, config);
 
-  // ══════════ 段落目录（长日报导航,xl 屏显示） ══════════
+  // ══════════ 洞察（TL;DR）：文章头居中 lead 段,首版取正文首个 blockquote / 首段摘要 ══════════
+  // 生成端输出专用 summary 字段属后端增强,留待后端批次;派生失败时整段隐藏,不占版面。
+  const INSIGHT_SCAN_LINES = 40;
+  const INSIGHT_MAX_LENGTH = 160;
+
+  function stripInlineMarkdown(text) {
+    return (text || '')
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      .replace(/[*_`~]/g, '')
+      .trim();
+  }
+
+  function deriveReportInsight(content) {
+    if (!content) return '';
+    const lines = content.split('\n').slice(0, INSIGHT_SCAN_LINES);
+    let firstParagraph = '';
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      if (
+        line.startsWith('<!--') ||
+        line.startsWith('<details') ||
+        line.startsWith('#') ||
+        line.startsWith('|') ||
+        line.startsWith('---')
+      ) {
+        continue;
+      }
+      // 首个 blockquote 优先——生成端通常把结论放在引用块里
+      if (line.startsWith('>')) {
+        const quote = stripInlineMarkdown(line.replace(/^>+\s*/, ''));
+        if (quote) return quote.slice(0, INSIGHT_MAX_LENGTH);
+        continue;
+      }
+      if (!firstParagraph && !line.startsWith('-') && !line.startsWith('*')) {
+        firstParagraph = stripInlineMarkdown(line);
+      }
+    }
+    return firstParagraph.slice(0, INSIGHT_MAX_LENGTH);
+  }
+
+  $: reportInsight = report && !isYesterdayReport ? deriveReportInsight(report.content) : '';
+
+  /** 字数统计（文章头元信息行）：剔除注释与 markdown 标记后按非空白字符计。 */
+  function countReportChars(content) {
+    if (!content) return 0;
+    return content
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/[#>*`_\-|[\]()!]/g, '')
+      .replace(/\s+/g, '')
+      .length;
+  }
+
+  $: reportCharCount = countReportChars(report?.content);
+
+  // 「跳到明日建议」：按标题关键词定位建议段,找不到则不显示链接
+  const ADVICE_TITLE_RE = /(明日|明天|建议|建議|tomorrow|suggest|advice|recommend|اقتراح|توصي)/i;
+  $: adviceSectionIndex = visibleSections.findIndex((section) => ADVICE_TITLE_RE.test(tocTitle(section)));
+
+  // ══════════ 历史周条：哪天有报告一眼可见（本周 7 天,点击切换日期,弱化为工具栏下细行） ══════════
+  // 带首句摘要的历史列表需 `list_report_dates` 汇总接口,留待后端批次;
+  // 这里用既有 get_saved_report 逐日探测"有/无",每个 locale 只探测一次。
+  let weekReportStatus = {}; // date -> bool
+  let weekStatusLocale = '';
+  let weekStatusRequestId = 0;
+
+  function getCurrentWeekDates() {
+    const today = new Date();
+    const dayFromMonday = (today.getDay() + 6) % 7;
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - dayFromMonday);
+    return Array.from({ length: 7 }, (_, i) => {
+      const day = new Date(monday);
+      day.setDate(monday.getDate() + i);
+      return toIsoDate(day);
+    });
+  }
+
+  async function loadWeekStripStatus() {
+    if (weekStatusLocale === currentLocale) return;
+    weekStatusLocale = currentLocale;
+    const requestId = ++weekStatusRequestId;
+    const todayStr = getLocalDateString();
+    const dates = getCurrentWeekDates().filter((date) => date <= todayStr);
+    const entries = await Promise.all(
+      dates.map(async (date) => {
+        try {
+          const saved = await invoke('get_saved_report', { date, locale: currentLocale });
+          return [date, !!saved];
+        } catch {
+          return [date, false];
+        }
+      })
+    );
+    if (requestId !== weekStatusRequestId) return;
+    weekReportStatus = Object.fromEntries(entries);
+  }
+
+  $: { currentLocale; loadWeekStripStatus(); }
+
+  $: weekStripDays = (() => {
+    // currentLocale 依赖:星期短标签随语言切换
+    currentLocale;
+    const todayStr = getLocalDateString();
+    return getCurrentWeekDates().map((date) => {
+      const parsed = new Date(`${date}T12:00:00`);
+      return {
+        date,
+        label: formatLocalizedDate(parsed, { weekday: 'narrow' }),
+        dayNum: parsed.getDate(),
+        hasReport: !!weekReportStatus[date],
+        isFuture: date > todayStr,
+        isToday: date === todayStr,
+      };
+    });
+  })();
+  $: weekElapsedCount = weekStripDays.filter((day) => !day.isFuture).length;
+  $: weekGeneratedCount = weekStripDays.filter((day) => day.hasReport).length;
+
+  // ══════════ KPI 参照系（与报告同页的四个答案;快照固化留待后端批次,当前为实时口径） ══════════
+  /** 专注峰值：hourly 分布最大桶向相邻延伸（相邻桶 ≥ 最大值 60% 时并入窗口），与概览定稿同一算法。 */
+  function computePeakWindow(distribution) {
+    const buckets = Array.from({ length: 24 }, (_, hour) => {
+      const found = (distribution || []).find((bucket) => bucket.hour === hour);
+      return found?.duration || 0;
+    });
+    const maxDuration = Math.max(...buckets);
+    if (maxDuration <= 0) {
+      return null;
+    }
+    const peakHour = buckets.indexOf(maxDuration);
+    const threshold = maxDuration * 0.6;
+    let startHour = peakHour;
+    let endHour = peakHour;
+    while (startHour > 0 && buckets[startHour - 1] >= threshold) {
+      startHour -= 1;
+    }
+    while (endHour < 23 && buckets[endHour + 1] >= threshold) {
+      endHour += 1;
+    }
+    const totalDuration = buckets
+      .slice(startHour, endHour + 1)
+      .reduce((sum, duration) => sum + duration, 0);
+    return { startHour, endHour, totalDuration };
+  }
+
+  function formatSignedCompactDuration(diffSeconds) {
+    const sign = diffSeconds >= 0 ? '+' : '−';
+    return `${sign}${formatDurationLocalized(Math.abs(diffSeconds), { compact: true })}`;
+  }
+
+  function categorySharePct(stats, categoryKey) {
+    if (!stats || !(stats.total_duration > 0)) return null;
+    const item = (stats.category_usage || []).find((c) => c.category === categoryKey);
+    return Math.round(((item?.duration || 0) / stats.total_duration) * 100);
+  }
+
+  $: kpiTotalDeltaText = freshStats && lastWeekStats && lastWeekStats.total_duration > 0
+    ? t('report.kpiDeltaVsLastWeek', {
+        delta: formatSignedCompactDuration(freshStats.total_duration - lastWeekStats.total_duration),
+      })
+    : t('report.kpiNoBaseline');
+  $: peakWindow = freshStats ? computePeakWindow(freshStats.hourly_activity_distribution) : null;
+  $: peakWindowValue = peakWindow
+    ? `${String(peakWindow.startHour).padStart(2, '0')}:00–${String(peakWindow.endHour + 1).padStart(2, '0')}:00`
+    : '--';
+  $: commSharePct = categorySharePct(freshStats, 'communication');
+  $: commShareBaselinePct = categorySharePct(lastWeekStats, 'communication');
+  $: commShareDeltaText = commSharePct != null && commShareBaselinePct != null
+    ? t('report.kpiDeltaPt', {
+        delta: `${commSharePct - commShareBaselinePct >= 0 ? '+' : '−'}${Math.abs(commSharePct - commShareBaselinePct)}`,
+      })
+    : t('report.kpiNoBaseline');
+
+  // ══════════ 数据对照面板（文末折叠）：分类构成条,与正文百分比互证 ══════════
+  // 证据 chips 与跳时间线定位依赖生成端结构化引用,留待后端批次。
+  function categoryDisplayName(categoryKey, cats) {
+    const translated = translateCategoryLabel(categoryKey);
+    if (translated !== categoryKey) return translated;
+    const found = cats.find((c) => c.key === categoryKey);
+    return found?.name || categoryKey;
+  }
+
+  $: proofSegments = (() => {
+    currentLocale;
+    const usage = freshStats?.category_usage || [];
+    const total = usage.reduce((sum, item) => sum + item.duration, 0);
+    if (total <= 0) return [];
+    const colorMap = new Map(categoryList.map((c) => [c.key, c.color]));
+    return usage
+      .slice()
+      .sort((left, right) => right.duration - left.duration)
+      .map((item) => ({
+        key: item.category,
+        name: categoryDisplayName(item.category, categoryList),
+        color: colorMap.get(item.category) || '#94a3b8',
+        duration: item.duration,
+        widthPct: (item.duration / total) * 100,
+        percent: Math.round((item.duration / total) * 100),
+      }));
+  })();
+
+  // ══════════ 段落目录（宽屏贴右侧悬浮,≥1024px;窄窗折叠为文章顶部锚点条） ══════════
   let activeSectionIndex = 0;
   let sectionObserver = null;
 
@@ -552,6 +798,10 @@
 
   onMount(() => {
     loadConfig();
+    // 分类色板：数据对照面板构成条着色（与概览/时间线同一色源）
+    invoke('get_categories')
+      .then((cats) => { categoryList = cats || []; })
+      .catch(() => { categoryList = []; });
     return () => {
       sectionObserver?.disconnect();
       sectionObserver = null;
@@ -573,94 +823,123 @@
 }} />
 
 <div class="page-shell report-editorial-shell" data-locale={currentLocale}>
-  <!-- 页面标题 -->
+  <!-- 页头：与概览同构——左=「日报」页面标题,右=控制组(日期切换器+导出▾+生成设置+重新生成);
+       文章头保持下沉到正文卡内居中 -->
   <div class="report-hero">
     <div class="report-hero-main">
       <div class="page-title-group report-hero-copy">
-      <div class="page-title-badge">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8 7h8M8 12h8M8 17h5" />
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M7 3h7l5 5v10a3 3 0 01-3 3H7a3 3 0 01-3-3V6a3 3 0 013-3Z" />
-        </svg>
-      </div>
-      <div class="page-title-copy">
-        <h2>
-          {selectedDate === getLocalDateString() ? t('report.todayReport') : t('report.historyReport')}
-        </h2>
-        <div class="report-hero-meta">
-          <div class="report-hero-date-row">
-            <span class="report-hero-date">{formatReportDate(selectedDate)}</span>
-            {#if config || report}
-              <span class="report-hero-mode-chip">{getAiModeName(reportMeta.reportMode)}</span>
-            {/if}
-          </div>
-          {#if config || report}
-            {#if reportMeta.showUsageMismatchNotice}
-              <p class="report-hero-mode-note">{t('report.aiNotAppliedPrefix')}{getFallbackReasonText(reportMeta)}</p>
-            {/if}
-          {/if}
+        <div class="page-title-badge">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8 7h8M8 12h8M8 17h5" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M7 3h7l5 5v10a3 3 0 01-3 3H7a3 3 0 01-3-3V6a3 3 0 013-3Z" />
+          </svg>
+        </div>
+        <div class="page-title-copy">
+          <h2>{t('sidebar.nav.report')}</h2>
         </div>
       </div>
-    </div>
       <div class="report-hero-actions">
-      <div class="page-toolbar-end">
-        <button
-          class="page-control-btn {selectedDate === getLocalDateString() ? 'page-control-btn-active' : ''}"
-          on:click={() => selectDate(getLocalDateString())}
-        >
-          {t('report.today')}
-        </button>
-        <button
-          class="page-control-btn {selectedDate === getYesterdayDateString() ? 'page-control-btn-active' : ''}"
-          on:click={() => selectDate(getYesterdayDateString())}
-        >
-          {t('report.yesterday')}
-        </button>
-        {#key `report-date-${currentLocale}`}
-          <LocalizedDatePicker
-            bind:value={selectedDate}
-            max={getLocalDateString()}
-            localeCode={currentLocale}
-            triggerClass="page-control-input w-auto"
-          />
-        {/key}
-      </div>
-      <div class="flex flex-wrap justify-end gap-2">
-        {#if report}
+        <div class="page-toolbar-end">
           <button
-            class="page-action-secondary min-h-10 px-4 py-2"
-            on:click={exportReportMarkdown}
-            disabled={exportInProgress}
-            title={config?.daily_report_export_dir ? '' : t('report.exportWithoutDefaultDir')}
+            class="page-control-btn {selectedDate === getLocalDateString() ? 'page-control-btn-active' : ''}"
+            on:click={() => selectDate(getLocalDateString())}
           >
-            {#if exportInProgress}
-              <div class="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent"></div>
-              {t('report.exporting')}
-            {:else}
-              {t('report.exportMarkdown')}
+            {t('report.today')}
+          </button>
+          <button
+            class="page-control-btn {selectedDate === getYesterdayDateString() ? 'page-control-btn-active' : ''}"
+            on:click={() => selectDate(getYesterdayDateString())}
+          >
+            {t('report.yesterday')}
+          </button>
+          {#key `report-date-${currentLocale}`}
+            <LocalizedDatePicker
+              bind:value={selectedDate}
+              max={getLocalDateString()}
+              localeCode={currentLocale}
+              triggerClass="page-control-input w-auto"
+            />
+          {/key}
+        </div>
+        {#if report}
+          <div class="report-export-menu">
+            <button
+              type="button"
+              class="page-action-secondary min-h-9 px-3.5 py-1.5"
+              aria-haspopup="menu"
+              aria-expanded={showExportMenu}
+              on:click={() => (showExportMenu = !showExportMenu)}
+            >
+              {#if exportInProgress}
+                <div class="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent"></div>
+                {t('report.exporting')}
+              {:else}
+                {t('report.exportMenu')}
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                </svg>
+              {/if}
+            </button>
+            {#if showExportMenu}
+              <button
+                type="button"
+                class="report-export-menu-backdrop"
+                aria-label={t('common.cancel')}
+                on:click={() => (showExportMenu = false)}
+              ></button>
+              <div class="report-export-menu-panel" role="menu">
+                <button
+                  type="button"
+                  class="report-export-menu-item"
+                  role="menuitem"
+                  on:click={handleExportCurrent}
+                  disabled={exportInProgress}
+                >
+                  <span class="report-export-menu-item-title">{t('report.exportMenuCurrent')}</span>
+                  <span class="report-export-menu-item-sub">{config?.daily_report_export_dir || t('report.exportWithoutDefaultDir')}</span>
+                </button>
+                <button
+                  type="button"
+                  class="report-export-menu-item"
+                  role="menuitem"
+                  on:click={openBatchExportModal}
+                  disabled={batchExporting}
+                >
+                  <span class="report-export-menu-item-title">{t('report.exportMenuRange')}</span>
+                  <span class="report-export-menu-item-sub">{t('report.batchExportTitle')}</span>
+                </button>
+                <button
+                  type="button"
+                  class="report-export-menu-item"
+                  role="menuitem"
+                  on:click={copyReportContent}
+                >
+                  <span class="report-export-menu-item-title">{t('report.exportMenuCopy')}</span>
+                  <span class="report-export-menu-item-sub">{t('report.exportMenuCopyHint')}</span>
+                </button>
+              </div>
+            {/if}
+          </div>
+        {/if}
+        {#if config?.ai_mode === 'summary' || hiddenBlocks.length > 0}
+          <button
+            type="button"
+            class="page-action-secondary min-h-9 px-3 py-1.5"
+            title={t('report.generateSettings')}
+            aria-expanded={showGenerateDrawer}
+            on:click={() => (showGenerateDrawer = !showGenerateDrawer)}
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            {t('report.generateSettings')}
+            {#if hiddenBlocks.length > 0}
+              <span class="ml-1 rounded-full bg-slate-200 dark:bg-[#484f58] px-1.5 text-[10px] font-semibold">{hiddenBlocks.length}</span>
             {/if}
           </button>
-          <button
-            class="page-action-secondary min-h-10 px-4 py-2"
-            on:click={openBatchExportModal}
-            disabled={batchExporting}
-            title={t('report.batchExportTitle')}
-          >
-            {t('report.batchExport')}
-          </button>
-          {#if hiddenBlocks.length > 0}
-            <button
-              class="page-action-secondary min-h-10 px-4 py-2"
-              on:click={() => (showBlockManager = !showBlockManager)}
-              title={t('report.manageBlocks')}
-            >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
-              </svg>
-              {t('report.manageBlocks')}
-              <span class="ml-1 rounded-full bg-slate-200 dark:bg-[#484f58] px-1.5 text-[10px] font-semibold">{hiddenBlocks.length}</span>
-            </button>
-          {/if}
+        {/if}
+        {#if report}
           <button
             class="page-action-warn"
             on:click={() => generateReport(true)}
@@ -679,112 +958,205 @@
         {/if}
       </div>
     </div>
-    </div>
   </div>
 
   <div class="report-editorial-stack">
-  {#if config && config.ai_mode === 'summary'}
-    <CollapsibleSection title={t('report.promptSettings')} storageKey="report.promptSettings">
-      <label for="daily-report-custom-prompt" class="settings-label mb-1.5">{t('report.promptLabel')}</label>
+  <!-- 历史周条：工具栏下方一行,弱化为无卡片细行（解 A6） -->
+  <div class="report-weekstrip" aria-label={t('report.weekStripLabel')}>
+    <span class="report-weekstrip-label">{t('report.weekStripLabel')}</span>
+    <div class="report-weekstrip-days">
+      {#each weekStripDays as day (day.date)}
+        <button
+          type="button"
+          class="report-weekstrip-day {day.hasReport ? '' : 'report-weekstrip-day-none'} {day.date === selectedDate ? 'report-weekstrip-day-active' : ''}"
+          disabled={day.isFuture}
+          title={day.isFuture ? '' : day.hasReport ? t('report.weekStripHasReport') : t('report.weekStripNoReport')}
+          on:click={() => selectDate(day.date)}
+        >
+          <span class="report-weekstrip-day-label">{day.label} {day.dayNum}</span>
+          <i></i>
+        </button>
+      {/each}
+    </div>
+    <span class="report-weekstrip-meta">
+      {t('report.weekStripGenerated', { count: weekGeneratedCount, total: weekElapsedCount })}
+      ·
+      <button type="button" class="report-weekstrip-export" on:click={openWeekBatchExport}>
+        {t('report.weekStripExport')}
+      </button>
+    </span>
+  </div>
 
-      <!-- 预设胶片集合：与分类管理同一套交互语言(点选应用,悬停浮出编辑/删除角标) -->
-      <div class="mb-2 flex flex-wrap gap-2">
-        {#each (config?.daily_report_prompt_presets || []) as preset, i}
-          {@const presetActive = config.daily_report_custom_prompt === preset.prompt}
-          <div class="group/preset relative">
-            <button
-              type="button"
-              class="segment-btn flex-none rounded-lg border px-3 py-1.5 text-xs max-w-56 truncate
-                {presetActive ? 'settings-segment-success' : 'settings-segment-idle'}"
-              title={presetActive ? t('report.presetClickToUnselect') : preset.prompt}
-              on:click={() => {
-                // 再次点击已选中的预设 = 取消使用（回到"不带附加提示词"状态）
-                config.daily_report_custom_prompt = presetActive ? '' : preset.prompt;
-                persistReportPrompt();
-              }}
-            >
-              {preset.name}
-            </button>
-            <button
-              type="button"
-              class="absolute -top-1.5 left-1/2 -translate-x-1/2 flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-xs leading-none text-white opacity-0 shadow-sm transition-opacity hover:bg-blue-600 group-hover/preset:opacity-100 focus-visible:opacity-100 dark:shadow-none"
-              title={t('report.editPreset')}
-              on:click|stopPropagation={() => {
-                editingPresetIndex = i;
-                editingPresetName = preset.name;
-                editingPresetPrompt = preset.prompt;
-                showPresetModal = true;
-              }}
-            >✎</button>
-            <button
-              type="button"
-              class="absolute -top-1.5 -end-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs leading-none text-white opacity-0 shadow-sm transition-opacity hover:bg-red-600 group-hover/preset:opacity-100 focus-visible:opacity-100 dark:shadow-none"
-              title={t('common.delete')}
-              on:click|stopPropagation={() => deletePreset(i)}
-            >×</button>
+  <!-- 生成设置抽屉：提示词预设 + 系统提示词覆盖 + 已隐藏段落管理（配置只在要生成时出现,解 A4） -->
+  {#if showGenerateDrawer && (config?.ai_mode === 'summary' || hiddenBlocks.length > 0)}
+    <div class="page-card report-sheet-controls report-generate-drawer">
+      <div class="report-drawer-head">
+        <h3 class="text-sm font-semibold">{t('report.generateSettings')}</h3>
+        <button
+          class="text-slate-400 hover:text-slate-600 dark:text-[#7d8590] dark:hover:text-[#c9d1d9]"
+          title={t('report.cancelEdit')}
+          on:click={() => (showGenerateDrawer = false)}
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+
+      {#if config && config.ai_mode === 'summary'}
+        <div class="report-drawer-section">
+          <label for="daily-report-custom-prompt" class="settings-label mb-1.5">{t('report.promptLabel')}</label>
+
+          <!-- 预设胶片集合：与分类管理同一套交互语言(点选应用,悬停浮出编辑/删除角标) -->
+          <div class="mb-2 flex flex-wrap gap-2">
+            {#each (config?.daily_report_prompt_presets || []) as preset, i}
+              {@const presetActive = config.daily_report_custom_prompt === preset.prompt}
+              <div class="group/preset relative">
+                <button
+                  type="button"
+                  class="segment-btn flex-none rounded-lg border px-3 py-1.5 text-xs max-w-56 truncate
+                    {presetActive ? 'settings-segment-success' : 'settings-segment-idle'}"
+                  title={presetActive ? t('report.presetClickToUnselect') : preset.prompt}
+                  on:click={() => {
+                    // 再次点击已选中的预设 = 取消使用（回到"不带附加提示词"状态）
+                    config.daily_report_custom_prompt = presetActive ? '' : preset.prompt;
+                    persistReportPrompt();
+                  }}
+                >
+                  {preset.name}
+                </button>
+                <button
+                  type="button"
+                  class="absolute -top-1.5 left-1/2 -translate-x-1/2 flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-xs leading-none text-white opacity-0 shadow-sm transition-opacity hover:bg-blue-600 group-hover/preset:opacity-100 focus-visible:opacity-100 dark:shadow-none"
+                  title={t('report.editPreset')}
+                  on:click|stopPropagation={() => {
+                    editingPresetIndex = i;
+                    editingPresetName = preset.name;
+                    editingPresetPrompt = preset.prompt;
+                    showPresetModal = true;
+                  }}
+                >✎</button>
+                <button
+                  type="button"
+                  class="absolute -top-1.5 -end-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs leading-none text-white opacity-0 shadow-sm transition-opacity hover:bg-red-600 group-hover/preset:opacity-100 focus-visible:opacity-100 dark:shadow-none"
+                  title={t('common.delete')}
+                  on:click|stopPropagation={() => deletePreset(i)}
+                >×</button>
+              </div>
+            {/each}
+            {#if (config?.daily_report_prompt_presets || []).length < MAX_PROMPT_PRESETS}
+              <button
+                type="button"
+                class="segment-btn settings-segment-idle flex-none rounded-lg border border-dashed px-3 py-1.5 text-xs"
+                on:click={() => {
+                  editingPresetIndex = -1;
+                  editingPresetName = '';
+                  editingPresetPrompt = '';
+                  showPresetModal = true;
+                }}
+              >
+                + {t('report.addPreset')}
+              </button>
+            {:else}
+              <span class="inline-flex items-center px-2 text-xs text-slate-400 dark:text-[#636c76]" title={t('report.presetLimitReached', { max: MAX_PROMPT_PRESETS })}>
+                {t('report.presetLimitReached', { max: MAX_PROMPT_PRESETS })}
+              </span>
+            {/if}
           </div>
-        {/each}
-        {#if (config?.daily_report_prompt_presets || []).length < MAX_PROMPT_PRESETS}
-          <button
-            type="button"
-            class="segment-btn settings-segment-idle flex-none rounded-lg border border-dashed px-3 py-1.5 text-xs"
-            on:click={() => {
-              editingPresetIndex = -1;
-              editingPresetName = '';
-              editingPresetPrompt = '';
-              showPresetModal = true;
-            }}
-          >
-            + {t('report.addPreset')}
-          </button>
-        {:else}
-          <span class="inline-flex items-center px-2 text-xs text-slate-400 dark:text-[#636c76]" title={t('report.presetLimitReached', { max: MAX_PROMPT_PRESETS })}>
-            {t('report.presetLimitReached', { max: MAX_PROMPT_PRESETS })}
-          </span>
-        {/if}
-      </div>
-      <textarea
-        id="daily-report-custom-prompt"
-        bind:value={config.daily_report_custom_prompt}
-        on:change={persistReportPrompt}
-        rows="3"
-        class="control-input resize-y min-h-[80px]"
-        placeholder={t('report.promptPlaceholder')}
-      ></textarea>
+          <textarea
+            id="daily-report-custom-prompt"
+            bind:value={config.daily_report_custom_prompt}
+            on:change={persistReportPrompt}
+            rows="3"
+            class="control-input resize-y min-h-[80px]"
+            placeholder={t('report.promptPlaceholder')}
+          ></textarea>
 
-      <!-- 系统提示词覆盖 -->
-      <div class="mt-4 pt-3 border-t border-slate-200 dark:border-[#30363d]">
-        <div class="flex items-center justify-between mb-2">
-          <label for="daily-report-system-prompt-override" class="text-sm font-medium text-slate-700 dark:text-[#adbac7]">
-            {t('report.systemPromptOverride')}
-          </label>
-          <button
-            type="button"
-            class="text-xs text-slate-400 hover:text-slate-700 dark:hover:text-[#adbac7] transition"
-            on:click={() => { config.daily_report_system_prompt_override = null; }}
-            disabled={!config.daily_report_system_prompt_override}
-          >
-            {t('report.resetSystemPrompt')}
-          </button>
+          <!-- 系统提示词覆盖 -->
+          <div class="mt-4 pt-3 border-t border-slate-200 dark:border-[#30363d]">
+            <div class="flex items-center justify-between mb-2">
+              <label for="daily-report-system-prompt-override" class="text-sm font-medium text-slate-700 dark:text-[#adbac7]">
+                {t('report.systemPromptOverride')}
+              </label>
+              <button
+                type="button"
+                class="text-xs text-slate-400 hover:text-slate-700 dark:hover:text-[#adbac7] transition"
+                on:click={() => { config.daily_report_system_prompt_override = null; }}
+                disabled={!config.daily_report_system_prompt_override}
+              >
+                {t('report.resetSystemPrompt')}
+              </button>
+            </div>
+            <p class="text-xs text-slate-400 dark:text-[#636c76] mb-2">{t('report.systemPromptOverrideHint')}</p>
+            <textarea
+              id="daily-report-system-prompt-override"
+              rows="6"
+              class="control-input resize-y min-h-[100px] font-mono text-xs"
+              bind:value={config.daily_report_system_prompt_override}
+              on:change={persistReportPrompt}
+              placeholder={t('report.systemPromptOverridePlaceholder')}
+            ></textarea>
+          </div>
         </div>
-        <p class="text-xs text-slate-400 dark:text-[#636c76] mb-2">{t('report.systemPromptOverrideHint')}</p>
-        <textarea
-          id="daily-report-system-prompt-override"
-          rows="6"
-          class="control-input resize-y min-h-[100px] font-mono text-xs"
-          bind:value={config.daily_report_system_prompt_override}
-          on:change={persistReportPrompt}
-          placeholder={t('report.systemPromptOverridePlaceholder')}
-        ></textarea>
+      {/if}
+
+      <!-- 段落管理入口迁入抽屉：恢复被隐藏的段落 -->
+      {#if hiddenBlocks.length > 0}
+        <div class="report-drawer-section">
+          <h4 class="text-xs font-semibold text-slate-500 dark:text-[#7d8590] mb-2">{t('report.manageBlocksTitle')}</h4>
+          <div class="flex flex-wrap gap-2">
+            {#each hiddenBlocks as blockName}
+              <button
+                class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-[#30363d] bg-white dark:bg-[#21262d] px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-[#adbac7] hover:border-blue-300 dark:hover:border-blue-500 transition-colors"
+                on:click={async () => {
+                  const newHidden = hiddenBlocks.filter((b) => b !== blockName);
+                  try {
+                    await invoke('set_report_block_preference', { pinnedBlocks, hiddenBlocks: newHidden });
+                    config = { ...config, daily_report_hidden_blocks: newHidden };
+                  } catch (e) { console.error('设置隐藏失败:', e); }
+                }}
+              >
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                {tm(`report.blockNames.${blockName}`) || blockName}
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/if}
+    </div>
+  {/if}
+
+  <!-- KPI：与报告同页的四个答案（解 A2;实时口径,快照固化留待后端批次;汇总数居中） -->
+  {#if report && !loading && !error && !isYesterdayReport && freshStats}
+    <div class="report-kpi-grid grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div class="report-stat-card">
+        <div class="report-stat-label">{t('report.kpiTotal')}</div>
+        <div class="report-stat-value">{formatDurationLocalized(freshStats.total_duration)}</div>
+        <div class="report-stat-sub">{kpiTotalDeltaText}</div>
       </div>
-    </CollapsibleSection>
+      <div class="report-stat-card">
+        <div class="report-stat-label">{t('report.kpiPeakFocus')}</div>
+        <div class="report-stat-value">{peakWindowValue}</div>
+        <div class="report-stat-sub">
+          {peakWindow ? t('report.kpiPeakTotal', { dur: formatDurationLocalized(peakWindow.totalDuration, { compact: true }) }) : t('report.kpiNoBaseline')}
+        </div>
+      </div>
+      <div class="report-stat-card">
+        <div class="report-stat-label">{t('report.kpiCommShare')}</div>
+        <div class="report-stat-value">{commSharePct == null ? '--' : `${commSharePct}%`}</div>
+        <div class="report-stat-sub">{commShareDeltaText}</div>
+      </div>
+      <div class="report-stat-card">
+        <div class="report-stat-label">{t('report.kpiDataBase')}</div>
+        <div class="report-stat-value">{freshStats.screenshot_count}</div>
+        <div class="report-stat-sub" title={t('report.liveBasisTitle')}>{t('report.kpiDataBaseMeta', { apps: freshStats.app_usage?.length ?? 0 })}</div>
+      </div>
+    </div>
   {/if}
 
   <!-- 日报内容 -->
   {#if loading}
     <div class="empty-state-lg">
       <div class="empty-state-icon">
-        <div class="animate-spin rounded-full h-8 w-8 border-2 border-indigo-500 border-t-transparent"></div>
+        <div class="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent"></div>
       </div>
       <h3 class="empty-state-title">{t('report.loadingTitle')}</h3>
       <p class="empty-state-copy mt-1">{t('report.loadingCopy')}</p>
@@ -803,125 +1175,86 @@
       <button class="page-action-brand" on:click={() => generateReport(true)}>{t('common.retry')}</button>
     </div>
   {:else if report}
-    <!-- 昨日日报提示 -->
-    {#if isYesterdayReport}
-      <div class="page-banner-warning report-fallback-banner mb-4">
-        <div class="report-fallback-copy">
-          <div class="flex items-center gap-2 text-sm">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          {t('report.showingYesterday', { date: formatReportDate(report.date) })}
-          </div>
-        </div>
-        <div class="report-fallback-action">
-          <button
-            class="page-action-warn report-fallback-button min-h-9 px-3 text-xs rounded-lg shadow-none"
-            on:click={() => generateReport(false)}
-            disabled={generating}
-          >
-            {#if generating}
-              <div class="inline-flex items-center gap-2">
-                <div class="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent"></div>
-                <span>{t('report.generating')}</span>
-              </div>
-            {:else}
-              ✨ {t('report.generatingToday')}
-            {/if}
-          </button>
-        </div>
-      </div>
-    {/if}
-    {#if showBlockManager && hiddenBlocks.length > 0}
-      <div class="page-card mb-4 p-4">
-        <div class="flex items-center justify-between mb-3">
-          <h3 class="text-sm font-semibold">{t('report.manageBlocksTitle')}</h3>
-          <button class="text-slate-400 hover:text-slate-600 dark:text-[#7d8590] dark:hover:text-[#c9d1d9]" on:click={() => (showBlockManager = false)}>
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          {#each hiddenBlocks as blockName}
-            <button
-              class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-[#30363d] bg-white dark:bg-[#21262d] px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-[#adbac7] hover:border-indigo-300 dark:hover:border-indigo-500 transition-colors"
-              on:click={async () => {
-                const newHidden = hiddenBlocks.filter((b) => b !== blockName);
-                try {
-                  await invoke('set_report_block_preference', { pinnedBlocks, hiddenBlocks: newHidden });
-                  config = { ...config, daily_report_hidden_blocks: newHidden };
-                } catch (e) { console.error('设置隐藏失败:', e); }
-              }}
-            >
-              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-              {tm(`report.blockNames.${blockName}`) || blockName}
-            </button>
-          {/each}
-        </div>
-      </div>
-    {/if}
     <div class="report-reading-layout">
-      <!-- 段落目录：长日报导航（xl 屏显示,点击平滑滚动,滚动时高亮当前段） -->
-      {#if visibleSections.length > 1}
-        <nav class="report-toc" aria-label={t('report.tocLabel')}>
-          <p class="report-toc-title">{t('report.tocLabel')}</p>
-          <ul>
-            {#each visibleSections as section, i}
-              {@const label = tocTitle(section)}
-              {#if label}
-                <li>
-                  <button
-                    type="button"
-                    class="report-toc-item {activeSectionIndex === i ? 'report-toc-item-active' : ''}"
-                    on:click={() => scrollToSection(i)}
-                  >
-                    {label}
-                  </button>
-                </li>
-              {/if}
-            {/each}
-          </ul>
-        </nav>
-      {/if}
-
       <div class="page-card report-sheet report-article-card min-w-0">
       <div class="report-sheet-content">
-        <!-- 昨日日报醒目提示：避免被误认为今天的 -->
+        <!-- 昨日回退唯一横幅：页级警示横幅已删,同一信息不再占据两条首屏位（解 A5） -->
         {#if isYesterdayReport}
-          <div class="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200/80 bg-amber-50/80 px-3.5 py-2.5 dark:border-amber-500/30 dark:bg-amber-950/25">
-            <p class="text-sm text-amber-800 dark:text-amber-200">{t('report.yesterdayBanner')}</p>
-            <button
-              class="shrink-0 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-amber-600 disabled:opacity-50"
-              on:click={() => generateReport(false)}
-              disabled={generating}
-            >
-              {generating ? t('report.generating') : t('report.generateTodayNow')}
-            </button>
-          </div>
-        {/if}
-        <div class="report-sheet-meta text-xs text-slate-400 dark:text-[#7d8590] mb-4 flex items-center gap-2">
-          <div class="w-1.5 h-1.5 rounded-full {isYesterdayReport ? 'bg-amber-500' : 'bg-emerald-500'}"></div>
-          {isYesterdayReport ? t('report.yesterdayPrefix') : ''}{t('report.generatedAt', { time: formatLocalizedDate(new Date(report.created_at * 1000), { year: 'numeric', month: '2-digit', day: '2-digit' }) + ' ' + formatLocalizedTime(new Date(report.created_at * 1000), { hour: '2-digit', minute: '2-digit', second: '2-digit' }) })}
-        </div>
-        {#if freshStats}
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
-            <div class="report-stat-card">
-              <div class="report-stat-label">{t('report.statTotalDuration')}</div>
-              <div class="report-stat-value">{formatDurationLocalized(freshStats.total_duration)}</div>
+          <div class="page-banner-warning report-fallback-banner mb-4">
+            <div class="report-fallback-copy">
+              <div class="flex items-center gap-2 text-sm">
+                <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                {t('report.showingYesterday', { date: formatReportDate(report.date) })}
+              </div>
             </div>
-            <div class="report-stat-card">
-              <div class="report-stat-label">{t('report.statScreenshots')}</div>
-              <div class="report-stat-value">{freshStats.screenshot_count}</div>
-            </div>
-            <div class="report-stat-card">
-              <div class="report-stat-label">{t('report.statApps')}</div>
-              <div class="report-stat-value">{freshStats.app_usage?.length ?? 0}</div>
-            </div>
-            <div class="report-stat-card">
-              <div class="report-stat-label">{t('report.statWebsites')}</div>
-              <div class="report-stat-value">{freshStats.domain_usage?.length ?? 0}</div>
+            <div class="report-fallback-action">
+              <button
+                class="page-action-warn report-fallback-button min-h-9 px-3 text-xs rounded-lg shadow-none"
+                on:click={() => generateReport(false)}
+                disabled={generating}
+              >
+                {#if generating}
+                  <div class="inline-flex items-center gap-2">
+                    <div class="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent"></div>
+                    <span>{t('report.generating')}</span>
+                  </div>
+                {:else}
+                  ✨ {t('report.generateTodayNow')}
+                {/if}
+              </button>
             </div>
           </div>
         {/if}
+
+        <!-- 文章头（居中）：kicker + 日期大标题 + 元信息行（字数 · 生成时间 · 模式徽章）+ TL;DR lead 段 -->
+        <header class="report-article-head">
+          <p class="report-article-kicker">{selectedDate === getLocalDateString() ? t('report.todayReport') : t('report.historyReport')}</p>
+          <h1 class="report-article-title">{formatReportDate(isYesterdayReport ? report.date : selectedDate)}</h1>
+          <div class="report-hero-meta">
+            <div class="report-hero-date-row report-article-metaline">
+              {#if reportCharCount > 0}
+                <span>{t('report.wordCount', { count: reportCharCount })}</span>
+                <span class="report-article-metadot">·</span>
+              {/if}
+              <span>{t('report.generatedAt', { time: formatLocalizedDate(new Date(report.created_at * 1000), { month: '2-digit', day: '2-digit' }) + ' ' + formatLocalizedTime(new Date(report.created_at * 1000), { hour: '2-digit', minute: '2-digit' }) })}</span>
+              <span class="report-article-metadot">·</span>
+              <span class="report-hero-mode-chip">{getAiModeName(reportMeta.reportMode)}</span>
+              <span class="report-meta-pill" title={t('report.liveBasisTitle')}>{t('report.liveBasisChip')}</span>
+            </div>
+            {#if reportMeta.showUsageMismatchNotice}
+              <p class="report-hero-mode-note">{t('report.aiNotAppliedPrefix')}{getFallbackReasonText(reportMeta)}</p>
+            {/if}
+          </div>
+          {#if reportInsight}
+            <p class="report-article-lead">{reportInsight}</p>
+            {#if adviceSectionIndex >= 0}
+              <button type="button" class="report-insight-link" on:click={() => scrollToSection(adviceSectionIndex)}>
+                {t('report.insightJumpAdvice')}
+              </button>
+            {/if}
+          {/if}
+        </header>
+
+        <!-- 窄窗口锚点条：目录折叠后的横向导航（<1024px 显示,修 V4） -->
+        {#if visibleSections.length > 1}
+          <div class="report-anchor-bar" role="navigation" aria-label={t('report.tocLabel')}>
+            {#each visibleSections as section, i}
+              {@const anchorLabel = tocTitle(section)}
+              {#if anchorLabel}
+                <button
+                  type="button"
+                  class="report-anchor-chip {activeSectionIndex === i ? 'report-anchor-chip-active' : ''}"
+                  on:click={() => scrollToSection(i)}
+                >
+                  {anchorLabel}
+                </button>
+              {/if}
+            {/each}
+          </div>
+        {/if}
+
         <div class="markdown-body report-sheet-body prose prose-slate dark:prose-invert max-w-none">
           {#each visibleSections as section, i}
             {@const blockName = extractReportBlockName(section)}
@@ -968,14 +1301,69 @@
             </div>
           {/each}
         </div>
+
+        <!-- 数据对照面板：收为文末折叠（原则 2/3 的互证保留,不打断阅读动线） -->
+        {#if !isYesterdayReport && proofSegments.length > 0}
+          <details class="report-proof-details">
+            <summary>
+              <b>{t('report.proofTitle')}</b>
+              <span>{t('report.proofCaption')}</span>
+            </summary>
+            <div class="report-proof-panel">
+              <div class="report-proof-bar">
+                {#each proofSegments as segment (segment.key)}
+                  <i style={`width: ${segment.widthPct.toFixed(1)}%; min-width: 5px; background: ${segment.color};`}></i>
+                {/each}
+              </div>
+              <div class="report-proof-legend">
+                {#each proofSegments as segment (segment.key)}
+                  <span>
+                    <i style={`background: ${segment.color};`}></i>
+                    <b>{segment.name}</b>
+                    {formatDurationLocalized(segment.duration, { compact: true })}
+                    <em>{segment.percent}%</em>
+                  </span>
+                {/each}
+              </div>
+            </div>
+          </details>
+        {/if}
       </div>
       </div>
+
+      <!-- 段落目录：宽屏贴右侧悬浮（≥1024px,点击平滑滚动,滚动时高亮当前段） -->
+      {#if visibleSections.length > 1}
+        <nav class="report-toc" aria-label={t('report.tocLabel')}>
+          <p class="report-toc-title">{t('report.tocLabel')}</p>
+          <ul>
+            {#each visibleSections as section, i}
+              {@const label = tocTitle(section)}
+              {#if label}
+                <li>
+                  <button
+                    type="button"
+                    class="report-toc-item {activeSectionIndex === i ? 'report-toc-item-active' : ''}"
+                    on:click={() => scrollToSection(i)}
+                  >
+                    {label}
+                  </button>
+                </li>
+              {/if}
+            {/each}
+          </ul>
+          <!-- 目录底部固定生成元信息,与文章头元信息互为冗余 -->
+          <div class="report-toc-foot">
+            <p>{t('report.generatedAt', { time: formatLocalizedTime(new Date(report.created_at * 1000), { hour: '2-digit', minute: '2-digit' }) })}</p>
+            <p>{getAiModeName(reportMeta.reportMode)} · <span title={t('report.liveBasisTitle')}>{t('report.liveBasisChip')}</span></p>
+          </div>
+        </nav>
+      {/if}
     </div>
     {:else if generating}
     <!-- 生成中骨架屏：替代空白等待 -->
     <div class="page-card report-sheet report-article-card">
       <div class="report-sheet-content animate-pulse space-y-4 py-2">
-        <div class="h-3 w-40 rounded-full bg-slate-200/80 dark:bg-[#21262d]"></div>
+        <div class="h-3 w-40 rounded-full bg-slate-200/80 dark:bg-[#21262d] mx-auto"></div>
         <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {#each Array(4) as _}
             <div class="h-16 rounded-lg bg-slate-100/90 dark:bg-[#161b22]"></div>
@@ -1087,7 +1475,7 @@
           <input
             id="report-preset-name"
             type="text"
-            class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-[#484f58] bg-white dark:bg-[#21262d] text-slate-900 dark:text-[#c9d1d9] placeholder-slate-400 dark:placeholder-[#636c76] focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-400 transition-colors"
+            class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-[#484f58] bg-white dark:bg-[#21262d] text-slate-900 dark:text-[#c9d1d9] placeholder-slate-400 dark:placeholder-[#636c76] focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-colors"
             placeholder={t('report.presetNamePlaceholder')}
             bind:value={editingPresetName}
           />
@@ -1096,7 +1484,7 @@
           <label for="report-preset-prompt" class="block text-xs font-medium text-slate-500 dark:text-[#7d8590] mb-1.5">{t('report.promptLabel')}</label>
           <textarea
             id="report-preset-prompt"
-            class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-[#484f58] bg-white dark:bg-[#21262d] text-slate-900 dark:text-[#c9d1d9] placeholder-slate-400 dark:placeholder-[#636c76] focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-400 transition-colors resize-y min-h-[160px] leading-relaxed"
+            class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-[#484f58] bg-white dark:bg-[#21262d] text-slate-900 dark:text-[#c9d1d9] placeholder-slate-400 dark:placeholder-[#636c76] focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-colors resize-y min-h-[160px] leading-relaxed"
             placeholder={t('report.presetPromptPlaceholder')}
             bind:value={editingPresetPrompt}
             rows="6"
@@ -1111,7 +1499,7 @@
           {t('report.cancelEdit')}
         </button>
         <button
-          class="px-4 py-2 text-sm font-medium rounded-lg bg-indigo-500 hover:bg-indigo-600 text-white shadow-sm dark:shadow-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          class="px-4 py-2 text-sm font-medium rounded-lg bg-blue-500 hover:bg-blue-600 text-white shadow-sm dark:shadow-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           disabled={!editingPresetName.trim() || !editingPresetPrompt.trim() || presetSaving}
           on:click={async () => {
             if (presetSaving) return;
@@ -1177,7 +1565,7 @@
               type="date"
               bind:value={batchStartDate}
               max={getLocalDateString()}
-              class="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-[#484f58] bg-white dark:bg-[#21262d] text-slate-900 dark:text-[#c9d1d9] focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+              class="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-[#484f58] bg-white dark:bg-[#21262d] text-slate-900 dark:text-[#c9d1d9] focus:outline-none focus:ring-2 focus:ring-blue-500/40"
             />
           </label>
           <label class="block">
@@ -1186,7 +1574,7 @@
               type="date"
               bind:value={batchEndDate}
               max={getLocalDateString()}
-              class="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-[#484f58] bg-white dark:bg-[#21262d] text-slate-900 dark:text-[#c9d1d9] focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+              class="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-[#484f58] bg-white dark:bg-[#21262d] text-slate-900 dark:text-[#c9d1d9] focus:outline-none focus:ring-2 focus:ring-blue-500/40"
             />
           </label>
         </div>
@@ -1200,7 +1588,7 @@
           {t('report.cancelEdit')}
         </button>
         <button
-          class="px-4 py-2 text-sm font-medium rounded-lg bg-indigo-500 hover:bg-indigo-600 text-white shadow-sm dark:shadow-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          class="px-4 py-2 text-sm font-medium rounded-lg bg-blue-500 hover:bg-blue-600 text-white shadow-sm dark:shadow-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           on:click={exportReportsRange}
           disabled={batchExporting || !batchStartDate || !batchEndDate}
         >

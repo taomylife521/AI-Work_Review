@@ -167,7 +167,6 @@
         <div class="space-y-3">
           <McpServerPanel
             {config}
-            {dataDir}
             {saving}
             {mcpDbPath}
             {mcpConfigPath}
@@ -255,7 +254,7 @@
             <DeviceRegistryPanel {config} {localStatus} on:save={handleSave} />
           {/if}
           {#if config.localhost_api_enabled}
-            <ApiExamplesPanel {localStatus} {saving} on:toast={handleToast} />
+            <ApiExamplesPanel {localStatus} on:toast={handleToast} />
           {/if}
         </div>
       </CollapsibleSection>

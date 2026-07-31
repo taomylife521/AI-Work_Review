@@ -119,7 +119,7 @@
     <!-- 录制状态 -->
     <div class="sidebar-status sidebar-status-panel">
       <div class="flex items-center justify-between gap-3">
-        <div class="flex items-center gap-2 min-w-0">
+        <div class="sidebar-recording-copy flex items-center gap-2 min-w-0">
           <span class="relative flex h-2.5 w-2.5">
             {#if isRecording && !isPaused}
               <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -134,12 +134,25 @@
         </div>
         <button
           on:click={toggleRecording}
-          class="mt-0.5 shrink-0 px-3 py-1.5 text-[11px] font-semibold rounded-full transition-all
+          class="sidebar-recording-toggle mt-0.5 shrink-0 px-3 py-1.5 text-[11px] font-semibold rounded-full transition-all
             {isPaused 
               ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-300' 
               : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-[#30363d] dark:text-[#adbac7]'}"
+          aria-label={isPaused ? translate('sidebar.resume') : translate('sidebar.pause')}
+          title={isPaused ? translate('sidebar.resume') : translate('sidebar.pause')}
         >
-          {#if isPaused}{translate('sidebar.resume')}{:else}{translate('sidebar.pause')}{/if}
+          <span class="sidebar-recording-toggle-label">
+            {#if isPaused}{translate('sidebar.resume')}{:else}{translate('sidebar.pause')}{/if}
+          </span>
+          {#if isPaused}
+            <svg class="sidebar-recording-toggle-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          {:else}
+            <svg class="sidebar-recording-toggle-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
+            </svg>
+          {/if}
         </button>
       </div>
     </div>
@@ -207,15 +220,19 @@
         <div class="relative" bind:this={localeMenuContainer}>
           <button
             type="button"
-            class="locale-switch inline-flex h-8 min-w-[72px] items-center justify-center gap-1.5 rounded-full border border-slate-200/80 bg-white/90 px-3 text-[11px] font-semibold tracking-normal text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] outline-none dark:shadow-none transition hover:border-slate-300 hover:text-slate-900 focus:ring-2 focus:ring-slate-300 dark:border-[#30363d]/80 dark:bg-[#161b22]/80 dark:text-[#c9d1d9] dark:hover:border-[#484f58] dark:hover:text-[#e6edf3] dark:focus:ring-primary-600"
+            class="sidebar-locale-switch locale-switch inline-flex h-8 min-w-[72px] items-center justify-center gap-1.5 rounded-full border border-slate-200/80 bg-white/90 px-3 text-[11px] font-semibold tracking-normal text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] outline-none dark:shadow-none transition hover:border-slate-300 hover:text-slate-900 focus:ring-2 focus:ring-slate-300 dark:border-[#30363d]/80 dark:bg-[#161b22]/80 dark:text-[#c9d1d9] dark:hover:border-[#484f58] dark:hover:text-[#e6edf3] dark:focus:ring-primary-600"
             aria-label={translate('sidebar.localeButtonTitle')}
             aria-haspopup="menu"
             aria-expanded={localeMenuOpen}
             title={translate('sidebar.localeButtonTitle')}
             on:click={toggleLocaleMenu}
           >
-            <span class="leading-none">{currentLocaleLabel}</span>
-            <svg class="h-3 w-3 shrink-0 text-slate-400 transition-transform {localeMenuOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="sidebar-locale-compact-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" stroke-width="1.8" />
+              <path stroke-linecap="round" stroke-width="1.8" d="M3 12h18M12 3a15 15 0 010 18M12 3a15 15 0 000 18" />
+            </svg>
+            <span class="sidebar-locale-label leading-none">{currentLocaleLabel}</span>
+            <svg class="sidebar-locale-chevron h-3 w-3 shrink-0 text-slate-400 transition-transform {localeMenuOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 9l6 6 6-6" />
             </svg>
           </button>
