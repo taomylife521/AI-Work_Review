@@ -222,6 +222,8 @@ Work Review 的核心始终是**本地记录**。AI 的作用是让记录更容�
 
 **Windows：** 依赖 Microsoft Edge WebView2 Runtime。
 
+> **Windows 11 智能应用控制**：若系统提示「智能应用控制阻止了程序启动」，是因为本应用使用自签名证书（非 EV 商业证书）。可在「Windows 安全中心 → 应用和浏览器控制 → 智能应用控制」中将其关闭后运行。详见 [#139](https://github.com/wm94i/Work-Review/issues/139)。
+
 **Linux：** 截图和窗口追踪依赖当前会话类型与工具链。<details><summary>依赖说明</summary>
 
 ```bash

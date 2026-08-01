@@ -222,6 +222,8 @@ Work Review 的核心始終是**本地記錄**。AI 的作用是讓記錄更容�
 
 **Windows：** 依賴 Microsoft Edge WebView2 Runtime。
 
+> **Windows 11 智慧型應用程式控制**：若系統提示「智慧型應用程式控制已封鎖應用程式」，是因為本應用使用自簽憑證（非 EV 商業憑證）。可在「Windows 安全性 → 應用程式與瀏覽器控制 → 智慧型應用程式控制」中關閉後執行。詳見 [#139](https://github.com/wm94i/Work-Review/issues/139)。
+
 **Linux：** 截圖和窗口追蹤依賴當前會話類型與工具鏈。<details><summary>依賴說明</summary>
 
 ```bash

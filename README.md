@@ -222,6 +222,8 @@ Supported providers: Ollama (local) / LM Studio (local) / OpenAI compatible / De
 
 **Windows:** Depends on Microsoft Edge WebView2 Runtime.
 
+> **Windows 11 Smart App Control**: If Windows shows "Smart App Control blocked this app from running", it's because Work Review is signed with a self-signed certificate (not a commercial EV certificate). You can turn off Smart App Control in "Windows Security → App & browser control → Smart App Control". See [#139](https://github.com/wm94i/Work-Review/issues/139).
+
 **Linux:** Screenshots and window tracking depend on the current session type and toolchain. <details><summary>Dependency details</summary>
 
 ```bash
