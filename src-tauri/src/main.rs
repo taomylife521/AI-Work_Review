@@ -4517,6 +4517,7 @@ async fn main() {
             commands::save_avatar_position,
             commands::persist_avatar_position,
             commands::set_avatar_window_expanded,
+            commands::set_avatar_interactive_regions,
             commands::get_data_dir,
             commands::get_default_data_dir,
             commands::get_runtime_platform,

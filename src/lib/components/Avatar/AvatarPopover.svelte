@@ -32,7 +32,9 @@
     <div class={`avatar-popover-anchor absolute ${flipLeft ? 'left-[6%]' : 'right-[6%]'} top-[8px]`}>
       <div class="relative overflow-visible">
         <div
-          class="pointer-events-auto relative rounded-[16px] border shadow-[0_10px_24px_rgba(15,23,42,0.1),0_3px_10px_rgba(15,23,42,0.05)]"
+          class="relative rounded-[16px] border shadow-[0_10px_24px_rgba(15,23,42,0.1),0_3px_10px_rgba(15,23,42,0.05)]"
+          class:pointer-events-auto={bubble?.persistent}
+          data-avatar-hit-region={bubble?.persistent ? 'bubble' : undefined}
           style="{bubblePanelStyle} min-height: 40px; padding: 6px 14px 7px 14px; {panelStyle}"
         >
           {#if bubble?.persistent}

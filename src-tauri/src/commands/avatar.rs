@@ -136,6 +136,17 @@ pub async fn set_avatar_window_expanded(
         .map_err(|e| AppError::Unknown(format!("调整桌宠窗口尺寸失败: {e}")))
 }
 
+/// 更新隐藏桌宠时可交互的气泡/卡片区域。
+#[tauri::command]
+pub async fn set_avatar_interactive_regions(
+    precise: bool,
+    regions: Vec<crate::avatar_engine::AvatarInteractiveRegion>,
+) -> Result<(), AppError> {
+    crate::avatar_engine::update_avatar_interactive_regions(precise, regions);
+    crate::avatar_input::force_resync_click_through();
+    Ok(())
+}
+
 /// 从桌面助手窗口读取当前位置并持久化
 #[tauri::command]
 pub async fn persist_avatar_position(

@@ -136,7 +136,7 @@ test('状态气泡应采用贴头短气泡，减少白卡感和视觉侵入', ()
   assert.match(source, /bubble-tail-dot/);
   assert.match(windowSource, /h-\[86px\]/);
   assert.match(windowSource, /top-\[78px\]/);
-  assert.match(windowSource, /class="h-full w-\[82%\]"/);
+  assert.match(windowSource, /class="h-full w-\[82%\] pointer-events-auto"/);
   assert.doesNotMatch(source, /-translate-x-1\/2/);
 });
 
@@ -147,7 +147,8 @@ test('休息提醒气泡应支持常驻显示和手动关闭', () => {
   assert.match(source, /export let onClose = \(\) => \{\};/);
   assert.match(source, /bubble\?\.persistent/);
   assert.match(source, /class="absolute inset-0 z-20 overflow-visible pointer-events-none"/);
-  assert.match(source, /class="pointer-events-auto relative rounded-\[16px\]/);
+  assert.match(source, /class="relative rounded-\[16px\]/);
+  assert.match(source, /class:pointer-events-auto=\{bubble\?\.persistent\}/);
   assert.match(source, /<button[\s\S]*type="button"[\s\S]*on:click=\{onClose\}/);
   assert.match(source, /aria-label=\{t\('avatar\.dismissReminder'\)\}/);
   assert.match(source, /class="absolute inset-0 rounded-\[16px\]"/);

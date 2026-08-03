@@ -1,4 +1,6 @@
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use std::sync::Mutex;
 use tauri::{
     AppHandle, Emitter, LogicalSize, Manager, Monitor, PhysicalPosition, Position, Size,
     WebviewUrl, WebviewWindow, WebviewWindowBuilder,
@@ -25,6 +27,25 @@ const AVATAR_WINDOW_WIDTH: f64 = AVATAR_WINDOW_BASE_WIDTH * AVATAR_SCALE_DEFAULT
 #[cfg(test)]
 const AVATAR_WINDOW_HEIGHT: f64 = AVATAR_WINDOW_BASE_HEIGHT * AVATAR_SCALE_DEFAULT;
 const AVATAR_WINDOW_MARGIN: f64 = 8.0;
+const AVATAR_INTERACTIVE_REGION_TOLERANCE: f64 = 6.0;
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AvatarInteractiveRegion {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+#[derive(Debug, Clone, Default)]
+struct AvatarInteractiveHitState {
+    precise: bool,
+    regions: Vec<AvatarInteractiveRegion>,
+}
+
+static AVATAR_INTERACTIVE_HIT_STATE: Lazy<Mutex<AvatarInteractiveHitState>> =
+    Lazy::new(|| Mutex::new(AvatarInteractiveHitState::default()));
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Rect {
@@ -472,29 +493,117 @@ fn point_in_rect(cx: i64, cy: i64, x: i64, y: i64, w: i64, h: i64) -> bool {
     cx >= x && cy >= y && cx < x + w && cy < y + h
 }
 
-/// 全局鼠标是否落在桌宠窗口矩形内（物理像素）。用于智能穿透命中测试。
-/// 注意：用 `outer_size()`（物理），不用 `avatar_window_size`（逻辑），避免 DPR≠1 偏移。
-pub fn avatar_window_hit_by_cursor(app: &AppHandle) -> bool {
-    let Some(window) = app.get_webview_window(AVATAR_WINDOW_LABEL) else {
+fn is_valid_avatar_interactive_region(region: &AvatarInteractiveRegion) -> bool {
+    region.x.is_finite()
+        && region.y.is_finite()
+        && region.width.is_finite()
+        && region.height.is_finite()
+        && region.width > 0.0
+        && region.height > 0.0
+        && (region.x + region.width).is_finite()
+        && (region.y + region.height).is_finite()
+}
+
+/// 更新前端上报的桌宠交互区域。无效矩形不会进入运行时状态。
+pub fn update_avatar_interactive_regions(precise: bool, regions: Vec<AvatarInteractiveRegion>) {
+    let regions = regions
+        .into_iter()
+        .filter(is_valid_avatar_interactive_region)
+        .collect();
+    let mut state = AVATAR_INTERACTIVE_HIT_STATE
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    *state = AvatarInteractiveHitState { precise, regions };
+}
+
+/// 隐藏桌宠时，前端启用精确交互区域命中。
+pub fn avatar_precise_hit_testing_enabled() -> bool {
+    AVATAR_INTERACTIVE_HIT_STATE
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .precise
+}
+
+fn avatar_interactive_hit_state() -> AvatarInteractiveHitState {
+    AVATAR_INTERACTIVE_HIT_STATE
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
+
+/// 将全局物理坐标转换为窗口客户区逻辑坐标，并检查是否命中前端交互矩形。
+fn point_in_avatar_interactive_regions(
+    cursor_x: i64,
+    cursor_y: i64,
+    window_x: i32,
+    window_y: i32,
+    scale_factor: f64,
+    regions: &[AvatarInteractiveRegion],
+) -> bool {
+    if !scale_factor.is_finite() || scale_factor <= 0.0 || regions.is_empty() {
         return false;
-    };
-    let Ok(pos) = window.outer_position() else {
+    }
+
+    let local_x = (cursor_x as f64 - window_x as f64) / scale_factor;
+    let local_y = (cursor_y as f64 - window_y as f64) / scale_factor;
+    if !local_x.is_finite() || !local_y.is_finite() {
         return false;
-    };
-    let Ok(size) = window.outer_size() else {
-        return false;
-    };
-    let Some((cx, cy)) = crate::avatar_input::global_cursor_position(app) else {
-        return false;
-    };
-    point_in_rect(
+    }
+
+    regions.iter().any(|region| {
+        if !is_valid_avatar_interactive_region(region) {
+            return false;
+        }
+
+        let left = region.x - AVATAR_INTERACTIVE_REGION_TOLERANCE;
+        let top = region.y - AVATAR_INTERACTIVE_REGION_TOLERANCE;
+        let right = region.x + region.width + AVATAR_INTERACTIVE_REGION_TOLERANCE;
+        let bottom = region.y + region.height + AVATAR_INTERACTIVE_REGION_TOLERANCE;
+        left.is_finite()
+            && top.is_finite()
+            && right.is_finite()
+            && bottom.is_finite()
+            && local_x >= left
+            && local_y >= top
+            && local_x < right
+            && local_y < bottom
+    })
+}
+
+/// 全局鼠标是否命中桌宠。精确模式仅命中前端上报的交互区域；
+/// 非精确模式保留原有整窗物理矩形判断。
+pub fn avatar_window_hit_by_cursor(app: &AppHandle) -> Option<bool> {
+    let window = app.get_webview_window(AVATAR_WINDOW_LABEL)?;
+    let scale_factor = window.scale_factor().ok()?;
+    let (cx, cy) = crate::avatar_input::global_cursor_position(app, scale_factor)?;
+    let hit_state = avatar_interactive_hit_state();
+
+    if hit_state.precise {
+        // getBoundingClientRect() 相对 WebView 客户区，优先使用客户区物理原点。
+        let pos = window
+            .inner_position()
+            .or_else(|_| window.outer_position())
+            .ok()?;
+        return Some(point_in_avatar_interactive_regions(
+            cx,
+            cy,
+            pos.x,
+            pos.y,
+            scale_factor,
+            &hit_state.regions,
+        ));
+    }
+
+    let pos = window.outer_position().ok()?;
+    let size = window.outer_size().ok()?;
+    Some(point_in_rect(
         cx,
         cy,
         pos.x as i64,
         pos.y as i64,
         size.width as i64,
         size.height as i64,
-    )
+    ))
 }
 
 pub fn apply_avatar_window_expansion(
@@ -822,8 +931,9 @@ fn avatar_state(
 mod tests {
     use super::{
         avatar_window_size, clamp_avatar_position, clamp_avatar_position_with_size,
-        default_avatar_state, derive_avatar_state, derive_avatar_state_with_rules, point_in_rect,
-        remembered_avatar_position, resolve_avatar_position, Rect, AVATAR_WINDOW_HEIGHT,
+        default_avatar_state, derive_avatar_state, derive_avatar_state_with_rules,
+        point_in_avatar_interactive_regions, point_in_rect, remembered_avatar_position,
+        resolve_avatar_position, AvatarInteractiveRegion, Rect, AVATAR_WINDOW_HEIGHT,
         AVATAR_WINDOW_WIDTH,
     };
     use crate::config::AppCategoryRule;
@@ -838,6 +948,80 @@ mod tests {
         assert!(!point_in_rect(5, 10, 0, 0, 10, 10), "下边外不应命中");
         assert!(point_in_rect(-5, -5, -10, -10, 8, 8), "负坐标内部应命中");
         assert!(!point_in_rect(0, 0, 0, 0, 0, 0), "零尺寸矩形不应命中");
+    }
+
+    #[test]
+    fn 隐藏桌宠精确命中应排除窗口内透明区域并支持高分屏负坐标() {
+        let regions = vec![AvatarInteractiveRegion {
+            x: 15.0,
+            y: 8.0,
+            width: 120.0,
+            height: 48.0,
+        }];
+
+        assert!(point_in_avatar_interactive_regions(
+            -450, 140, -500, 100, 2.0, &regions,
+        ));
+        assert!(!point_in_avatar_interactive_regions(
+            -60, 140, -500, 100, 2.0, &regions,
+        ));
+        assert!(!point_in_avatar_interactive_regions(
+            -450,
+            140,
+            -500,
+            100,
+            2.0,
+            &[],
+        ));
+    }
+
+    #[test]
+    fn 隐藏桌宠精确命中应拒绝非法缩放与无效区域() {
+        let valid_region = vec![AvatarInteractiveRegion {
+            x: 15.0,
+            y: 8.0,
+            width: 120.0,
+            height: 48.0,
+        }];
+        assert!(!point_in_avatar_interactive_regions(
+            20,
+            20,
+            0,
+            0,
+            0.0,
+            &valid_region,
+        ));
+        assert!(!point_in_avatar_interactive_regions(
+            20,
+            20,
+            0,
+            0,
+            f64::NAN,
+            &valid_region,
+        ));
+
+        let invalid_regions = vec![
+            AvatarInteractiveRegion {
+                x: 0.0,
+                y: 0.0,
+                width: 0.0,
+                height: 20.0,
+            },
+            AvatarInteractiveRegion {
+                x: f64::NAN,
+                y: 0.0,
+                width: 20.0,
+                height: 20.0,
+            },
+        ];
+        assert!(!point_in_avatar_interactive_regions(
+            10,
+            10,
+            0,
+            0,
+            1.0,
+            &invalid_regions,
+        ));
     }
 
     #[test]

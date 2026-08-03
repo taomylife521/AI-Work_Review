@@ -815,6 +815,32 @@ test('继续提醒卡片应为每种人格提供紧凑按钮文案与完整 tool
   assert.match(i18nSource, /avatarFollowupSnoozeFull:/);
 });
 
+test('隐藏桌宠时仅实际通知区域应阻止鼠标穿透，透明区域保持可操作', () => {
+  const windowSource = readFileSync(new URL('../../../routes/avatar/AvatarWindow.svelte', import.meta.url), 'utf8');
+  const popoverSource = readFileSync(new URL('./AvatarPopover.svelte', import.meta.url), 'utf8');
+  const followupSource = readFileSync(new URL('./AvatarFollowupCard.svelte', import.meta.url), 'utf8');
+  const commandSource = readFileSync(new URL('../../../../src-tauri/src/commands/avatar.rs', import.meta.url), 'utf8');
+  const mainSource = readFileSync(new URL('../../../../src-tauri/src/main.rs', import.meta.url), 'utf8');
+
+  assert.match(popoverSource, /data-avatar-hit-region=\{bubble\?\.persistent \? 'bubble' : undefined\}/);
+  assert.match(popoverSource, /class:pointer-events-auto=\{bubble\?\.persistent\}/);
+  assert.doesNotMatch(popoverSource, /class="pointer-events-auto relative rounded-\[16px\]/);
+  assert.match(followupSource, /data-avatar-hit-region="followup"/);
+  assert.match(windowSource, /import \{ onMount, tick \} from 'svelte'/);
+  assert.match(windowSource, /document\.querySelectorAll\('\[data-avatar-hit-region\]'\)/);
+  assert.match(windowSource, /invoke\('set_avatar_interactive_regions'/);
+  assert.match(windowSource, /getBoundingClientRect\(\)/);
+  assert.match(windowSource, /precise:\s*!!state\.avatarBodyHidden/);
+  assert.match(windowSource, /new ResizeObserver/);
+  assert.match(windowSource, /cancelAnimationFrame/);
+  assert.match(windowSource, /interactiveRegionObserver\?\.disconnect\(\)/);
+  assert.match(windowSource, /class:pointer-events-none=\{state\.avatarBodyHidden\}/);
+  assert.match(windowSource, /state\.avatarBodyHidden[\s\S]*startAvatarDrag\(e\)/);
+  assert.match(windowSource, /class="h-full w-\[82%\] pointer-events-auto"/);
+  assert.match(commandSource, /pub async fn set_avatar_interactive_regions/);
+  assert.match(mainSource, /commands::set_avatar_interactive_regions/);
+});
+
 test('桌宠气泡面板在非紧凑文案下应允许更长的英文文字换行，避免整段被裁断', () => {
   const popoverSource = readFileSync(new URL('./AvatarPopover.svelte', import.meta.url), 'utf8');
 

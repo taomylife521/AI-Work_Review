@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { emitTo, listen } from '@tauri-apps/api/event';
   import { getCurrentWindow, currentMonitor } from '@tauri-apps/api/window';
@@ -64,6 +64,12 @@
   let handleContextMenu = null;
   let handleKeydown = null;
   let avatarExpanded = null;
+  let interactiveRegionObserver = null;
+  let interactiveRegionFrame = null;
+  let interactiveRegionElements = [];
+  let interactiveRegionSyncPending = false;
+  let interactiveRegionSyncRequested = false;
+  let interactiveRegionsMounted = false;
   $: currentLocale = $locale;
 
   const RUNTIME_BUBBLE_MESSAGES = {
@@ -255,6 +261,97 @@
   $: bubble = localizeBubblePayload(focusBubble || bubbleSource, currentLocale);
   $: followupCopy = buildFollowupCopy(followup);
   $: syncAvatarExpansion(followup != null);
+  $: {
+    // 以下状态均可能改变通知区域的位置或尺寸，DOM 更新后统一重新采集。
+    void bubble;
+    void followup;
+    void bubbleFlipLeft;
+    void currentLocale;
+    void state.avatarBodyHidden;
+    scheduleInteractiveRegionsSync();
+  }
+
+  function refreshInteractiveRegionObserver(elements) {
+    const unchanged =
+      elements.length === interactiveRegionElements.length
+      && elements.every((element, index) => element === interactiveRegionElements[index]);
+
+    if (unchanged) {
+      return;
+    }
+
+    interactiveRegionObserver?.disconnect();
+    interactiveRegionElements = elements;
+    for (const element of elements) {
+      interactiveRegionObserver?.observe(element);
+    }
+  }
+
+  async function syncAvatarInteractiveRegions() {
+    if (interactiveRegionSyncPending) {
+      interactiveRegionSyncRequested = true;
+      return;
+    }
+
+    interactiveRegionSyncPending = true;
+    try {
+      do {
+        interactiveRegionSyncRequested = false;
+        await tick();
+
+        if (!interactiveRegionsMounted) {
+          return;
+        }
+
+        const elements = Array.from(
+          document.querySelectorAll('[data-avatar-hit-region]'),
+        );
+        refreshInteractiveRegionObserver(elements);
+
+        const regions = elements
+          .map((element) => {
+            const rect = element.getBoundingClientRect();
+            return {
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height,
+            };
+          })
+          .filter((region) => region.width > 0 && region.height > 0);
+
+        try {
+          await invoke('set_avatar_interactive_regions', {
+            precise: !!state.avatarBodyHidden,
+            regions,
+          });
+        } catch (e) {
+          console.error('更新桌宠精确交互区域失败:', e);
+        }
+      } while (interactiveRegionSyncRequested && interactiveRegionsMounted);
+    } finally {
+      interactiveRegionSyncPending = false;
+    }
+  }
+
+  function scheduleInteractiveRegionsSync() {
+    if (!interactiveRegionsMounted) {
+      return;
+    }
+
+    interactiveRegionSyncRequested = true;
+    if (interactiveRegionSyncPending) {
+      return;
+    }
+
+    if (interactiveRegionFrame !== null) {
+      cancelAnimationFrame(interactiveRegionFrame);
+    }
+    interactiveRegionFrame = requestAnimationFrame(() => {
+      interactiveRegionFrame = null;
+      void syncAvatarInteractiveRegions();
+    });
+  }
 
   async function syncAvatarExpansion(expanded, options = {}) {
     const { force = false } = options;
@@ -671,6 +768,11 @@
     let unlistenMoved = () => {};
     let unlistenResized = () => {};
     let unlistenLocaleChanged = () => {};
+    interactiveRegionsMounted = true;
+    interactiveRegionObserver = new ResizeObserver(() => {
+      scheduleInteractiveRegionsSync();
+    });
+    scheduleInteractiveRegionsSync();
     initializeLocale();
     unsubscribeLocale = locale.subscribe((nextLocale) => {
       applyLocaleToDocument(nextLocale);
@@ -805,10 +907,20 @@
       // 这里在 resize 后回正到当前配置尺寸，避免出现“拖一下就变小一圈”。
       unlistenResized = await nativeWindow.onResized(() => {
         scheduleAvatarSizeCorrection();
+        scheduleInteractiveRegionsSync();
       });
     })();
 
     return () => {
+      interactiveRegionsMounted = false;
+      interactiveRegionSyncRequested = false;
+      if (interactiveRegionFrame !== null) {
+        cancelAnimationFrame(interactiveRegionFrame);
+        interactiveRegionFrame = null;
+      }
+      interactiveRegionObserver?.disconnect();
+      interactiveRegionObserver = null;
+      interactiveRegionElements = [];
       clearTimeout(bubbleTimer);
       clearTimeout(transitionTimer);
       clearTimeout(positionSaveTimer);
@@ -831,7 +943,15 @@
   });
 </script>
 
-<div role="presentation" class="relative h-screen w-screen overflow-visible bg-transparent select-none" on:mousedown={(e) => { if (e.target.closest('button, a, section, .avatar-popover-anchor, [role="button"]')) return; startAvatarDrag(e); }}>
+<div
+  role="presentation"
+  class="relative h-screen w-screen overflow-visible bg-transparent select-none"
+  class:pointer-events-none={state.avatarBodyHidden}
+  on:mousedown={(e) => {
+    if (state.avatarBodyHidden || e.target.closest('button, a, section, .avatar-popover-anchor, [role="button"]')) return;
+    startAvatarDrag(e);
+  }}
+>
   <div class="absolute inset-x-0 top-0 h-[86px] overflow-visible">
     <AvatarPopover {bubble} flipLeft={bubbleFlipLeft} onClose={dismissBubble} />
   </div>
@@ -849,7 +969,7 @@
 
   {#if !state.avatarBodyHidden}
     <div class="absolute inset-x-0 bottom-0 top-[78px] flex items-end justify-center overflow-visible">
-      <div class="h-full w-[82%]">
+      <div class="h-full w-[82%] pointer-events-auto">
         <AvatarCanvas
           {state}
           {inputActivity}
