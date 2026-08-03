@@ -4281,6 +4281,7 @@ async fn main() {
                     avatar_input::set_avatar_click_through_flag(s.config.avatar_click_through);
                 }
                 avatar_input::start_avatar_input_monitor(app.handle());
+                avatar_input::spawn_avatar_input_monitor_retry(app.handle().clone());
                 avatar_input::spawn_avatar_input_bridge(app.handle().clone());
             } else {
                 avatar_input::set_avatar_enabled_flag(false);

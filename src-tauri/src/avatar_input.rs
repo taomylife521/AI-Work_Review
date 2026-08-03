@@ -21,6 +21,8 @@ static CURSOR_RATIO_X_PERMILLE: AtomicU32 = AtomicU32::new(500);
 static CURSOR_RATIO_Y_PERMILLE: AtomicU32 = AtomicU32::new(500);
 static INPUT_BRIDGE_STARTED: AtomicBool = AtomicBool::new(false);
 static INPUT_MONITOR_STARTED: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "macos")]
+static INPUT_MONITOR_RETRY_STARTED: AtomicBool = AtomicBool::new(false);
 // 智能穿透运行时状态（无锁读，避免轮询每轮锁 Mutex）
 static AVATAR_CLICK_THROUGH_ENABLED: AtomicBool = AtomicBool::new(false);
 static AVATAR_ENABLED_FLAG: AtomicBool = AtomicBool::new(false);
@@ -61,6 +63,8 @@ const MOUSE_GROUP_LEFT: u8 = 2;
 const MOUSE_GROUP_RIGHT: u8 = 3;
 const MOUSE_GROUP_SIDE: u8 = 4;
 const INPUT_BRIDGE_POLL_INTERVAL: Duration = Duration::from_millis(16);
+#[cfg(target_os = "macos")]
+const INPUT_MONITOR_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 const PRESSED_KEY_STALE_MS: u64 = KEYBOARD_ACTIVE_WINDOW_MS;
 #[cfg(target_os = "linux")]
 const WAYLAND_MOUSE_POLL_INTERVAL: Duration = Duration::from_millis(120);
@@ -1101,6 +1105,47 @@ pub fn global_cursor_position(app: &AppHandle) -> Option<(i64, i64)> {
     Some((abs_x.round() as i64, abs_y.round() as i64))
 }
 
+fn should_retry_avatar_input_monitor(
+    monitor_started: bool,
+    has_accessibility_permission: bool,
+    has_input_monitoring_permission: bool,
+) -> bool {
+    !monitor_started && has_accessibility_permission && has_input_monitoring_permission
+}
+
+#[cfg(target_os = "macos")]
+pub fn spawn_avatar_input_monitor_retry(app: AppHandle) {
+    if INPUT_MONITOR_RETRY_STARTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let monitor_started = INPUT_MONITOR_STARTED.load(Ordering::SeqCst);
+            if !monitor_started {
+                let has_accessibility_permission =
+                    crate::screenshot::has_accessibility_permission(false);
+                let has_input_monitoring_permission =
+                    crate::screenshot::has_input_monitoring_permission();
+
+                if should_retry_avatar_input_monitor(
+                    monitor_started,
+                    has_accessibility_permission,
+                    has_input_monitoring_permission,
+                ) {
+                    log::info!("桌宠输入联动权限已就绪，重新注册全局键鼠监听");
+                    start_avatar_input_monitor(&app);
+                }
+            }
+
+            tokio::time::sleep(INPUT_MONITOR_RETRY_INTERVAL).await;
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn spawn_avatar_input_monitor_retry(_app: AppHandle) {}
+
 #[cfg(target_os = "macos")]
 thread_local! {
     static MACOS_INPUT_MONITOR: std::cell::RefCell<Option<MacosInputMonitor>> =
@@ -1585,6 +1630,14 @@ mod tests {
             .pressed_keys
             .clear();
         guard
+    }
+
+    #[test]
+    fn macos权限恢复且监听尚未启动时应触发重试() {
+        assert!(!should_retry_avatar_input_monitor(true, true, true));
+        assert!(!should_retry_avatar_input_monitor(false, false, true));
+        assert!(!should_retry_avatar_input_monitor(false, true, false));
+        assert!(should_retry_avatar_input_monitor(false, true, true));
     }
 
     #[test]

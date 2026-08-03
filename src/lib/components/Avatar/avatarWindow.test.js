@@ -183,6 +183,17 @@ test('桌宠窗口应监听原生输入事件，并将键鼠活跃状态喂给�
   assert.match(inputSource, /GetCursorPos/);
 });
 
+test('macOS 权限在启动后恢复时应自动重试桌宠输入监听', () => {
+  const mainSource = readFileSync(new URL('../../../../src-tauri/src/main.rs', import.meta.url), 'utf8');
+  const inputSource = readFileSync(new URL('../../../../src-tauri/src/avatar_input.rs', import.meta.url), 'utf8');
+
+  assert.match(mainSource, /spawn_avatar_input_monitor_retry/);
+  assert.match(inputSource, /pub fn spawn_avatar_input_monitor_retry/);
+  assert.match(inputSource, /has_accessibility_permission\(false\)/);
+  assert.match(inputSource, /has_input_monitoring_permission\(\)/);
+  assert.match(inputSource, /start_avatar_input_monitor\(&app\)/);
+});
+
 test('所有平台均启用智能穿透命中轮询，修复 Windows 穿透模式下通知按钮无法点击（#137）', () => {
   const inputSource = readFileSync(new URL('../../../../src-tauri/src/avatar_input.rs', import.meta.url), 'utf8');
 
