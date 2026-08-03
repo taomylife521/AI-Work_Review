@@ -758,24 +758,22 @@ fn clamp_avatar_position_with_size(
 
 fn avatar_window_size(scale: f64, expanded: bool, body_hidden: bool) -> (f64, f64) {
     let normalized_scale = normalize_avatar_scale(scale);
-    let (base_width, base_height) = if expanded {
-        (
-            AVATAR_WINDOW_EXPANDED_BASE_WIDTH,
-            AVATAR_WINDOW_EXPANDED_BASE_HEIGHT,
-        )
+    let base_width = if expanded {
+        AVATAR_WINDOW_EXPANDED_BASE_WIDTH
     } else {
-        (AVATAR_WINDOW_BASE_WIDTH, AVATAR_WINDOW_BASE_HEIGHT)
+        AVATAR_WINDOW_BASE_WIDTH
     };
-    // 隐藏本体时窗口高度收缩到仅容纳通知区（顶部气泡/卡片 + 边距），
-    // 宽度保持不变以容纳完整气泡（#137 诉求二）
-    let effective_height = if body_hidden {
+    // 跟进通知展开时必须优先保留完整窗口高度；隐藏本体只压缩非展开状态。
+    let base_height = if expanded {
+        AVATAR_WINDOW_EXPANDED_BASE_HEIGHT
+    } else if body_hidden {
         AVATAR_WINDOW_BODY_HIDDEN_BASE_HEIGHT
     } else {
-        base_height
+        AVATAR_WINDOW_BASE_HEIGHT
     };
     (
         ((base_width * normalized_scale) * 10.0).round() / 10.0,
-        ((effective_height * normalized_scale) * 10.0).round() / 10.0,
+        ((base_height * normalized_scale) * 10.0).round() / 10.0,
     )
 }
 
@@ -1026,6 +1024,17 @@ mod tests {
         assert!(expanded_w > compact_w);
         assert!(expanded_h > compact_h);
         assert_eq!((expanded_w, expanded_h), (342.0, 396.0));
+    }
+
+    #[test]
+    fn 隐藏桌宠本体时展开通知仍应使用完整展开尺寸() {
+        let (hidden_compact_w, hidden_compact_h) = avatar_window_size(0.9, false, true);
+        let (hidden_expanded_w, hidden_expanded_h) = avatar_window_size(0.9, true, true);
+        let visible_expanded = avatar_window_size(0.9, true, false);
+
+        assert_eq!((hidden_compact_w, hidden_compact_h), (248.4, 99.0));
+        assert_eq!((hidden_expanded_w, hidden_expanded_h), (342.0, 396.0));
+        assert_eq!((hidden_expanded_w, hidden_expanded_h), visible_expanded);
     }
 
     #[test]
