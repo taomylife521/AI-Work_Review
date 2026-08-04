@@ -415,8 +415,8 @@ npm run tauri:build  # 構建
 
 <a href="https://www.star-history.com/#wm94i/Work-Review&Date">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=wm94i/Work-Review&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=wm94i/Work-Review&type=Date" />
-    <img alt="Star History" src="https://api.star-history.com/svg?repos=wm94i/Work-Review&type=Date" width="720" />
+    <source media="(prefers-color-scheme: dark)" srcset="docs/star-history-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="docs/star-history.svg" />
+    <img alt="Star History" src="docs/star-history.svg" width="720" />
   </picture>
 </a>
