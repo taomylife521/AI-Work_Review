@@ -170,10 +170,6 @@
                   ? 'sidebar-nav-item-active'
                   : 'sidebar-nav-item-idle'}">
 
-              {#if activeStates[item.path]}
-                <!-- 当前页指示条：三套 ui-style 各有专属样式（app.css .sidebar-nav-rail） -->
-                <span class="sidebar-nav-rail" aria-hidden="true"></span>
-              {/if}
               <div class="sidebar-nav-main">
                 <!-- SVG 图标 -->
                 <div class="sidebar-nav-icon {activeStates[item.path] ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400 group-hover:text-slate-500 dark:group-hover:text-slate-400'}">

@@ -852,9 +852,6 @@
   @apply w-[18px] h-[18px];
 }
 
-.sidebar-nav-rail {
-  @apply absolute start-1.5 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-full bg-indigo-500;
-}
 
 .sidebar-bottom {
   @apply pt-2.5;
@@ -1829,14 +1826,6 @@
   @apply min-w-0 flex items-center gap-2.5;
 }
 
-.sidebar-nav-rail {
-  inset-inline-start: 0.55rem;
-  width: 3px;
-  height: 1.75rem;
-  border-radius: 999px;
-  background: linear-gradient(180deg, #6366f1, #7c3aed);
-  box-shadow: 0 0 0 5px rgba(99, 102, 241, 0.08);
-}
 
 .sidebar-toolbelt {
   @apply rounded-none px-0;
@@ -4533,10 +4522,6 @@
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
 }
 
-.app-shell.ui-style-a .sidebar-nav-rail {
-  background: #0f172a;
-  box-shadow: none;
-}
 
 .app-shell.ui-style-a .sidebar-brand,
 .app-shell.ui-style-a .sidebar-toolbelt {
