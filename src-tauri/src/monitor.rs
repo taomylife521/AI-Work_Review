@@ -1754,11 +1754,12 @@ mod tests {
         categorize_app, categorize_app_with_rules, clean_browser_window_title, decode_mozlz4_bytes,
         extract_active_tab_url_from_session_store_value, extract_url_from_title,
         find_focused_sway_node, firefox_family_profile_dir_from_ini, is_browser_app,
-        is_probable_domain, normalize_display_app_name, normalize_macos_frontmost_app_name,
-        normalize_possible_url, parse_gnome_focused_window_dbus_output,
-        parse_hyprland_window_bounds, parse_kdotool_geometry_output,
-        parse_macos_window_bounds_fields, parse_xdotool_geometry_shell_output,
-        resolve_browser_url_for_window_linux, semantic_category_to_base_category, WindowBounds,
+        is_current_process_owner, is_probable_domain, normalize_display_app_name,
+        normalize_macos_frontmost_app_name, normalize_possible_url,
+        parse_gnome_focused_window_dbus_output, parse_hyprland_window_bounds,
+        parse_kdotool_geometry_output, parse_macos_window_bounds_fields,
+        parse_xdotool_geometry_shell_output, resolve_browser_url_for_window_linux,
+        semantic_category_to_base_category, WindowBounds,
     };
     use std::path::Path;
     #[cfg(target_os = "macos")]
@@ -1767,6 +1768,17 @@ mod tests {
         process::Command,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    #[test]
+    fn current_process_owner当前进程拥有的浮动窗口应被识别() {
+        assert!(is_current_process_owner(Some(24418.0), 24418));
+    }
+
+    #[test]
+    fn current_process_owner其他进程或缺少pid时不应识别为自身窗口() {
+        assert!(!is_current_process_owner(Some(24419.0), 24418));
+        assert!(!is_current_process_owner(None, 24418));
+    }
 
     #[test]
     fn 识别浏览器进程名() {
@@ -4121,6 +4133,12 @@ pub fn get_active_window_fast() -> Result<ActiveWindow> {
     })
 }
 
+/// 判断窗口所有者 PID 是否属于当前 Work Review 进程。
+#[cfg(any(target_os = "macos", test))]
+fn is_current_process_owner(owner_pid: Option<f64>, current_process_id: u32) -> bool {
+    owner_pid == Some(f64::from(current_process_id))
+}
+
 /// 获取浮动/overlay 窗口（如 PiP 画中画小窗）
 /// 通过 CGWindowListCopyWindowInfo 枚举屏幕上所有窗口，
 /// 过滤出 layer > 0 的浮动窗口（排除当前前台应用和系统进程）
@@ -4174,6 +4192,7 @@ pub fn get_overlay_windows(frontmost_app: &str) -> Vec<ActiveWindow> {
     ];
 
     let mut results: Vec<ActiveWindow> = Vec::new();
+    let current_process_id = std::process::id();
 
     unsafe {
         let window_list = CGWindowListCopyWindowInfo(
@@ -4236,6 +4255,16 @@ pub fn get_overlay_windows(frontmost_app: &str) -> Vec<ActiveWindow> {
 
             // 排除当前前台应用（避免重复计时）
             if owner_name == frontmost_app {
+                continue;
+            }
+
+            // 桌宠、通知气泡等当前进程的置顶窗口不代表用户正在使用 Work Review，
+            // 使用窗口所有者 PID 精确排除，避免应用名称变化或同名程序造成误判。
+            let owner_pid = get_cf_dict_number(dict, "kCGWindowOwnerPID");
+            if is_current_process_owner(owner_pid, current_process_id) {
+                log::debug!(
+                    "🪟 排除 Work Review 自身浮动窗口: {owner_name} (pid={current_process_id}, layer={layer})"
+                );
                 continue;
             }
 
