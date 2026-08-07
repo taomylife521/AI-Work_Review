@@ -125,9 +125,11 @@ test('多语言 README 底部都应展示 Star History，并在 License 后加�
   assert.match(enSource, /## License\s+\[MIT\]\(\.\/LICENSE\)[\s\S]*---\s+## Star History/);
   assert.match(twSource, /## License\s+\[MIT\]\(\.\/LICENSE\)[\s\S]*---\s+## 歷史星標/);
   assert.match(enSource, /star-history\.com\/#wm94i\/Work-Review&Date/);
-  assert.match(enSource, /<img alt="Star History" src="https:\/\/api\.star-history\.com\/svg\?repos=wm94i\/Work-Review&type=Date" width="720" \/>/);
-  assert.match(zhSource, /<img alt="Star History" src="https:\/\/api\.star-history\.com\/svg\?repos=wm94i\/Work-Review&type=Date" width="720" \/>/);
-  assert.match(twSource, /<img alt="Star History" src="https:\/\/api\.star-history\.com\/svg\?repos=wm94i\/Work-Review&type=Date" width="720" \/>/);
+  for (const source of [zhSource, enSource, twSource]) {
+    assert.match(source, /srcset="docs\/star-history-dark\.svg"/);
+    assert.match(source, /srcset="docs\/star-history\.svg"/);
+    assert.match(source, /<img alt="Star History" src="docs\/star-history\.svg" width="720" \/>/);
+  }
 });
 
 test('README 不应把默认关闭的 Localhost API 描述为启动后自动开放', async () => {
