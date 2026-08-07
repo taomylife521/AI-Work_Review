@@ -1436,6 +1436,34 @@ fn should_probe_browser_url_before_change_detection(
     last_app_name == Some(app_name) && last_window_title == Some(window_title)
 }
 
+fn claim_browser_url_probe(browser_url_probe_attempted: &mut bool, eligible: bool) -> bool {
+    if *browser_url_probe_attempted || !eligible {
+        return false;
+    }
+
+    // 查询开始即消耗本轮预算。即使 URL 获取失败，也不能立即重复扫描 UIA。
+    *browser_url_probe_attempted = true;
+    true
+}
+
+fn resolve_browser_url_once<F>(
+    browser_url_probe_attempted: &mut bool,
+    eligible: bool,
+    resolve: F,
+) -> Option<String>
+where
+    F: FnOnce() -> Option<String>,
+{
+    claim_browser_url_probe(browser_url_probe_attempted, eligible).then(resolve)?
+}
+
+fn browser_url_probe_attempted_after_full_lookup(
+    used_full_window_lookup: bool,
+    is_browser: bool,
+) -> bool {
+    used_full_window_lookup && is_browser
+}
+
 fn browser_change_capture_min_interval_ms(
     app_name: &str,
     title_changed: bool,
@@ -2173,25 +2201,33 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                 active_window_now,
             )
         };
-        let mut active_window = if let Some(window) = cached_active_window {
-            // 头像循环缓存不含浏览器 URL，如果是浏览器窗口则跳过缓存重新获取
-            if monitor::is_browser_app(&window.app_name) && window.browser_url.is_none() {
-                match monitor::get_active_window() {
-                    Ok(w) => w,
-                    Err(_) => window,
+        let (mut active_window, used_full_window_lookup) =
+            if let Some(window) = cached_active_window {
+                // 头像循环缓存不含浏览器 URL；浏览器窗口需要走完整采集路径。
+                if monitor::is_browser_app(&window.app_name) && window.browser_url.is_none() {
+                    match monitor::get_active_window() {
+                        Ok(window) => (window, true),
+                        Err(_) => (window, false),
+                    }
+                } else {
+                    (window, false)
                 }
             } else {
-                window
-            }
-        } else {
-            match monitor::get_active_window() {
-                Ok(w) => w,
-                Err(_) => {
-                    last_capture_time = std::time::Instant::now();
-                    continue;
-                }
-            }
-        };
+                (
+                    match monitor::get_active_window() {
+                        Ok(w) => w,
+                        Err(_) => {
+                            last_capture_time = std::time::Instant::now();
+                            continue;
+                        }
+                    },
+                    true,
+                )
+            };
+        let mut browser_url_probe_attempted = browser_url_probe_attempted_after_full_lookup(
+            used_full_window_lookup,
+            monitor::is_browser_app(&active_window.app_name),
+        );
 
         // 再次检查状态
         let should_capture = {
@@ -2242,21 +2278,25 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
             last_app_window_title.as_deref(),
             active_window.browser_url.as_deref(),
         );
-        if should_probe_browser_url {
-            if let Some(resolved_url) = monitor::resolve_browser_url_for_window(
-                &active_window.app_name,
-                &active_window.window_title,
-            ) {
-                if last_browser_url.as_deref() != Some(resolved_url.as_str()) {
-                    log::debug!(
-                        "浏览器 URL 预探测命中: {} | {} -> {}",
-                        active_window.app_name,
-                        active_window.window_title,
-                        resolved_url
-                    );
-                }
-                active_window.browser_url = Some(resolved_url);
+        if let Some(resolved_url) = resolve_browser_url_once(
+            &mut browser_url_probe_attempted,
+            should_probe_browser_url,
+            || {
+                monitor::resolve_browser_url_for_window(
+                    &active_window.app_name,
+                    &active_window.window_title,
+                )
+            },
+        ) {
+            if last_browser_url.as_deref() != Some(resolved_url.as_str()) {
+                log::debug!(
+                    "浏览器 URL 预探测命中: {} | {} -> {}",
+                    active_window.app_name,
+                    active_window.window_title,
+                    resolved_url
+                );
             }
+            active_window.browser_url = Some(resolved_url);
         }
 
         // 浏览器 URL 存在瞬时采集失败时，尽量复用同窗口最近一次成功值，减少统计断裂。
@@ -2389,24 +2429,29 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
             continue;
         }
 
-        if should_refresh_browser_url_before_record(
+        let should_refresh_browser_url = should_refresh_browser_url_before_record(
             &active_window.app_name,
             &active_window.window_title,
+        );
+        if let Some(resolved_url) = resolve_browser_url_once(
+            &mut browser_url_probe_attempted,
+            should_refresh_browser_url,
+            || {
+                monitor::resolve_browser_url_for_window(
+                    &active_window.app_name,
+                    &active_window.window_title,
+                )
+            },
         ) {
-            if let Some(resolved_url) = monitor::resolve_browser_url_for_window(
-                &active_window.app_name,
-                &active_window.window_title,
-            ) {
-                if active_window.browser_url.as_deref() != Some(resolved_url.as_str()) {
-                    log::debug!(
-                        "浏览器 URL 落库前刷新: {} | {} -> {}",
-                        active_window.app_name,
-                        active_window.window_title,
-                        resolved_url
-                    );
-                }
-                active_window.browser_url = Some(resolved_url);
+            if active_window.browser_url.as_deref() != Some(resolved_url.as_str()) {
+                log::debug!(
+                    "浏览器 URL 落库前刷新: {} | {} -> {}",
+                    active_window.app_name,
+                    active_window.window_title,
+                    resolved_url
+                );
             }
+            active_window.browser_url = Some(resolved_url);
             url_changed = match (&last_browser_url, &active_window.browser_url) {
                 (Some(l), Some(r)) => l != r,
                 (None, None) => false,
@@ -4622,12 +4667,12 @@ mod tests {
         advance_break_reminder, avatar_activity_decision, avatar_monitor_poll_interval_ms,
         avatar_monitor_poll_interval_ms_for_platform, avatar_proactive_ai_should_run,
         avatar_transition_decision, browser_change_capture_min_interval_ms,
-        describe_config_file_issue, duplicate_instance_should_stay_silent,
-        effective_dock_visibility, initial_recording_state, launch_args_contain_autostart,
-        main_window_close_behavior, monitoring_poll_interval_ms,
+        browser_url_probe_attempted_after_full_lookup, describe_config_file_issue,
+        duplicate_instance_should_stay_silent, effective_dock_visibility, initial_recording_state,
+        launch_args_contain_autostart, main_window_close_behavior, monitoring_poll_interval_ms,
         monitoring_poll_interval_ms_for_platform, persist_previous_activity_backfill,
         previous_app_backfill_duration, record_avatar_window_switch, recording_loop_decision,
-        resolve_activity_classification, reusable_cached_active_window,
+        resolve_activity_classification, resolve_browser_url_once, reusable_cached_active_window,
         screen_lock_check_interval_ms_for_platform, should_confirm_idle,
         should_emit_avatar_backlog_nudge, should_hide_main_window_on_setup,
         should_initialize_avatar_input, should_initialize_startup_permissions,
@@ -4894,6 +4939,89 @@ mod tests {
             None,
             Some("https://example.com"),
         ));
+    }
+
+    #[test]
+    fn 完整窗口查询后本轮后续阶段都不应再次查询url() {
+        let mut calls = 1;
+        let mut attempted = browser_url_probe_attempted_after_full_lookup(true, true);
+
+        let first = resolve_browser_url_once(&mut attempted, true, || {
+            calls += 1;
+            None
+        });
+        let second = resolve_browser_url_once(&mut attempted, true, || {
+            calls += 1;
+            None
+        });
+
+        assert_eq!(calls, 1);
+        assert!(first.is_none());
+        assert!(second.is_none());
+    }
+
+    #[test]
+    fn 变化检测领取查询后落库刷新不能再次领取() {
+        let mut attempted = false;
+
+        let mut calls = 0;
+        resolve_browser_url_once(&mut attempted, true, || {
+            calls += 1;
+            None
+        });
+        resolve_browser_url_once(&mut attempted, true, || {
+            calls += 1;
+            None
+        });
+
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn 浏览器url查询失败也应消耗本轮预算() {
+        let mut attempted = false;
+        let mut calls = 0;
+
+        let resolved_url = resolve_browser_url_once(&mut attempted, true, || {
+            calls += 1;
+            None
+        });
+        let retried_url = resolve_browser_url_once(&mut attempted, true, || {
+            calls += 1;
+            Some("https://example.com".to_string())
+        });
+
+        assert_eq!(calls, 1);
+        assert!(resolved_url.is_none());
+        assert!(retried_url.is_none());
+    }
+
+    #[test]
+    fn 变化检测无需查询时落库前仍可使用唯一预算() {
+        let mut attempted = false;
+
+        let mut calls = 0;
+        resolve_browser_url_once(&mut attempted, false, || {
+            calls += 1;
+            None
+        });
+        resolve_browser_url_once(&mut attempted, true, || {
+            calls += 1;
+            None
+        });
+        resolve_browser_url_once(&mut attempted, true, || {
+            calls += 1;
+            None
+        });
+
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn 完整窗口查询是否探测url不应依赖查询结果() {
+        assert!(browser_url_probe_attempted_after_full_lookup(true, true));
+        assert!(!browser_url_probe_attempted_after_full_lookup(false, true));
+        assert!(!browser_url_probe_attempted_after_full_lookup(true, false));
     }
 
     #[test]

@@ -9,11 +9,20 @@ use crate::linux_session::{
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde_json::Value;
+#[cfg(any(target_os = "windows", test))]
+use std::collections::{HashMap, HashSet};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use std::process::{Command, Output, Stdio};
+#[cfg(any(target_os = "windows", test))]
+use std::sync::{
+    atomic::{AtomicU8, Ordering},
+    Arc,
+};
+#[cfg(target_os = "windows")]
+use std::sync::{mpsc, Condvar, Mutex};
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use std::thread;
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -1474,20 +1483,570 @@ fn normalize_executable_path(path: &str) -> Option<String> {
     Some(trimmed.replace('/', "\\"))
 }
 
+#[cfg(any(target_os = "windows", test))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct BrowserUrlCacheKey {
+    identity: BrowserWindowIdentity,
+    raw_window_title: String,
+}
+
+#[cfg(any(target_os = "windows", test))]
+impl BrowserUrlCacheKey {
+    fn new(hwnd: isize, pid: u32, raw_window_title: &str) -> Self {
+        Self {
+            identity: BrowserWindowIdentity { hwnd, pid },
+            raw_window_title: raw_window_title.to_string(),
+        }
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct BrowserWindowIdentity {
+    hwnd: isize,
+    pid: u32,
+}
+
+#[cfg(any(target_os = "windows", test))]
+const BROWSER_URL_TICKET_PENDING: u8 = 0;
+#[cfg(any(target_os = "windows", test))]
+const BROWSER_URL_TICKET_RUNNING: u8 = 1;
+#[cfg(any(target_os = "windows", test))]
+const BROWSER_URL_TICKET_CANCELLED: u8 = 2;
+
+#[cfg(any(target_os = "windows", test))]
+#[derive(Debug, Clone)]
+struct BrowserUrlQueryTicket {
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    key: BrowserUrlCacheKey,
+    deadline_ms: u64,
+    state: Arc<AtomicU8>,
+}
+
+#[cfg(any(target_os = "windows", test))]
+impl BrowserUrlQueryTicket {
+    fn new(key: BrowserUrlCacheKey, deadline_ms: u64) -> Self {
+        Self {
+            key,
+            deadline_ms,
+            state: Arc::new(AtomicU8::new(BROWSER_URL_TICKET_PENDING)),
+        }
+    }
+
+    fn cancel_if_pending(&self) -> bool {
+        self.state
+            .compare_exchange(
+                BROWSER_URL_TICKET_PENDING,
+                BROWSER_URL_TICKET_CANCELLED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    }
+
+    fn try_start(&self, now_ms: u64, key_is_current: bool, query_is_active: bool) -> bool {
+        if now_ms >= self.deadline_ms || !key_is_current || !query_is_active {
+            self.cancel_if_pending();
+            return false;
+        }
+
+        self.state
+            .compare_exchange(
+                BROWSER_URL_TICKET_PENDING,
+                BROWSER_URL_TICKET_RUNNING,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    }
+}
+
+/// 固定工作线程的等待槽：正在执行的任务之外，只保留最新一个待处理任务。
+#[cfg(any(target_os = "windows", test))]
+struct LatestOnlySlot<T> {
+    pending: Option<T>,
+}
+
+#[cfg(any(target_os = "windows", test))]
+impl<T> Default for LatestOnlySlot<T> {
+    fn default() -> Self {
+        Self { pending: None }
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+impl<T> LatestOnlySlot<T> {
+    fn replace(&mut self, value: T) -> Option<T> {
+        self.pending.replace(value)
+    }
+
+    fn take(&mut self) -> Option<T> {
+        self.pending.take()
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+#[derive(Debug, Clone, Copy)]
+struct BrowserUrlProtectionConfig {
+    success_ttl_ms: u64,
+    failure_ttl_ms: u64,
+    slow_query_threshold_ms: u64,
+    circuit_breaker_cooldown_ms: u64,
+}
+
+#[cfg(target_os = "windows")]
+impl Default for BrowserUrlProtectionConfig {
+    fn default() -> Self {
+        Self {
+            success_ttl_ms: 3_000,
+            failure_ttl_ms: 2_000,
+            slow_query_threshold_ms: 1_000,
+            circuit_breaker_cooldown_ms: 20_000,
+        }
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BrowserUrlQueryDecision {
+    StartQuery,
+    UseCached(Option<String>),
+    QueryInFlight,
+    CircuitOpen,
+}
+
+#[cfg(any(target_os = "windows", test))]
+#[derive(Debug, Clone)]
+struct BrowserUrlCacheEntry {
+    value: Option<String>,
+    expires_at_ms: u64,
+}
+
+#[cfg(any(target_os = "windows", test))]
+struct BrowserUrlProtection {
+    config: BrowserUrlProtectionConfig,
+    cache: HashMap<BrowserUrlCacheKey, BrowserUrlCacheEntry>,
+    in_flight_windows: HashSet<BrowserWindowIdentity>,
+    circuit_open_until_by_window: HashMap<BrowserWindowIdentity, u64>,
+}
+
+#[cfg(any(target_os = "windows", test))]
+impl BrowserUrlProtection {
+    fn new(config: BrowserUrlProtectionConfig) -> Self {
+        Self {
+            config,
+            cache: HashMap::new(),
+            in_flight_windows: HashSet::new(),
+            circuit_open_until_by_window: HashMap::new(),
+        }
+    }
+
+    /// 纯状态判断：调用方传入单调递增毫秒数，避免测试依赖真实时间。
+    fn begin_query(&mut self, key: &BrowserUrlCacheKey, now_ms: u64) -> BrowserUrlQueryDecision {
+        self.cache.retain(|_, entry| entry.expires_at_ms > now_ms);
+        self.circuit_open_until_by_window
+            .retain(|_, open_until_ms| *open_until_ms > now_ms);
+
+        if let Some(entry) = self.cache.get(key) {
+            return BrowserUrlQueryDecision::UseCached(entry.value.clone());
+        }
+
+        // 同一 HWND 标题变化时，旧标题结果不得再占用缓存，避免 URL 串号和状态增长。
+        self.cache
+            .retain(|cached_key, _| cached_key.identity.hwnd != key.identity.hwnd);
+
+        if self
+            .circuit_open_until_by_window
+            .contains_key(&key.identity)
+        {
+            return BrowserUrlQueryDecision::CircuitOpen;
+        }
+
+        if !self.in_flight_windows.insert(key.identity) {
+            return BrowserUrlQueryDecision::QueryInFlight;
+        }
+
+        BrowserUrlQueryDecision::StartQuery
+    }
+
+    /// 完成查询并写入成功/失败缓存；返回值表示本次慢查询是否打开了熔断器。
+    fn finish_query(
+        &mut self,
+        key: &BrowserUrlCacheKey,
+        started_at_ms: u64,
+        finished_at_ms: u64,
+        value: Option<String>,
+        force_circuit_open: bool,
+    ) -> bool {
+        self.in_flight_windows.remove(&key.identity);
+
+        // 调用方等待超时表示工作线程可能仍在 UIA 内部阻塞；此时只开启熔断，
+        // 不写失败缓存，确保 begin_query 明确走 CircuitOpen 分支并使用低成本兜底。
+        if !force_circuit_open {
+            let ttl_ms = if value.is_some() {
+                self.config.success_ttl_ms
+            } else {
+                self.config.failure_ttl_ms
+            };
+            self.cache.insert(
+                key.clone(),
+                BrowserUrlCacheEntry {
+                    value,
+                    expires_at_ms: finished_at_ms.saturating_add(ttl_ms),
+                },
+            );
+        }
+
+        let elapsed_ms = finished_at_ms.saturating_sub(started_at_ms);
+        let is_slow = force_circuit_open || elapsed_ms >= self.config.slow_query_threshold_ms;
+        if is_slow {
+            self.circuit_open_until_by_window.insert(
+                key.identity,
+                finished_at_ms.saturating_add(self.config.circuit_breaker_cooldown_ms),
+            );
+        }
+
+        is_slow
+    }
+
+    fn is_query_active(&mut self, key: &BrowserUrlCacheKey, now_ms: u64) -> bool {
+        self.circuit_open_until_by_window
+            .retain(|_, open_until_ms| *open_until_ms > now_ms);
+        self.in_flight_windows.contains(&key.identity)
+            && !self
+                .circuit_open_until_by_window
+                .contains_key(&key.identity)
+    }
+
+    fn discard_query_with_cooldown(&mut self, key: &BrowserUrlCacheKey, now_ms: u64) {
+        self.in_flight_windows.remove(&key.identity);
+        let open_until_ms = now_ms.saturating_add(self.config.failure_ttl_ms);
+        self.circuit_open_until_by_window
+            .entry(key.identity)
+            .and_modify(|current| *current = (*current).max(open_until_ms))
+            .or_insert(open_until_ms);
+    }
+}
+
+#[cfg(target_os = "windows")]
+static WINDOWS_BROWSER_URL_PROTECTION: Lazy<Mutex<BrowserUrlProtection>> = Lazy::new(|| {
+    Mutex::new(BrowserUrlProtection::new(
+        BrowserUrlProtectionConfig::default(),
+    ))
+});
+
+#[cfg(target_os = "windows")]
+static WINDOWS_BROWSER_URL_PROTECTION_CLOCK: Lazy<Instant> = Lazy::new(Instant::now);
+
+#[cfg(target_os = "windows")]
+const WINDOWS_BROWSER_URL_WAIT_TIMEOUT_MS: u64 = 350;
+
+#[cfg(target_os = "windows")]
+const WINDOWS_BROWSER_URL_NATIVE_FALLBACK_BUDGET_MS: u64 = 200;
+
+#[cfg(target_os = "windows")]
+#[derive(Debug)]
+enum BrowserUrlWorkerResponse {
+    Completed(Option<String>),
+    Replaced,
+    Skipped,
+}
+
+#[cfg(target_os = "windows")]
+struct BrowserUrlQueryJob {
+    app_name: String,
+    ticket: BrowserUrlQueryTicket,
+    response_tx: mpsc::SyncSender<BrowserUrlWorkerResponse>,
+}
+
+/// Windows UIA 只能在一个固定线程中串行执行。若该线程被第三方辅助功能树阻塞，
+/// 调用方仍会在有界时间内返回；等待槽只保留最新任务，避免不断创建阻塞线程。
+#[cfg(target_os = "windows")]
+struct WindowsBrowserUrlWorker {
+    queue: Arc<(Mutex<LatestOnlySlot<BrowserUrlQueryJob>>, Condvar)>,
+    available: bool,
+}
+
+#[cfg(target_os = "windows")]
+impl WindowsBrowserUrlWorker {
+    fn new() -> Self {
+        let queue = Arc::new((Mutex::new(LatestOnlySlot::default()), Condvar::new()));
+        let worker_queue = Arc::clone(&queue);
+        let available = thread::Builder::new()
+            .name("work-review-browser-uia".to_string())
+            .spawn(move || loop {
+                let job = {
+                    let (queue_lock, queue_ready) = &*worker_queue;
+                    let mut slot = queue_lock
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    while slot.pending.is_none() {
+                        slot = queue_ready
+                            .wait(slot)
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    }
+                    slot.take().expect("待处理任务已由条件变量确认")
+                };
+
+                let now_ms = windows_browser_url_now_ms();
+                let key_is_current = browser_url_cache_key_is_current_windows(&job.ticket.key);
+                let query_is_active = WINDOWS_BROWSER_URL_PROTECTION
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .is_query_active(&job.ticket.key, now_ms);
+                if !job
+                    .ticket
+                    .try_start(now_ms, key_is_current, query_is_active)
+                {
+                    let _ = job.response_tx.send(BrowserUrlWorkerResponse::Skipped);
+                    continue;
+                }
+
+                let hwnd = job.ticket.key.identity.hwnd;
+                let window_title = job.ticket.key.raw_window_title.as_str();
+                let result = std::panic::catch_unwind(|| {
+                    query_browser_url_windows_unprotected(&job.app_name, window_title, hwnd)
+                })
+                .unwrap_or_else(|_| {
+                    log::warn!("浏览器 URL 工作线程捕获到异常: hwnd={hwnd}");
+                    None
+                });
+                let _ = job
+                    .response_tx
+                    .send(BrowserUrlWorkerResponse::Completed(result));
+            })
+            .map(|_| true)
+            .unwrap_or_else(|error| {
+                log::error!("启动浏览器 URL UIA 工作线程失败: {error}");
+                false
+            });
+
+        Self { queue, available }
+    }
+
+    fn submit_latest(&self, job: BrowserUrlQueryJob) -> bool {
+        if !self.available {
+            return false;
+        }
+
+        let (queue_lock, queue_ready) = &*self.queue;
+        let mut slot = queue_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(replaced) = slot.replace(job) {
+            let _ = replaced.ticket.cancel_if_pending();
+            let _ = replaced
+                .response_tx
+                .try_send(BrowserUrlWorkerResponse::Replaced);
+        }
+        queue_ready.notify_one();
+        true
+    }
+}
+
+#[cfg(target_os = "windows")]
+static WINDOWS_BROWSER_URL_WORKER: Lazy<WindowsBrowserUrlWorker> =
+    Lazy::new(WindowsBrowserUrlWorker::new);
+
+#[cfg(target_os = "windows")]
+fn windows_browser_url_now_ms() -> u64 {
+    WINDOWS_BROWSER_URL_PROTECTION_CLOCK
+        .elapsed()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
+
+#[cfg(target_os = "windows")]
+fn get_window_process_id_windows(hwnd: isize) -> u32 {
+    if hwnd == 0 {
+        return 0;
+    }
+
+    let mut pid = 0;
+    unsafe {
+        winapi::um::winuser::GetWindowThreadProcessId(
+            hwnd as winapi::shared::windef::HWND,
+            &mut pid,
+        );
+    }
+    pid
+}
+
+#[cfg(target_os = "windows")]
+fn get_raw_window_title_windows(hwnd: isize) -> Option<String> {
+    if hwnd == 0 {
+        return None;
+    }
+
+    let mut title: [u16; 512] = [0; 512];
+    let len = unsafe {
+        winapi::um::winuser::GetWindowTextW(
+            hwnd as winapi::shared::windef::HWND,
+            title.as_mut_ptr(),
+            title.len() as i32,
+        )
+    };
+    if len <= 0 {
+        return None;
+    }
+
+    Some(String::from_utf16_lossy(&title[..len as usize]))
+}
+
+#[cfg(target_os = "windows")]
+fn browser_url_cache_key_is_current_windows(key: &BrowserUrlCacheKey) -> bool {
+    get_window_process_id_windows(key.identity.hwnd) == key.identity.pid
+        && get_raw_window_title_windows(key.identity.hwnd).as_deref()
+            == Some(key.raw_window_title.as_str())
+}
+
 /// 从窗口获取浏览器 URL (Windows)
-/// 使用原生 UI Automation COM 接口（通过 uiautomation crate），不再 spawn PowerShell 进程
-/// 为避免串号，不缓存正向结果，优先保证 URL 与时长归属的准确性
+/// UIA 固定在线程中串行执行，并通过短 TTL、单飞、熔断和有界等待抑制扫描风暴。
 #[cfg(target_os = "windows")]
 fn get_browser_url_windows(app_name: &str, window_title: &str, hwnd: isize) -> Option<String> {
     if !is_browser_app(app_name) {
         return None;
     }
 
+    // resolve_browser_url_for_window 可能传入清理后的标题；统一重新读取 HWND 的原始标题，
+    // 确保所有入口共享同一个缓存键。读取失败时再使用调用方标题兜底。
+    let raw_window_title = get_raw_window_title_windows(hwnd);
+    let effective_window_title = raw_window_title.as_deref().unwrap_or(window_title);
+    let pid = get_window_process_id_windows(hwnd);
+    let key = BrowserUrlCacheKey::new(hwnd, pid, effective_window_title);
+    let started_at_ms = windows_browser_url_now_ms();
+    let decision = WINDOWS_BROWSER_URL_PROTECTION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .begin_query(&key, started_at_ms);
+
+    match decision {
+        BrowserUrlQueryDecision::UseCached(value) => return value,
+        BrowserUrlQueryDecision::QueryInFlight => {
+            log::trace!("浏览器 URL 查询已在执行，跳过重复 UIA 扫描: hwnd={hwnd}, pid={pid}");
+            return infer_browser_page_hint(effective_window_title);
+        }
+        BrowserUrlQueryDecision::CircuitOpen => {
+            log::trace!("浏览器 URL 查询处于熔断冷却期: hwnd={hwnd}, pid={pid}");
+            return infer_browser_page_hint(effective_window_title);
+        }
+        BrowserUrlQueryDecision::StartQuery => {}
+    }
+
+    let (response_tx, response_rx) = mpsc::sync_channel(1);
+    let ticket = BrowserUrlQueryTicket::new(
+        key.clone(),
+        started_at_ms.saturating_add(WINDOWS_BROWSER_URL_WAIT_TIMEOUT_MS),
+    );
+    let submitted = WINDOWS_BROWSER_URL_WORKER.submit_latest(BrowserUrlQueryJob {
+        app_name: app_name.to_string(),
+        ticket: ticket.clone(),
+        response_tx,
+    });
+    if !submitted {
+        WINDOWS_BROWSER_URL_PROTECTION
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .finish_query(&key, started_at_ms, started_at_ms, None, true);
+        return infer_browser_page_hint(effective_window_title);
+    }
+
+    let response =
+        response_rx.recv_timeout(Duration::from_millis(WINDOWS_BROWSER_URL_WAIT_TIMEOUT_MS));
+    let finished_at_ms = windows_browser_url_now_ms();
+    match response {
+        Ok(BrowserUrlWorkerResponse::Completed(result)) => {
+            if !browser_url_cache_key_is_current_windows(&key) {
+                WINDOWS_BROWSER_URL_PROTECTION
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .discard_query_with_cooldown(&key, finished_at_ms);
+                log::trace!("浏览器窗口在 URL 查询期间已变化，丢弃旧结果: hwnd={hwnd}, pid={pid}");
+                return infer_browser_page_hint(effective_window_title);
+            }
+
+            let opened_circuit = WINDOWS_BROWSER_URL_PROTECTION
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .finish_query(&key, started_at_ms, finished_at_ms, result.clone(), false);
+            if opened_circuit {
+                log::warn!(
+                    "浏览器 URL 查询耗时 {}ms，已对 hwnd={}, pid={} 熔断 {}ms",
+                    finished_at_ms.saturating_sub(started_at_ms),
+                    hwnd,
+                    pid,
+                    BrowserUrlProtectionConfig::default().circuit_breaker_cooldown_ms
+                );
+            }
+            result
+        }
+        Ok(BrowserUrlWorkerResponse::Replaced) => {
+            WINDOWS_BROWSER_URL_PROTECTION
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .finish_query(&key, started_at_ms, finished_at_ms, None, false);
+            log::trace!("浏览器 URL 待处理任务被更新窗口替换: hwnd={hwnd}, pid={pid}");
+            infer_browser_page_hint(effective_window_title)
+        }
+        Ok(BrowserUrlWorkerResponse::Skipped) => {
+            WINDOWS_BROWSER_URL_PROTECTION
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .discard_query_with_cooldown(&key, finished_at_ms);
+            log::trace!("浏览器 URL 待处理任务已失效并跳过: hwnd={hwnd}, pid={pid}");
+            infer_browser_page_hint(effective_window_title)
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            let _ = ticket.cancel_if_pending();
+            WINDOWS_BROWSER_URL_PROTECTION
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .finish_query(&key, started_at_ms, finished_at_ms, None, true);
+            log::warn!(
+                "浏览器 URL 查询等待超过 {}ms，已立即返回并熔断: hwnd={}, pid={}",
+                WINDOWS_BROWSER_URL_WAIT_TIMEOUT_MS,
+                hwnd,
+                pid
+            );
+            infer_browser_page_hint(effective_window_title)
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            let _ = ticket.cancel_if_pending();
+            WINDOWS_BROWSER_URL_PROTECTION
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .finish_query(&key, started_at_ms, finished_at_ms, None, true);
+            log::warn!("浏览器 URL 工作线程响应通道断开: hwnd={hwnd}, pid={pid}");
+            infer_browser_page_hint(effective_window_title)
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn query_browser_url_windows_unprotected(
+    app_name: &str,
+    window_title: &str,
+    hwnd: isize,
+) -> Option<String> {
+    let started_at = Instant::now();
     // 使用原生 UI Automation 获取 URL，catch_unwind 防止 COM 异常导致崩溃
     let native_result = std::panic::catch_unwind(|| get_url_via_uiautomation(hwnd)).unwrap_or(None);
     if let Some(url) = native_result {
         log::debug!("浏览器 URL 命中原生 UIA: {url}");
         return Some(url);
+    }
+
+    let native_elapsed_ms = started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+    if !should_run_windows_browser_url_fallback(
+        native_elapsed_ms,
+        WINDOWS_BROWSER_URL_NATIVE_FALLBACK_BUDGET_MS,
+    ) {
+        log::warn!(
+            "原生 UIA 已耗时 {}ms，跳过 PowerShell 二次扫描: hwnd={}",
+            native_elapsed_ms,
+            hwnd
+        );
+        return infer_browser_page_hint(window_title);
     }
 
     let powershell_result = get_url_via_powershell_uia(hwnd);
@@ -1506,6 +2065,11 @@ fn get_browser_url_windows(app_name: &str, window_title: &str, hwnd: isize) -> O
         );
     }
     title_result
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn should_run_windows_browser_url_fallback(elapsed_ms: u64, budget_ms: u64) -> bool {
+    elapsed_ms < budget_ms
 }
 
 /// Windows PowerShell 5.1 + UIAutomation 兜底读取真实地址栏 URL
@@ -1751,7 +2315,8 @@ mod tests {
         browser_url_system_events_process_name_macos, browser_url_ui_script_macos,
     };
     use super::{
-        categorize_app, categorize_app_with_rules, clean_browser_window_title, decode_mozlz4_bytes,
+        build_linux_x11_active_window, categorize_app, categorize_app_with_rules,
+        clean_browser_window_title, decode_mozlz4_bytes,
         extract_active_tab_url_from_session_store_value, extract_url_from_title,
         find_focused_sway_node, firefox_family_profile_dir_from_ini, is_browser_app,
         is_current_process_owner, is_probable_domain, normalize_display_app_name,
@@ -1759,7 +2324,9 @@ mod tests {
         parse_gnome_focused_window_dbus_output, parse_hyprland_window_bounds,
         parse_kdotool_geometry_output, parse_macos_window_bounds_fields,
         parse_xdotool_geometry_shell_output, resolve_browser_url_for_window_linux,
-        semantic_category_to_base_category, WindowBounds,
+        semantic_category_to_base_category, should_run_windows_browser_url_fallback,
+        BrowserUrlCacheKey, BrowserUrlProtection, BrowserUrlProtectionConfig,
+        BrowserUrlQueryDecision, BrowserUrlQueryTicket, LatestOnlySlot, WindowBounds,
     };
     use std::path::Path;
     #[cfg(target_os = "macos")]
@@ -1806,6 +2373,260 @@ mod tests {
         assert!(is_browser_app("Cent"));
         assert!(is_browser_app("Cent Browser"));
         assert!(is_browser_app("Arc"));
+    }
+
+    fn windows浏览器url保护测试配置() -> BrowserUrlProtectionConfig {
+        BrowserUrlProtectionConfig {
+            success_ttl_ms: 3_000,
+            failure_ttl_ms: 2_000,
+            slow_query_threshold_ms: 1_000,
+            circuit_breaker_cooldown_ms: 20_000,
+        }
+    }
+
+    fn windows浏览器url保护测试键(
+        hwnd: isize,
+        pid: u32,
+        title: &str,
+    ) -> BrowserUrlCacheKey {
+        BrowserUrlCacheKey::new(hwnd, pid, title)
+    }
+
+    #[test]
+    fn windows浏览器url保护_成功结果应在短ttl内复用并在到期后重查() {
+        let mut protection = BrowserUrlProtection::new(windows浏览器url保护测试配置());
+        let key = windows浏览器url保护测试键(100, 1000, "页面 A - Google Chrome");
+
+        assert_eq!(
+            protection.begin_query(&key, 0),
+            BrowserUrlQueryDecision::StartQuery
+        );
+        assert!(!protection.finish_query(
+            &key,
+            0,
+            100,
+            Some("https://example.com/a".to_string()),
+            false
+        ));
+        assert_eq!(
+            protection.begin_query(&key, 3_099),
+            BrowserUrlQueryDecision::UseCached(Some("https://example.com/a".to_string()))
+        );
+        assert_eq!(
+            protection.begin_query(&key, 3_100),
+            BrowserUrlQueryDecision::StartQuery
+        );
+    }
+
+    #[test]
+    fn windows浏览器url保护_失败结果也应在短ttl内抑制重复扫描() {
+        let mut protection = BrowserUrlProtection::new(windows浏览器url保护测试配置());
+        let key = windows浏览器url保护测试键(101, 1001, "页面 B - Google Chrome");
+
+        assert_eq!(
+            protection.begin_query(&key, 0),
+            BrowserUrlQueryDecision::StartQuery
+        );
+        assert!(!protection.finish_query(&key, 0, 100, None, false));
+        assert_eq!(
+            protection.begin_query(&key, 2_099),
+            BrowserUrlQueryDecision::UseCached(None)
+        );
+        assert_eq!(
+            protection.begin_query(&key, 2_100),
+            BrowserUrlQueryDecision::StartQuery
+        );
+    }
+
+    #[test]
+    fn windows浏览器url保护_相同hwnd标题变化时不得复用旧url() {
+        let mut protection = BrowserUrlProtection::new(windows浏览器url保护测试配置());
+        let old_key = windows浏览器url保护测试键(102, 1002, "旧页面 - Google Chrome");
+        let new_key = windows浏览器url保护测试键(102, 1002, "新页面 - Google Chrome");
+
+        assert_eq!(
+            protection.begin_query(&old_key, 0),
+            BrowserUrlQueryDecision::StartQuery
+        );
+        protection.finish_query(
+            &old_key,
+            0,
+            100,
+            Some("https://example.com/old".to_string()),
+            false,
+        );
+
+        assert_eq!(
+            protection.begin_query(&new_key, 200),
+            BrowserUrlQueryDecision::StartQuery
+        );
+    }
+
+    #[test]
+    fn windows浏览器url保护_同一hwnd只允许一个在途查询() {
+        let mut protection = BrowserUrlProtection::new(windows浏览器url保护测试配置());
+        let first_key = windows浏览器url保护测试键(103, 1003, "页面 A - Google Chrome");
+        let same_hwnd_key = windows浏览器url保护测试键(103, 1003, "页面 B - Google Chrome");
+        let other_hwnd_key =
+            windows浏览器url保护测试键(104, 1004, "页面 C - Google Chrome");
+
+        assert_eq!(
+            protection.begin_query(&first_key, 0),
+            BrowserUrlQueryDecision::StartQuery
+        );
+        assert_eq!(
+            protection.begin_query(&same_hwnd_key, 1),
+            BrowserUrlQueryDecision::QueryInFlight
+        );
+        assert_eq!(
+            protection.begin_query(&other_hwnd_key, 1),
+            BrowserUrlQueryDecision::StartQuery
+        );
+    }
+
+    #[test]
+    fn windows浏览器url保护_慢查询应触发熔断并在冷却后恢复() {
+        let mut protection = BrowserUrlProtection::new(windows浏览器url保护测试配置());
+        let key = windows浏览器url保护测试键(105, 1005, "页面 D - Google Chrome");
+
+        assert_eq!(
+            protection.begin_query(&key, 0),
+            BrowserUrlQueryDecision::StartQuery
+        );
+        assert!(protection.finish_query(
+            &key,
+            0,
+            1_500,
+            Some("https://example.com/slow".to_string()),
+            false
+        ));
+        assert_eq!(
+            protection.begin_query(&key, 4_501),
+            BrowserUrlQueryDecision::CircuitOpen
+        );
+        assert_eq!(
+            protection.begin_query(&key, 21_499),
+            BrowserUrlQueryDecision::CircuitOpen
+        );
+        assert_eq!(
+            protection.begin_query(&key, 21_500),
+            BrowserUrlQueryDecision::StartQuery
+        );
+    }
+
+    #[test]
+    fn windows浏览器url保护_hwnd被新进程复用时不得继承旧状态() {
+        let mut protection = BrowserUrlProtection::new(windows浏览器url保护测试配置());
+        let old_key = windows浏览器url保护测试键(106, 2001, "相同标题 - Google Chrome");
+        let reused_key = windows浏览器url保护测试键(106, 2002, "相同标题 - Google Chrome");
+
+        assert_eq!(
+            protection.begin_query(&old_key, 0),
+            BrowserUrlQueryDecision::StartQuery
+        );
+        assert!(protection.finish_query(
+            &old_key,
+            0,
+            1_500,
+            Some("https://example.com/old".to_string()),
+            false
+        ));
+
+        assert_eq!(
+            protection.begin_query(&reused_key, 1_501),
+            BrowserUrlQueryDecision::StartQuery
+        );
+    }
+
+    #[test]
+    fn windows浏览器url保护_等待超时应立即打开熔断() {
+        let mut protection = BrowserUrlProtection::new(windows浏览器url保护测试配置());
+        let key = windows浏览器url保护测试键(107, 1007, "慢页面 - Google Chrome");
+
+        assert_eq!(
+            protection.begin_query(&key, 0),
+            BrowserUrlQueryDecision::StartQuery
+        );
+        assert!(protection.finish_query(&key, 0, 300, None, true));
+        assert_eq!(
+            protection.begin_query(&key, 301),
+            BrowserUrlQueryDecision::CircuitOpen
+        );
+    }
+
+    #[test]
+    fn windows浏览器url保护_窗口变化后丢弃旧查询仍应短暂冷却() {
+        let mut protection = BrowserUrlProtection::new(windows浏览器url保护测试配置());
+        let key = windows浏览器url保护测试键(108, 1008, "页面 - Google Chrome");
+        let changed_key = windows浏览器url保护测试键(108, 1008, "动态标题 - Google Chrome");
+
+        assert_eq!(
+            protection.begin_query(&key, 0),
+            BrowserUrlQueryDecision::StartQuery
+        );
+        protection.discard_query_with_cooldown(&key, 100);
+        assert_eq!(
+            protection.begin_query(&changed_key, 101),
+            BrowserUrlQueryDecision::CircuitOpen
+        );
+        assert_eq!(
+            protection.begin_query(&changed_key, 2_100),
+            BrowserUrlQueryDecision::StartQuery
+        );
+    }
+
+    #[test]
+    fn windows浏览器url保护_超时后工作线程不得再领取任务() {
+        let mut protection = BrowserUrlProtection::new(windows浏览器url保护测试配置());
+        let key = windows浏览器url保护测试键(109, 1009, "慢页面 - Google Chrome");
+
+        assert_eq!(
+            protection.begin_query(&key, 0),
+            BrowserUrlQueryDecision::StartQuery
+        );
+        assert!(protection.is_query_active(&key, 100));
+
+        protection.finish_query(&key, 0, 350, None, true);
+        assert!(!protection.is_query_active(&key, 351));
+    }
+
+    #[test]
+    fn windows浏览器url任务_开始执行与取消必须原子互斥() {
+        let key = windows浏览器url保护测试键(110, 1010, "页面 - Google Chrome");
+        let running_ticket = BrowserUrlQueryTicket::new(key.clone(), 350);
+
+        assert!(running_ticket.try_start(349, true, true));
+        assert!(!running_ticket.cancel_if_pending());
+
+        let cancelled_ticket = BrowserUrlQueryTicket::new(key.clone(), 350);
+        assert!(cancelled_ticket.cancel_if_pending());
+        assert!(!cancelled_ticket.try_start(100, true, true));
+
+        let expired_ticket = BrowserUrlQueryTicket::new(key.clone(), 350);
+        assert!(!expired_ticket.try_start(350, true, true));
+
+        let stale_ticket = BrowserUrlQueryTicket::new(key.clone(), 350);
+        assert!(!stale_ticket.try_start(100, false, true));
+
+        let inactive_ticket = BrowserUrlQueryTicket::new(key, 350);
+        assert!(!inactive_ticket.try_start(100, true, false));
+    }
+
+    #[test]
+    fn windows浏览器url保护_原生查询超过预算后不应再运行powershell() {
+        assert!(should_run_windows_browser_url_fallback(199, 200));
+        assert!(!should_run_windows_browser_url_fallback(200, 200));
+        assert!(!should_run_windows_browser_url_fallback(800, 200));
+    }
+
+    #[test]
+    fn windows浏览器url工作队列只保留最新待处理任务() {
+        let mut slot = LatestOnlySlot::default();
+
+        assert_eq!(slot.replace(1), None);
+        assert_eq!(slot.replace(2), Some(1));
+        assert_eq!(slot.take(), Some(2));
+        assert_eq!(slot.take(), None);
     }
 
     #[test]
@@ -2263,6 +3084,32 @@ Path=Profiles/wkm9x2lf.Default (release)
     #[test]
     fn gnome_focused_window_dbus空对象应视为无活动窗口() {
         assert!(parse_gnome_focused_window_dbus_output("('{}',)").is_err());
+    }
+
+    #[test]
+    fn gnome完整窗口查询也应尝试解析浏览器url() {
+        let output = r#"('{"title":"https://example.com - Google Chrome","wm_class":"google-chrome","pid":1234,"x":10,"y":20,"width":1200,"height":800}',)"#;
+
+        let window = parse_gnome_focused_window_dbus_output(output).expect("应解析成功");
+
+        assert_eq!(window.browser_url, Some("https://example.com".to_string()));
+    }
+
+    #[test]
+    fn x11完整窗口查询也应尝试解析浏览器url() {
+        let window = build_linux_x11_active_window(
+            "Google Chrome".to_string(),
+            "https://example.com/tasks?id=1 - Google Chrome".to_string(),
+            Some("/usr/bin/google-chrome".to_string()),
+            None,
+        );
+
+        assert_eq!(window.app_name, "Google Chrome");
+        assert_eq!(window.window_title, "https://example.com/tasks?id=1");
+        assert_eq!(
+            window.browser_url,
+            Some("https://example.com/tasks?id=1".to_string())
+        );
     }
 
     #[test]
@@ -3569,6 +4416,28 @@ pub fn current_linux_active_window_provider(
         .find_map(|(name, probe)| probe().then_some(*name))
 }
 
+#[cfg(any(target_os = "linux", test))]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn build_linux_x11_active_window(
+    raw_app_name: String,
+    raw_window_title: String,
+    executable_path: Option<String>,
+    window_bounds: Option<WindowBounds>,
+) -> ActiveWindow {
+    let app_name = normalize_display_app_name(&raw_app_name);
+    let browser_url = resolve_browser_url_for_window_linux(&app_name, &raw_window_title);
+    let window_title = clean_browser_window_title(&raw_window_title, &app_name);
+
+    ActiveWindow {
+        app_name,
+        window_title,
+        browser_url,
+        executable_path,
+        window_bounds,
+        is_minimized: false,
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn get_active_window_linux_x11() -> Result<ActiveWindow> {
     // 使用 xdotool 获取当前活动窗口 ID
@@ -3642,12 +4511,6 @@ fn get_active_window_linux_x11() -> Result<ActiveWindow> {
         (app_name, None)
     };
 
-    // 尝试获取浏览器 URL（从窗口标题推断）
-    let browser_url = if is_browser_app(&app_name) {
-        extract_url_from_title(&window_title).or_else(|| get_browser_url_from_xprop(&wid_str))
-    } else {
-        None
-    };
     let geometry_output = run_monitor_command_with_timeout(
         Command::new("xdotool").args(["getwindowgeometry", "--shell", &wid_str]),
         "xdotool getwindowgeometry --shell",
@@ -3657,17 +4520,12 @@ fn get_active_window_linux_x11() -> Result<ActiveWindow> {
         parse_xdotool_geometry_shell_output(&String::from_utf8_lossy(&output.stdout))
     });
 
-    let display_name = normalize_display_app_name(&app_name);
-    let window_title = clean_browser_window_title(&window_title, &display_name);
-
-    Ok(ActiveWindow {
-        app_name: display_name,
+    Ok(build_linux_x11_active_window(
+        app_name,
         window_title,
-        browser_url,
         executable_path,
         window_bounds,
-        is_minimized: false,
-    })
+    ))
 }
 
 #[cfg(target_os = "linux")]
@@ -3949,12 +4807,13 @@ fn parse_gnome_focused_window_dbus_output(output: &str) -> Result<ActiveWindow> 
         .and_then(|pid| read_executable_path_from_pid(pid as u32));
 
     let app_name = normalize_display_app_name(raw_app_name);
+    let browser_url = resolve_browser_url_for_window_linux(&app_name, &window_title);
     let cleaned_title = clean_browser_window_title(&window_title, &app_name);
 
     Ok(ActiveWindow {
         app_name,
         window_title: cleaned_title,
-        browser_url: None,
+        browser_url,
         executable_path,
         window_bounds,
         is_minimized: false,
@@ -4103,16 +4962,6 @@ fn parse_wm_class(xprop_output: &str) -> Option<String> {
     } else {
         None
     }
-}
-
-/// 尝试从 xprop _NET_WM_PID + /proc 读取浏览器 URL
-/// 实际上浏览器 URL 在 X11 下无法直接从窗口属性取得，
-/// 这里仅尝试从窗口标题中提取 URL 类字符串
-#[cfg(target_os = "linux")]
-fn get_browser_url_from_xprop(_wid: &str) -> Option<String> {
-    // X11 下无直接方式取得浏览器 URL，
-    // 大多数浏览器会在标题中显示部分 URL 或页面名称
-    None
 }
 
 /// 其他平台的后备实现
