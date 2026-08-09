@@ -34,7 +34,7 @@
   }
 </script>
 
-<div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 space-y-4 dark:border-[#30363d]/80 dark:bg-[#21262d]/40">
+<div class="settings-subsection space-y-4">
   <div class="flex items-center justify-between gap-3">
     <div class="flex items-center gap-2">
       <div class="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-900/30">

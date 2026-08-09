@@ -19,7 +19,7 @@ test('关于页新结构应保持居中、三列更新与留白分组', async ()
 
   assert.match(css, /\.about-brand-identity\s*\{[\s\S]*?align-items:\s*center;/);
   assert.match(css, /\.about-brand-title-row\s*\{[\s\S]*?justify-content:\s*center;/);
-  assert.match(css, /^\.about-version-badge\s*\{[\s\S]*?border-radius:\s*999px;/m);
+  assert.match(css, /^\.about-version-badge\s*\{[\s\S]*?border-radius:\s*var\(--radius-full\);/m);
   assert.match(css, /\.about-update-grid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);[\s\S]*?gap:\s*0\.75rem;/);
   assert.match(css, /\.about-trust-grid\s*\{[\s\S]*?gap:\s*1rem;/);
   assert.doesNotMatch(css, /\.about-update-unit\s*\+\s*\.about-update-unit\s*\{/);

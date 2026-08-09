@@ -9,10 +9,11 @@ const _cacheKeys = [];
 const _requestQueue = [];
 const MAX_ICON_CACHE = 120;
 const MAX_PERSISTED_ICON_CACHE = 36;
+const MAX_PERSISTED_ICON_CACHE_CHARS = 1_500_000;
 const MAX_CONCURRENT_ICON_REQUESTS = 3;
 const FAILED_ICON_RETRY_MS = 30 * 1000;
-// v2：失效历史缓存（曾因 executable_path 脏数据缓存过错误的编译器图标）。旧 v1 key 不再读取。
-const STORAGE_KEY = 'work-review-app-icon-cache-v2';
+// v4：原生图标升级为 256px 高 DPI 画布，旧低分辨率缓存不再读取。
+const STORAGE_KEY = 'work-review-app-icon-cache-v4';
 const _failedAt = {};
 let _activeRequestCount = 0;
 
@@ -90,10 +91,23 @@ function persistIconCache() {
     }
 
     try {
-        const items = _cacheKeys
-            .slice(-MAX_PERSISTED_ICON_CACHE)
-            .map((key) => ({ key, value: _iconCache[key] }))
-            .filter((item) => typeof item.value === 'string' && item.value.length > 100);
+        const items = [];
+        let persistedChars = JSON.stringify({ items: [] }).length;
+        for (let index = _cacheKeys.length - 1; index >= 0; index -= 1) {
+            if (items.length >= MAX_PERSISTED_ICON_CACHE) break;
+
+            const key = _cacheKeys[index];
+            const value = _iconCache[key];
+            if (typeof value !== 'string' || value.length <= 100) continue;
+
+            const item = { key, value };
+            const itemChars = JSON.stringify(item).length + (items.length > 0 ? 1 : 0);
+            if (persistedChars + itemChars > MAX_PERSISTED_ICON_CACHE_CHARS) continue;
+
+            items.push(item);
+            persistedChars += itemChars;
+        }
+        items.reverse();
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ items }));
     } catch (error) {
         console.warn('保存应用图标缓存失败:', error);
@@ -202,4 +216,3 @@ export function preloadAppIcons(entries, invoke, options = {}) {
 
     queueEntries.forEach((entry) => loadAppIcon(entry, invoke, options));
 }
-

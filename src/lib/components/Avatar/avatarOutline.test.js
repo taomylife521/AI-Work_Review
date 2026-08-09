@@ -125,7 +125,7 @@ test('状态气泡应采用贴头短气泡，减少白卡感和视觉侵入', ()
   assert.match(source, /padding: 6px 14px 7px 14px/);
   assert.match(source, /display: block;/);
   assert.match(source, /text-xs font-semibold leading-\[1\.35\]/);
-  assert.match(source, /rounded-\[16px\]/);
+  assert.match(source, /class="relative rounded-lg/);
   assert.match(source, /shadow-\[0_10px_24px_rgba\(15,23,42,0\.1\),0_3px_10px_rgba\(15,23,42,0\.05\)\]/);
   assert.match(source, /word-break: normal/);
   assert.match(source, /overflow-wrap: anywhere/);
@@ -147,11 +147,11 @@ test('休息提醒气泡应支持常驻显示和手动关闭', () => {
   assert.match(source, /export let onClose = \(\) => \{\};/);
   assert.match(source, /bubble\?\.persistent/);
   assert.match(source, /class="absolute inset-0 z-20 overflow-visible pointer-events-none"/);
-  assert.match(source, /class="relative rounded-\[16px\]/);
+  assert.match(source, /class="relative rounded-lg/);
   assert.match(source, /class:pointer-events-auto=\{bubble\?\.persistent\}/);
   assert.match(source, /<button[\s\S]*type="button"[\s\S]*on:click=\{onClose\}/);
   assert.match(source, /aria-label=\{t\('avatar\.dismissReminder'\)\}/);
-  assert.match(source, /class="absolute inset-0 rounded-\[16px\]"/);
+  assert.match(source, /class="absolute inset-0 rounded-lg"/);
   assert.match(source, /bubble-tail-dot absolute \$\{flipLeft/);
   assert.match(windowSource, /<AvatarPopover \{bubble\} flipLeft=\{bubbleFlipLeft\} onClose=\{dismissBubble\} \/>/);
   assert.match(windowSource, /if \(!payload\?\.persistent\)/);
@@ -174,7 +174,7 @@ test('接上次继续卡片应保留可操作结构，但与轻气泡共用圆�
   assert.match(source, /style="max-height: calc\(100vh - 16px\);"/);
   assert.match(source, /min-h-0 flex-1 overflow-y-auto pr-1/);
   assert.match(source, /mt-3 shrink-0 space-y-2/);
-  assert.match(source, /rounded-\[16px\]/);
+  assert.match(source, /overflow-hidden rounded-lg/);
   assert.match(source, /bg-\[rgba\(255,255,255,0\.96\)\]/);
   assert.match(source, /shadow-\[0_14px_28px_rgba\(15,23,42,0\.14\),0_4px_12px_rgba\(15,23,42,0\.07\)\]/);
   assert.match(source, /copy\.surfaceClass/);

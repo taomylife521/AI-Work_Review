@@ -64,6 +64,7 @@
   let handleVisibilityChange;
   let handleTimelineFocus;
   let appIcons = {};
+  let failedTimelineIconKeys = new Set();
 
   // LRU 缓存：防止长时间运行内存无限增长
   // 缩略图 ~80KB/条，60 条 ≈ 5MB；高清图 ~300KB/条，20 条 ≈ 6MB
@@ -478,12 +479,25 @@
     });
   }
 
+  function hasUsableTimelineNativeIcon(base64) {
+    return typeof base64 === 'string' && base64.length > 100;
+  }
+
   function getTimelineIconSrc(activity) {
     const preferredAppName = getPreferredTimelineAppName(activity);
-    const base64 = appIcons[getIconCacheKey({
+    const iconKey = getIconCacheKey({
       appName: activity.app_name,
       executablePath: activity.executable_path,
-    })];
+    });
+    const base64 = appIcons[iconKey];
+
+    if (failedTimelineIconKeys.has(iconKey)) {
+      return null;
+    }
+
+    if (hasUsableTimelineNativeIcon(base64)) {
+      return resolveAppIconSrc(preferredAppName, base64);
+    }
 
     if (shouldPreferTimelineFallbackIcon(activity)) {
       return resolveAppIconSrc(preferredAppName, null);
@@ -493,6 +507,15 @@
       preferredAppName,
       base64
     );
+  }
+
+  function handleTimelineIconError(activity) {
+    const iconKey = getIconCacheKey({
+      appName: activity.app_name,
+      executablePath: activity.executable_path,
+    });
+    if (failedTimelineIconKeys.has(iconKey)) return;
+    failedTimelineIconKeys = new Set([...failedTimelineIconKeys, iconKey]);
   }
 
   function getTimelineTitle(activity) {
@@ -1439,10 +1462,12 @@
                   <div class="timeline-entry-meta timeline-entry-meta-featured">
                     <div class="timeline-entry-app">
                       <div class="timeline-app-icon"
+                           class:timeline-app-icon-has-image={Boolean(getTimelineIconSrc(activity))}
                            style={iconStyle(info)}>
                         {#if getTimelineIconSrc(activity)}
                           <img src={getTimelineIconSrc(activity)}
                                alt={activity.app_name}
+                               on:error={() => handleTimelineIconError(activity)}
                                class="timeline-app-icon-image app-icon object-cover" />
                         {:else}
                           <span>{info.icon}</span>
@@ -1467,10 +1492,12 @@
               <div class="timeline-entry-card timeline-entry-card-compact timeline-entry-card-compact-grid">
                 <div class="timeline-entry-app timeline-entry-app-compact">
                   <div class="timeline-app-icon"
+                       class:timeline-app-icon-has-image={Boolean(getTimelineIconSrc(activity))}
                        style={iconStyle(info)}>
                     {#if getTimelineIconSrc(activity)}
                       <img src={getTimelineIconSrc(activity)}
                            alt={activity.app_name}
+                           on:error={() => handleTimelineIconError(activity)}
                            class="timeline-app-icon-image app-icon object-cover" />
                     {:else}
                       <span>{info.icon}</span>
@@ -1558,10 +1585,12 @@
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-3">
             <div class="timeline-app-icon timeline-app-icon-lg"
+                 class:timeline-app-icon-has-image={Boolean(getTimelineIconSrc(selectedActivity))}
                  style={iconStyle(info)}>
               {#if getTimelineIconSrc(selectedActivity)}
                 <img src={getTimelineIconSrc(selectedActivity)}
                      alt={selectedActivity.app_name}
+                     on:error={() => handleTimelineIconError(selectedActivity)}
                      class="timeline-app-icon-image timeline-app-icon-image-lg app-icon object-cover" />
               {:else}
                 {info.icon}
@@ -1868,7 +1897,7 @@
     on:click|self={() => !cleanupBusy && (showCleanupPanel = false)}
     on:keydown={(e) => e.key === 'Escape' && !cleanupBusy && (showCleanupPanel = false)}
   >
-    <div class="w-full max-w-lg rounded-2xl border border-slate-200 dark:border-[#30363d] bg-white dark:bg-[#161b22] shadow-2xl">
+    <div class="w-full max-w-lg rounded-[var(--radius-lg)] border border-slate-200 dark:border-[#30363d] bg-white dark:bg-[#161b22] shadow-2xl">
       <div class="flex items-center justify-between p-5 border-b border-slate-200 dark:border-[#30363d]">
         <h3 class="text-base font-semibold text-slate-900 dark:text-[#e6edf3]">{t('timeline.cleanupRecordsTitle')}</h3>
         <button class="btn btn-ghost" on:click={() => (showCleanupPanel = false)} disabled={cleanupBusy}>
@@ -2059,7 +2088,7 @@
     margin: 1rem;
     padding: 1.5rem;
     border: 1px solid rgb(226 232 240);
-    border-radius: 1rem;
+    border-radius: var(--radius-lg);
     background: white;
     box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
   }
@@ -2133,7 +2162,7 @@
     top: 1.25rem;
     bottom: 1.25rem;
     width: 2px;
-    border-radius: 999px;
+    border-radius: var(--radius-full);
     background: linear-gradient(180deg, rgba(31, 41, 55, 0.88), rgba(31, 41, 55, 0.08));
     opacity: 0.9;
     pointer-events: none;
@@ -2187,7 +2216,7 @@
     inset-inline-end: 0;
     width: 0.8rem;
     height: 0.8rem;
-    border-radius: 999px;
+    border-radius: var(--radius-full);
     background: #1f2937;
     box-shadow:
       0 0 0 0.32rem rgba(255, 251, 235, 0.96),
@@ -2212,7 +2241,7 @@
 
   .timeline-entry-card {
     position: relative;
-    border-radius: 1.35rem;
+    border-radius: var(--radius-md);
     border: 1px solid rgba(17, 24, 39, 0.08);
     overflow: hidden;
     transition:
@@ -2255,7 +2284,7 @@
   .timeline-featured-image {
     width: 100%;
     aspect-ratio: 1.38;
-    border-radius: 1rem;
+    border-radius: var(--radius-md);
     object-fit: cover;
     background:
       linear-gradient(135deg, rgba(191, 219, 254, 0.82), rgba(254, 243, 199, 0.9)),
@@ -2307,7 +2336,7 @@
   .timeline-app-icon {
     width: 2.75rem;
     height: 2.75rem;
-    border-radius: 1rem;
+    border-radius: var(--radius-md);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -2321,8 +2350,13 @@
   .timeline-app-icon-lg {
     width: 3.2rem;
     height: 3.2rem;
-    border-radius: 1.05rem;
+    border-radius: var(--radius-md);
     font-size: 1.5rem;
+  }
+
+  .timeline-app-icon-has-image {
+    background: transparent;
+    box-shadow: none;
   }
 
   .timeline-app-icon-blue {
@@ -2354,15 +2388,15 @@
   }
 
   .timeline-app-icon-image {
-    width: 1.9rem;
-    height: 1.9rem;
-    border-radius: 0.7rem;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    border-radius: var(--radius-md);
   }
 
   .timeline-app-icon-image-lg {
-    width: 2.25rem;
-    height: 2.25rem;
-    border-radius: 0.8rem;
+    width: 100%;
+    height: 100%;
   }
 
   .timeline-entry-heading {
@@ -2402,7 +2436,7 @@
     min-height: 1.5rem;
     max-width: max-content;
     padding: 0.2rem 0.58rem;
-    border-radius: 999px;
+    border-radius: var(--radius-full);
     border: 1px solid rgba(217, 119, 6, 0.18);
     background: rgba(255, 247, 237, 0.92);
     color: #b45309;
@@ -2418,7 +2452,7 @@
   .timeline-entry-duration-chip {
     flex-shrink: 0;
     padding: 0.4rem 0.7rem;
-    border-radius: 999px;
+    border-radius: var(--radius-full);
     background: rgba(255, 247, 237, 0.92);
     color: #9a3412;
     font-size: 0.78rem;
@@ -2518,7 +2552,7 @@
     gap: 0.5rem;
     font-size: 0.92rem;
     color: #57534e;
-    border-radius: 1rem;
+    border-radius: var(--radius-md);
     border: 1px dashed rgba(120, 113, 108, 0.35);
     background: rgba(255, 255, 255, 0.54);
     transition:
@@ -2552,7 +2586,7 @@
     overflow-y: auto;
     position: relative;
     border: 1px solid rgba(148, 163, 184, 0.24);
-    border-radius: 1.25rem;
+    border-radius: var(--radius-lg);
     background: var(--editorial-surface-featured);
     box-shadow: -18px 0 48px rgba(15, 23, 42, 0.18);
   }
@@ -2624,7 +2658,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 0.9rem;
+    border-radius: var(--radius-md);
     background: rgba(148, 163, 184, 0.1);
   }
 
@@ -2656,7 +2690,7 @@
     align-items: center;
     justify-content: center;
     border: 1px solid rgba(148, 163, 184, 0.24);
-    border-radius: 999px;
+    border-radius: var(--radius-full);
     background: rgba(255, 255, 255, 0.82);
     box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
   }
@@ -2724,7 +2758,7 @@
     gap: 0.65rem;
     padding: 0.6rem 0.75rem;
     border: 1px solid rgba(148, 163, 184, 0.28);
-    border-radius: 0.8rem;
+    border-radius: var(--radius-md);
     color: #292524;
     background: rgba(255, 255, 255, 0.82);
     font-size: 0.88rem;
@@ -2752,7 +2786,7 @@
     width: 0.62rem;
     height: 0.62rem;
     flex: 0 0 auto;
-    border-radius: 999px;
+    border-radius: var(--radius-full);
     box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.12);
   }
 
@@ -2762,7 +2796,7 @@
     overflow-y: auto;
     padding: 0.42rem;
     border: 1px solid rgba(148, 163, 184, 0.24);
-    border-radius: 0.9rem;
+    border-radius: var(--radius-md);
     background: #fff;
     box-shadow: 0 18px 42px rgba(15, 23, 42, 0.14);
   }
@@ -2787,7 +2821,7 @@
     gap: 0.62rem;
     padding: 0.48rem 0.62rem;
     border: 0;
-    border-radius: 0.65rem;
+    border-radius: var(--radius-sm);
     color: #57534e;
     background: transparent;
     font-size: 0.84rem;
@@ -2826,7 +2860,7 @@
     align-items: center;
     justify-content: center;
     border: 0;
-    border-radius: 0.55rem;
+    border-radius: var(--radius-sm);
     color: #a8a29e;
     background: transparent;
     font-size: 0.76rem;
@@ -2846,7 +2880,7 @@
     gap: 0.4rem;
     margin-top: 0.3rem;
     border: 1px dashed rgba(148, 163, 184, 0.32);
-    border-radius: 0.65rem;
+    border-radius: var(--radius-sm);
     color: #78716c;
     background: transparent;
     font-size: 0.8rem;
@@ -2858,7 +2892,7 @@
     margin-top: 0.42rem;
     padding: 0.72rem;
     border: 1px solid rgba(148, 163, 184, 0.2);
-    border-radius: 0.72rem;
+    border-radius: var(--radius-md);
     background: #fafaf9;
   }
 
@@ -2879,7 +2913,7 @@
     min-width: 0;
     padding: 0.42rem 0.55rem;
     border: 1px solid rgba(148, 163, 184, 0.28);
-    border-radius: 0.55rem;
+    border-radius: var(--radius-sm);
     background: #fff;
     font-size: 0.8rem;
   }
@@ -2889,7 +2923,7 @@
     height: 2rem;
     padding: 0;
     border: 0;
-    border-radius: 0.45rem;
+    border-radius: var(--radius-xs);
     background: transparent;
   }
 
@@ -2903,7 +2937,7 @@
     width: 1.85rem;
     height: 1.85rem;
     border: 0;
-    border-radius: 0.45rem;
+    border-radius: var(--radius-xs);
     background: transparent;
   }
 
@@ -2921,7 +2955,7 @@
   .timeline-category-editor-actions button {
     padding: 0.4rem 0.68rem;
     border: 1px solid rgba(148, 163, 184, 0.24);
-    border-radius: 0.55rem;
+    border-radius: var(--radius-sm);
     color: #78716c;
     background: #fff;
     font-size: 0.76rem;
@@ -3038,6 +3072,10 @@
     color: #e6edf3;
     background: var(--icon-bg-dark, rgba(51, 65, 85, 0.74));
     box-shadow: none;
+  }
+
+  :global(.dark) .timeline-app-icon-has-image {
+    background: transparent;
   }
 
   :global(.dark) .timeline-app-icon-blue {
@@ -3242,7 +3280,7 @@
     .timeline-app-icon {
       width: 2.5rem;
       height: 2.5rem;
-      border-radius: 0.85rem;
+      border-radius: var(--radius-md);
     }
 
     .timeline-entry-tail-compact {

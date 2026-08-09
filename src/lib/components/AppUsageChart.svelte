@@ -48,10 +48,10 @@
   $: maxDuration = displayApps.length > 0 ? Math.max(1, ...displayApps.map(a => a.duration || 0)) : 1;
   $: columnShellClass = embedded
     ? 'app-usage-chart__columns app-usage-chart__columns-embedded'
-    : 'app-usage-chart__columns rounded-2xl border border-slate-100 bg-white/90 p-4 dark:border-[#30363d]/60 dark:bg-[#21262d]/70';
+    : 'app-usage-chart__columns rounded-lg border border-slate-100 bg-white/90 p-4 dark:border-[#30363d]/60 dark:bg-[#21262d]/70';
   $: plotClass = embedded
-    ? 'app-usage-chart__plot relative rounded-[22px] bg-slate-50/90 px-3 pb-3 pt-4 dark:bg-[#161b22]/40'
-    : 'app-usage-chart__plot relative rounded-2xl bg-slate-50 px-3 pb-3 pt-4 dark:bg-[#161b22]/40';
+    ? 'app-usage-chart__plot relative rounded-lg bg-slate-50/90 px-3 pb-3 pt-4 dark:bg-[#161b22]/40'
+    : 'app-usage-chart__plot relative rounded-lg bg-slate-50 px-3 pb-3 pt-4 dark:bg-[#161b22]/40';
 </script>
 
 <div class="space-y-2" data-locale={currentLocale}>
@@ -74,9 +74,9 @@
               <div class="mb-2 text-center text-[11px] font-medium whitespace-nowrap tabular-nums text-slate-500 dark:text-[#7d8590]">
                 {formatDuration(app.duration)}
               </div>
-              <div class="mx-auto flex h-32 w-12 items-end rounded-2xl bg-slate-100 p-1 dark:bg-[#30363d]/50">
+              <div class="mx-auto flex h-32 w-12 items-end rounded-lg bg-slate-100 p-1 dark:bg-[#30363d]/50">
                 <div
-                  class="app-usage-chart__bar w-full rounded-2xl transition-all duration-500"
+                  class="app-usage-chart__bar w-full rounded-md transition-all duration-500"
                   style="height: {Math.max((app.duration / maxDuration) * 100, 6)}%; background-color: {colors[i % colors.length]}; opacity: 0.88"
                 ></div>
               </div>

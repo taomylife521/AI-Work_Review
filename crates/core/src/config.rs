@@ -1099,6 +1099,9 @@ pub struct AppConfig {
     /// 上次记忆合成日期（防同天重复）
     #[serde(default)]
     pub memory_last_synthesis_date: Option<String>,
+    /// 助手显式长期记忆开关。默认关闭，关闭不会删除已保存的记忆。
+    #[serde(default)]
+    pub assistant_memory_enabled: bool,
     /// 助手联网能力总开关（隐私默认关：开启后问题可能发给搜索服务商/目标网站）
     #[serde(default)]
     pub assistant_web_access_enabled: bool,
@@ -1324,6 +1327,7 @@ impl Default for AppConfig {
             goal_notifications: false,
             memory_enabled: false,
             memory_last_synthesis_date: None,
+            assistant_memory_enabled: false,
             assistant_web_access_enabled: false,
             assistant_search_provider: default_assistant_search_provider(),
             assistant_search_api_key: None,
@@ -2297,9 +2301,8 @@ mod tests {
         let original_bytes = b"old-config";
         std::fs::write(&path, original_bytes).expect("应写入原主配置");
 
-        let result = update_config_backup_with_sync(&path, |_| {
-            Err(io::Error::other("模拟父目录同步失败"))
-        });
+        let result =
+            update_config_backup_with_sync(&path, |_| Err(io::Error::other("模拟父目录同步失败")));
 
         assert!(result.is_ok());
         assert_eq!(
@@ -2507,6 +2510,13 @@ mod tests {
         let config = AppConfig::default();
 
         assert!(!config.lightweight_mode);
+    }
+
+    #[test]
+    fn 助手长期记忆默认应关闭() {
+        let config = AppConfig::default();
+
+        assert!(!config.assistant_memory_enabled);
     }
 
     #[test]

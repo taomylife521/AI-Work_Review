@@ -377,6 +377,7 @@ pub fn normalize_display_app_name(app_name: &str) -> String {
         "chromium" => "Chromium".to_string(),
         "arc" => "Arc".to_string(),
         "zen browser" | "zen" => "Zen Browser".to_string(),
+        "cent" | "cent browser" | "centbrowser" => "Cent Browser".to_string(),
         "qqbrowser" | "qq browser" | "qq浏览器" => "QQ Browser".to_string(),
         "360se" | "360chrome" | "360 browser" | "360浏览器" => "360 Browser".to_string(),
         "sogouexplorer" | "sogou browser" | "搜狗浏览器" => "Sogou Browser".to_string(),
@@ -2714,6 +2715,17 @@ mod tests {
     }
 
     #[test]
+    fn cent浏览器应归一化为稳定显示名() {
+        assert_eq!(normalize_display_app_name("cent"), "Cent Browser");
+        assert_eq!(normalize_display_app_name("cent browser"), "Cent Browser");
+        assert_eq!(normalize_display_app_name("centbrowser"), "Cent Browser");
+        assert_eq!(
+            normalize_display_app_name("centbrowser.exe"),
+            "Cent Browser"
+        );
+    }
+
+    #[test]
     fn 规范化地址栏候选值() {
         assert_eq!(
             normalize_possible_url("https://example.com/path"),
@@ -4856,9 +4868,10 @@ fn find_focused_sway_node(value: &Value) -> Option<&Value> {
         .get("focused")
         .and_then(|v| v.as_bool())
         .unwrap_or(false)
-        && (value.get("pid").is_some() || value.get("app_id").is_some()) {
-            return Some(value);
-        }
+        && (value.get("pid").is_some() || value.get("app_id").is_some())
+    {
+        return Some(value);
+    }
 
     for key in ["nodes", "floating_nodes"] {
         if let Some(nodes) = value.get(key).and_then(|v| v.as_array()) {

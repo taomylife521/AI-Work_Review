@@ -49,7 +49,7 @@
   }
 </script>
 
-<div class="rounded-xl bg-white/70 px-3.5 py-3 ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
+<div class="settings-subsection">
   <div class="flex items-center justify-between gap-3 mb-2">
     <div class="flex items-center gap-2">
       <div class="flex h-5 w-5 items-center justify-center rounded-md bg-primary-100 dark:bg-primary-900/30">

@@ -95,13 +95,13 @@
   })();
   $: yAxisTicks = [axisMax, Math.round(axisMax * 2 / 3), Math.round(axisMax / 3), 0];
   $: summaryCardClass = embedded
-    ? 'min-h-[88px] rounded-[22px] bg-slate-50/90 px-2 py-3 text-center dark:bg-[#161b22]/30'
-    : 'min-h-[104px] rounded-2xl border border-slate-100 bg-white p-4 text-center dark:border-[#30363d]/60 dark:bg-[#21262d]/80';
+    ? 'min-h-[88px] rounded-lg bg-slate-50/90 px-2 py-3 text-center dark:bg-[#161b22]/30'
+    : 'min-h-[104px] rounded-lg border border-slate-100 bg-white p-4 text-center dark:border-[#30363d]/60 dark:bg-[#21262d]/80';
   $: summaryValueClass =
     'mt-2 text-center text-base font-semibold text-slate-900 dark:text-[#e6edf3] leading-tight';
   $: chartShellClass = embedded
-    ? 'rounded-[24px] bg-transparent p-0'
-    : 'rounded-2xl border border-slate-100 bg-white p-4 dark:border-[#30363d]/60 dark:bg-[#21262d]/80';
+    ? 'rounded-lg bg-transparent p-0'
+    : 'rounded-lg border border-slate-100 bg-white p-4 dark:border-[#30363d]/60 dark:bg-[#21262d]/80';
 </script>
 
 <div class="space-y-4" data-locale={currentLocale}>
@@ -172,14 +172,14 @@
       <div class="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
         {#each usedCategories as cat}
           <span class="inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-[#7d8590]">
-            <span class="inline-block h-2.5 w-2.5 rounded-[3px]" style={`background: ${(categoryColors && categoryColors[cat.category]) || '#94a3b8'};`}></span>
+            <span class="inline-block h-2.5 w-2.5 rounded-[var(--radius-xs)]" style={`background: ${(categoryColors && categoryColors[cat.category]) || '#94a3b8'};`}></span>
             {(categoryNames && categoryNames[cat.category]) || cat.category}
           </span>
         {/each}
       </div>
     {/if}
 
-    <div class="overflow-hidden rounded-2xl bg-slate-50 px-3 pb-3 pt-4 dark:bg-[#161b22]/40">
+    <div class="overflow-hidden rounded-lg bg-slate-50 px-3 pb-3 pt-4 dark:bg-[#161b22]/40">
         <div class="grid grid-cols-[2.9rem_minmax(0,1fr)] gap-2">
           <div class="relative h-44">
             {#each yAxisTicks as tick, index}
@@ -205,13 +205,13 @@
                     <button
                       type="button"
                       class={`w-full overflow-hidden transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-sky-300 dark:focus:ring-sky-500 ${selectedHour === bucket.hour ? 'ring-2 ring-sky-300 dark:focus:ring-sky-500' : ''} ${categoryMode && bucket.duration > 0 ? '' : isPeak ? 'bg-sky-500 dark:bg-sky-400' : 'bg-slate-300 dark:bg-[#484f58]'}`}
-                      style={`height: ${height}%; opacity: ${bucket.duration > 0 ? 1 : 0.35}; border-top-left-radius: 10px; border-top-right-radius: 10px;`}
+                      style={`height: ${height}%; opacity: ${bucket.duration > 0 ? 1 : 0.35}; border-top-left-radius: var(--radius-md); border-top-right-radius: var(--radius-md);`}
                       title={`${formatHourRangeLabel(bucket.hour)} · ${formatDurationLocalized(bucket.duration)}`}
                       aria-pressed={selectedHour === bucket.hour}
                       on:click={() => selectHour(bucket.hour)}
                     >
                       {#if categoryMode && bucket.duration > 0}
-                        <div class="flex h-full w-full flex-col justify-end overflow-hidden" style="border-top-left-radius: 10px; border-top-right-radius: 10px;">
+                        <div class="flex h-full w-full flex-col justify-end overflow-hidden" style="border-top-left-radius: var(--radius-md); border-top-right-radius: var(--radius-md);">
                           {#each (categoryBreakdown?.[bucket.hour] || []) as seg}
                             <div
                               class={`activity-hourly-category-segment ${selectedCategory === seg.category ? 'activity-hourly-category-segment-selected' : ''} ${selectedCategory && seg.category !== selectedCategory ? 'activity-hourly-category-segment-muted' : ''}`}
@@ -243,7 +243,7 @@
         {@const hourApps = (appBreakdown?.find(b => b.hour === selectedBucket.hour)?.apps || [])
           .filter((app) => !selectedCategory || app.category === selectedCategory)
           .slice().sort((a, b) => b.duration - a.duration).slice(0, 5)}
-        <div class="activity-hourly-selected-apps mt-3 rounded-2xl bg-sky-50 px-3.5 py-3 text-left dark:bg-sky-500/10">
+        <div class="activity-hourly-selected-apps mt-3 rounded-lg bg-sky-50 px-3.5 py-3 text-left dark:bg-sky-500/10">
           <div class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
             <span class="inline-flex items-center rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold tracking-[0.08em] text-sky-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-[#161b22]/80 dark:text-sky-300 dark:shadow-none">
               {t('chart.currentlySelected')}
@@ -259,7 +259,7 @@
             <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1">
               {#each hourApps as app}
                 <span class="inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-[#7d8590]">
-                  <span class="inline-block h-2 w-2 rounded-sm" style={`background: ${(categoryColors && categoryColors[app.category]) || '#94a3b8'};`}></span>
+                  <span class="inline-block h-2 w-2 rounded-[var(--radius-xs)]" style={`background: ${(categoryColors && categoryColors[app.category]) || '#94a3b8'};`}></span>
                   <span>{app.app_name}</span>
                   <span class="tabular-nums text-slate-400">{formatCompact(app.duration)}</span>
                 </span>

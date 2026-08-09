@@ -23,6 +23,8 @@ test('应用应提供 A/B/C 三套可持久化界面风格并作用到根壳层'
     readFile(new URL('./lib/i18n/locales/zh-TW.js', import.meta.url), 'utf8'),
   ]);
 
+  const tailwindSource = await readFile(new URL('../tailwind.config.js', import.meta.url), 'utf8');
+
   assert.match(configSource, /pub ui_visual_style: String/);
   assert.match(configSource, /default_ui_visual_style/);
   assert.match(configSource, /normalize_ui_visual_style/);
@@ -71,7 +73,16 @@ test('应用应提供 A/B/C 三套可持久化界面风格并作用到根壳层'
   assert.match(appCssSource, /\.app-shell\.ui-style-a\s+\.overview-lead-card\s*\{[\s\S]*?display:\s*contents/);
   assert.match(appCssSource, /\.app-shell\.ui-style-c\s+\.app-shell-stage\s*\{[\s\S]*?grid-template-columns:\s*12rem minmax\(0,\s*1fr\)/);
   assert.match(appCssSource, /\.app-shell\.ui-style-c\s+\.overview-summary-grid\s*\{[\s\S]*?gap:\s*0\.5rem/);
-  assert.match(appCssSource, /\.app-shell\.ui-style-c\s+\.page-section-title\s*\{[\s\S]*?font-size:\s*0\.92rem/);
+  assert.match(appCssSource, /\.app-shell\.ui-style-c\s+\.page-section-title\s*\{[^}]*font-size:\s*0\.92rem;[^}]*line-height:\s*1\.35/);
+  assert.match(
+    appCssSource,
+    /:root\s*\{[^}]*font-family:\s*-apple-system,\s*BlinkMacSystemFont,\s*"SF Pro Text",\s*"PingFang SC"/,
+  );
+  assert.doesNotMatch(appCssSource, /:root\s*\{[^}]*font-family:\s*"SF Pro Display"/);
+  assert.match(
+    tailwindSource,
+    /sans:\s*\[\s*'-apple-system',\s*'BlinkMacSystemFont',\s*'SF Pro Text',\s*'PingFang SC'/,
+  );
   assert.match(appCssSource, /\.page-shell\s*\{[\s\S]*?max-width:\s*108rem/);
   assert.match(appCssSource, /\.app-shell-stage\s*\{[\s\S]*?max-width:\s*136rem/);
   assert.match(appCssSource, /\.settings-style-preview__sidebar\b/);

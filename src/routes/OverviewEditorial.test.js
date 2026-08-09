@@ -64,6 +64,41 @@ test('常驻网站应呈现与应用使用一致的轻分隔排行', async () =>
   assert.match(source, /domainUsageLoading[\s\S]*t\('common\.loading'\)[\s\S]*domainUsageExpanded[\s\S]*t\('common\.collapse'\)[\s\S]*t\('overview\.viewAll'\)/);
 });
 
+test('常驻网站文字层级应与应用使用共享排版节奏', async () => {
+  const [source, css] = await Promise.all([
+    readFile(new URL('./Overview.svelte', import.meta.url), 'utf8'),
+    readFile(new URL('../app.css', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(source, /class="overview-domain-name block truncate"/);
+  assert.match(
+    css,
+    /\.app-usage-chart__name,\s*\.overview-domain-name\s*\{[^}]*font-size:\s*0\.8125rem;[^}]*font-weight:\s*600;[^}]*line-height:\s*1\.35;/,
+    '网站名称应与应用名称共享字号、字重和行高',
+  );
+  assert.match(
+    css,
+    /\.app-usage-chart__meta,\s*\.overview-domain-row \.overview-domain-meta,\s*\.overview-domain-row \.overview-domain-source-list\s*\{[^}]*font-size:\s*0\.6875rem;[^}]*line-height:\s*1\.35;/,
+    '网站辅助信息与来源应和应用辅助信息共享行高',
+  );
+  assert.doesNotMatch(
+    css,
+    /\.app-usage-chart__meta,\s*\.overview-domain-meta,\s*\.overview-domain-source-list/,
+    '首页排行规则不得覆盖域名弹窗复用的辅助信息类',
+  );
+  assert.match(
+    css,
+    /\.dark \.app-usage-chart__meta,\s*\.dark \.overview-domain-row \.overview-domain-meta,\s*\.dark \.overview-domain-row \.overview-domain-source-list,/,
+    '深色文字颜色也应限定在首页网站排行内',
+  );
+  assert.match(
+    css,
+    /\.app-usage-chart__duration,\s*\.overview-domain-duration\s*\{[^}]*font-size:\s*0\.75rem;[^}]*font-weight:\s*600;[^}]*line-height:\s*1\.35;/,
+    '网站时长应与应用时长共享数字排版',
+  );
+  assert.doesNotMatch(css, /\.overview-domain-meta\s*\{[^}]*line-height:\s*1\.45/);
+});
+
 test('常驻网站加载骨架应复用正式网站行的三列信息结构', async () => {
   const source = await readFile(new URL('./Overview.svelte', import.meta.url), 'utf8');
 

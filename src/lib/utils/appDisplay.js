@@ -13,13 +13,19 @@ function isGenericInstallerToken(value) {
 }
 
 function isInstallerLikeName(value) {
-  const comparable = normalizeComparable(value);
-  return (
-    comparable.includes('setup')
-    || comparable.includes('installer')
-    || comparable.includes('uninstall')
-    || comparable.includes('install')
-  );
+  const installerTokens = ['setup', 'install', 'installer', 'uninstall'];
+  const nameWithoutExtension = trimmed(value).replace(/\.(?:exe|msi|pkg|dmg|app)$/i, '');
+  const tokens = nameWithoutExtension
+    .toLowerCase()
+    .split(/[^a-z0-9\u4e00-\u9fa5]+/i)
+    .filter(Boolean);
+
+  if (tokens.some((token) => installerTokens.includes(token))) {
+    return true;
+  }
+
+  const comparable = normalizeComparable(nameWithoutExtension);
+  return installerTokens.some((token) => comparable.endsWith(token));
 }
 
 function isCompactRawToken(value) {
@@ -77,28 +83,9 @@ export function getPreferredTimelineAppName(activity = {}) {
 
 export function shouldPreferTimelineFallbackIcon(activity = {}) {
   const rawAppName = trimmed(activity.appName || activity.app_name);
-  const rawTitle = trimmed(activity.windowTitle || activity.window_title);
-  const preferredName = getPreferredTimelineAppName({ appName: rawAppName, windowTitle: rawTitle });
-
-  if (!preferredName) {
+  if (!rawAppName) {
     return false;
   }
 
-  if (isGenericInstallerToken(rawAppName)) {
-    return true;
-  }
-
-  if (isInstallerLikeName(rawAppName) && rawTitle) {
-    return true;
-  }
-
-  if (normalizeComparable(preferredName) !== normalizeComparable(rawAppName)) {
-    return true;
-  }
-
-  if (isCompactRawToken(rawAppName) && rawTitle && rawTitle !== rawAppName) {
-    return true;
-  }
-
-  return false;
+  return isGenericInstallerToken(rawAppName) || isInstallerLikeName(rawAppName);
 }

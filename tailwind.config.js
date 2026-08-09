@@ -19,7 +19,16 @@ export default {
         },
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        sans: [
+          '-apple-system',
+          'BlinkMacSystemFont',
+          'SF Pro Text',
+          'PingFang SC',
+          'Hiragino Sans GB',
+          'Segoe UI Variable Text',
+          'Microsoft YaHei',
+          'sans-serif',
+        ],
         mono: ['Fira Code', 'monospace'],
       },
     },

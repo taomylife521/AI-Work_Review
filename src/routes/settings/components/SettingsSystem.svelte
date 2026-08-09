@@ -486,7 +486,7 @@
     justify-content: center;
     min-height: 24px;
     padding: 0 10px;
-    border-radius: 999px;
+    border-radius: var(--radius-full);
     font-size: 11px;
     font-weight: 700;
     white-space: nowrap;
@@ -525,7 +525,7 @@
     justify-content: center;
     min-height: 32px;
     padding: 0 12px;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     font-size: 12px;
     font-weight: 600;
     transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
@@ -568,7 +568,7 @@
   }
 
   .permission-item-card {
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     border: 1px solid rgba(226, 232, 240, 0.9);
     background: rgba(248, 250, 252, 0.7);
     padding: 10px 12px;
@@ -601,7 +601,7 @@
   .permission-item-marker {
     width: 7px;
     height: 7px;
-    border-radius: 999px;
+    border-radius: var(--radius-full);
     margin-top: 6px;
     flex-shrink: 0;
   }
@@ -643,7 +643,7 @@
     justify-content: center;
     min-height: 28px;
     padding: 0 10px;
-    border-radius: 999px;
+    border-radius: var(--radius-full);
     font-size: 11px;
     font-weight: 700;
     white-space: nowrap;
@@ -685,7 +685,7 @@
   .permission-setup-accent {
     width: 36px;
     height: 4px;
-    border-radius: 999px;
+    border-radius: var(--radius-full);
     background: linear-gradient(90deg, rgba(59, 130, 246, 0.88), rgba(99, 102, 241, 0.74));
     margin-bottom: 16px;
   }
@@ -714,7 +714,7 @@
 
   .permission-setup-button {
     min-height: 44px;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     padding: 0 16px;
     font-size: 14px;
     font-weight: 700;

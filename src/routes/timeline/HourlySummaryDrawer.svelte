@@ -248,7 +248,7 @@
     flex-direction: column;
     overflow: hidden;
     border: 1px solid rgba(148, 163, 184, 0.24);
-    border-radius: 1.25rem;
+    border-radius: var(--radius-lg);
     background: #fff;
     box-shadow: -18px 0 48px rgba(15, 23, 42, 0.18);
   }
@@ -298,7 +298,7 @@
     align-items: center;
     justify-content: center;
     border: 1px solid rgba(120, 113, 108, 0.16);
-    border-radius: 0.8rem;
+    border-radius: var(--radius-lg);
     color: #57534e;
     background: rgba(250, 250, 249, 0.92);
     cursor: pointer;
@@ -342,7 +342,7 @@
   .hourly-summary-refresh-error {
     padding: 0.6rem 0.75rem;
     border: 1px solid rgba(248, 113, 113, 0.2);
-    border-radius: 0.75rem;
+    border-radius: var(--radius-lg);
     color: #b91c1c;
     background: rgba(254, 242, 242, 0.78);
   }
@@ -352,7 +352,7 @@
     height: 0.9rem;
     border: 2px solid rgba(120, 113, 108, 0.24);
     border-top-color: #d97706;
-    border-radius: 999px;
+    border-radius: var(--radius-full);
     animation: hourly-summary-spin 700ms linear infinite;
   }
 
@@ -380,7 +380,7 @@
   .hourly-summary-item {
     padding: 1rem 1.05rem;
     border: 1px solid rgba(120, 113, 108, 0.14);
-    border-radius: 1rem;
+    border-radius: var(--radius-md);
     background: rgba(255, 255, 255, 0.92);
     box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
   }
@@ -421,7 +421,7 @@
     align-items: center;
     min-height: 1.55rem;
     padding: 0.18rem 0.56rem;
-    border-radius: 999px;
+    border-radius: var(--radius-full);
     font-size: 0.68rem;
     font-weight: 700;
     white-space: nowrap;
@@ -495,7 +495,7 @@
   .hourly-summary-apps span {
     padding: 0.27rem 0.58rem;
     border: 1px solid rgba(120, 113, 108, 0.12);
-    border-radius: 999px;
+    border-radius: var(--radius-full);
     color: #57534e;
     background: #fafaf9;
     font-size: 0.72rem;

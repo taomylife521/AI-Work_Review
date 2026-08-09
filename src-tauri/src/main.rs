@@ -321,7 +321,11 @@ pub(crate) fn refresh_tray_menu(app: &AppHandle) {
     let _ = tray_menu.show.set_text(tray_label("show", &locale));
     let _ = tray_menu
         .recording_toggle
-        .set_text(tray_recording_toggle_label(is_recording, is_paused, &locale));
+        .set_text(tray_recording_toggle_label(
+            is_recording,
+            is_paused,
+            &locale,
+        ));
     let _ = tray_menu
         .lightweight_mode
         .set_text(tray_label("lightweight", &locale));
@@ -346,7 +350,9 @@ async fn set_app_locale(
         _ => "zh-CN",
     };
     let config = {
-        let mut s = state.lock().map_err(|e| crate::error::AppError::Unknown(e.to_string()))?;
+        let mut s = state
+            .lock()
+            .map_err(|e| crate::error::AppError::Unknown(e.to_string()))?;
         s.config.locale = normalized.to_string();
         s.config.clone()
     };
@@ -1081,7 +1087,11 @@ pub(crate) fn resolve_activity_classification(
             .ok()
             .and_then(|m| m.get(&cache_key).cloned());
         if let Some((cached_base, semantic)) = cached {
-            if config.custom_categories.iter().any(|c| c.key == cached_base) {
+            if config
+                .custom_categories
+                .iter()
+                .any(|c| c.key == cached_base)
+            {
                 base_category = cached_base;
                 cached_semantic = Some(semantic);
             }
@@ -3571,8 +3581,7 @@ async fn remote_upload_backfill_task(state: Arc<Mutex<AppState>>) {
             if !local_path.exists() {
                 continue; // 本地文件已被保留策略清理，无从补传
             }
-            match remote_upload::upload_screenshot(&remote_cfg, &local_path, &relative_path).await
-            {
+            match remote_upload::upload_screenshot(&remote_cfg, &local_path, &relative_path).await {
                 Ok(url) => {
                     let updated = {
                         let guard = state.lock().unwrap_or_else(|e| e.into_inner());
@@ -3582,9 +3591,9 @@ async fn remote_upload_backfill_task(state: Arc<Mutex<AppState>>) {
                     };
                     match updated {
                         Ok(()) => uploaded += 1,
-                        Err(e) => log::warn!(
-                            "补传后写回 screenshot_url 失败（活动 {activity_id}）: {e}"
-                        ),
+                        Err(e) => {
+                            log::warn!("补传后写回 screenshot_url 失败（活动 {activity_id}）: {e}")
+                        }
                     }
                 }
                 Err(e) => log::warn!("补传截图失败（活动 {activity_id}）: {e}"),
@@ -3605,9 +3614,8 @@ async fn remote_upload_backfill_task(state: Arc<Mutex<AppState>>) {
 /// 采集循环里的 resolve_activity_classification 只读查询。
 pub(crate) fn entity_category_cache(
 ) -> &'static std::sync::RwLock<std::collections::HashMap<String, (String, String)>> {
-    static CACHE: OnceCell<
-        std::sync::RwLock<std::collections::HashMap<String, (String, String)>>,
-    > = OnceCell::new();
+    static CACHE: OnceCell<std::sync::RwLock<std::collections::HashMap<String, (String, String)>>> =
+        OnceCell::new();
     CACHE.get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::new()))
 }
 
@@ -3789,7 +3797,9 @@ async fn entity_classify_task(state: Arc<Mutex<AppState>>) {
             let app_lower = app.to_lowercase();
             let key = format!("app:{app_lower}");
             if cached_keys.contains(&key)
-                || app_rule_names.iter().any(|r| app_lower.contains(r.as_str()))
+                || app_rule_names
+                    .iter()
+                    .any(|r| app_lower.contains(r.as_str()))
             {
                 continue;
             }
@@ -3859,7 +3869,9 @@ async fn entity_classify_task(state: Arc<Mutex<AppState>>) {
 
             let persisted = {
                 let guard = state.lock().unwrap_or_else(|e| e.into_inner());
-                guard.database.upsert_entity_category(&key, &base, &semantic)
+                guard
+                    .database
+                    .upsert_entity_category(&key, &base, &semantic)
             };
             if let Err(e) = persisted {
                 log::warn!("写入实体分类缓存失败({key}): {e}");
@@ -4357,14 +4369,18 @@ async fn main() {
                 tray_recording_toggle_label(true, false, &tray_locale),
             )
             .build(app)?;
-            let lightweight_mode =
-                CheckMenuItemBuilder::with_id(TRAY_MENU_LIGHTWEIGHT_MODE_ID, tray_label("lightweight", &tray_locale))
-                    .checked(false)
-                    .build(app)?;
-            let avatar_toggle =
-                CheckMenuItemBuilder::with_id(TRAY_MENU_AVATAR_TOGGLE_ID, tray_label("avatar", &tray_locale))
-                    .checked(avatar_enabled)
-                    .build(app)?;
+            let lightweight_mode = CheckMenuItemBuilder::with_id(
+                TRAY_MENU_LIGHTWEIGHT_MODE_ID,
+                tray_label("lightweight", &tray_locale),
+            )
+            .checked(false)
+            .build(app)?;
+            let avatar_toggle = CheckMenuItemBuilder::with_id(
+                TRAY_MENU_AVATAR_TOGGLE_ID,
+                tray_label("avatar", &tray_locale),
+            )
+            .checked(avatar_enabled)
+            .build(app)?;
             let quit =
                 MenuItemBuilder::with_id(TRAY_MENU_QUIT_ID, tray_label("quit", &tray_locale))
                     .build(app)?;
@@ -4601,6 +4617,11 @@ async fn main() {
             commands::get_assistant_messages,
             commands::append_assistant_message,
             commands::delete_assistant_conversation,
+            commands::list_user_memories,
+            commands::create_user_memory,
+            commands::update_user_memory,
+            commands::delete_user_memory,
+            commands::clear_user_memories,
             commands::index_semantic_memory,
             commands::semantic_memory_status,
             commands::test_embedding_model,
@@ -4649,12 +4670,11 @@ async fn main() {
             tauri::RunEvent::Reopen {
                 has_visible_windows,
                 ..
-            }
-                if !has_visible_windows => {
-                    if let Err(e) = reveal_main_window(&_app_handle.clone(), None) {
-                        log::warn!("Dock 恢复主窗口失败: {e}");
-                    }
+            } if !has_visible_windows => {
+                if let Err(e) = reveal_main_window(&_app_handle.clone(), None) {
+                    log::warn!("Dock 恢复主窗口失败: {e}");
                 }
+            }
             _ => {}
         });
 }
@@ -4803,10 +4823,18 @@ mod tests {
 
     #[test]
     fn 只有未切换的连续活动可以合并() {
-        assert!(should_merge_contiguous_activity(false, "Code", 1_500, 1_000));
-        assert!(!should_merge_contiguous_activity(true, "Code", 1_500, 1_000));
-        assert!(!should_merge_contiguous_activity(false, "Unknown", 1_500, 1_000));
-        assert!(!should_merge_contiguous_activity(false, "Code", 1_601, 1_000));
+        assert!(should_merge_contiguous_activity(
+            false, "Code", 1_500, 1_000
+        ));
+        assert!(!should_merge_contiguous_activity(
+            true, "Code", 1_500, 1_000
+        ));
+        assert!(!should_merge_contiguous_activity(
+            false, "Unknown", 1_500, 1_000
+        ));
+        assert!(!should_merge_contiguous_activity(
+            false, "Code", 1_601, 1_000
+        ));
         assert!(!should_merge_contiguous_activity(false, "Code", 999, 1_000));
     }
 
@@ -5125,8 +5153,15 @@ mod tests {
 
     #[test]
     fn 停止录制时桌宠应回到待命状态() {
-        let decision =
-            avatar_activity_decision(true, false, false, 0.82, "minimal-office", "assistant", false);
+        let decision = avatar_activity_decision(
+            true,
+            false,
+            false,
+            0.82,
+            "minimal-office",
+            "assistant",
+            false,
+        );
 
         assert!(!decision.should_continue);
         assert_eq!(
@@ -5247,8 +5282,14 @@ mod tests {
 
     #[test]
     fn 托盘录制按钮文案应与状态一致() {
-        assert_eq!(tray_recording_toggle_label(false, false, "zh-CN"), "开始录制");
-        assert_eq!(tray_recording_toggle_label(true, false, "zh-CN"), "暂停录制");
+        assert_eq!(
+            tray_recording_toggle_label(false, false, "zh-CN"),
+            "开始录制"
+        );
+        assert_eq!(
+            tray_recording_toggle_label(true, false, "zh-CN"),
+            "暂停录制"
+        );
         assert_eq!(tray_recording_toggle_label(true, true, "zh-CN"), "恢复录制");
     }
 
@@ -5495,9 +5536,7 @@ mod tests {
 
     #[test]
     fn 配置损坏时应跳过键鼠采集() {
-        assert!(!should_initialize_avatar_input(
-            ConfigLoadStatus::Corrupted
-        ));
+        assert!(!should_initialize_avatar_input(ConfigLoadStatus::Corrupted));
 
         for status in [
             ConfigLoadStatus::Loaded,

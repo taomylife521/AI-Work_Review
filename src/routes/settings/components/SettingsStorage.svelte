@@ -464,7 +464,7 @@
   <h3 class="settings-card-title">{t('settingsStorage.exportTitle')}</h3>
 
   <div class="settings-block">
-    <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 dark:border-[#30363d]/80 dark:bg-[#21262d]/40">
+    <div class="settings-subsection">
       <p class="settings-text">{t('settingsStorage.exportDir')}</p>
       <p class="settings-muted mt-1 break-all">
         {config.daily_report_export_dir || t('settingsStorage.notSet')}
@@ -516,7 +516,7 @@
   storageKey="settings.storage.remoteBackup"
 >
   <div class="settings-section space-y-4">
-    <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 dark:border-[#30363d]/80 dark:bg-[#21262d]/40">
+    <div class="settings-subsection">
       <div class="flex items-center gap-2 mb-3">
         <div class="flex h-6 w-6 items-center justify-center rounded-md bg-primary-100 dark:bg-primary-900/30">
           <svg class="w-3.5 h-3.5 text-primary-600 dark:text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -550,7 +550,7 @@
     </div>
 
     {#if config.remote_storage?.provider === 's3'}
-      <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 space-y-3 dark:border-[#30363d]/80 dark:bg-[#21262d]/40">
+      <div class="settings-subsection space-y-3">
         <div class="flex items-center gap-2">
           <div class="flex h-6 w-6 items-center justify-center rounded-md bg-amber-100 dark:bg-amber-900/30">
             <svg class="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -708,7 +708,7 @@
     {/if}
 
     {#if config.remote_storage?.provider === 'webdav'}
-      <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 space-y-3 dark:border-[#30363d]/80 dark:bg-[#21262d]/40">
+      <div class="settings-subsection space-y-3">
         <div class="flex items-center gap-2">
           <div class="flex h-6 w-6 items-center justify-center rounded-md bg-blue-100 dark:bg-blue-900/30">
             <svg class="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -822,7 +822,7 @@
 
   <div class="settings-section">
     <div class="settings-block">
-      <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 dark:border-[#30363d]/80 dark:bg-[#21262d]/40">
+      <div class="settings-subsection">
         <div class="grid gap-4 md:grid-cols-2">
           <div>
             <p class="settings-text">{t('settingsStorage.currentDir')}</p>
@@ -897,7 +897,7 @@
 
     {#if storageStats}
       <div class="settings-block">
-        <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 dark:border-[#30363d]/80 dark:bg-[#21262d]/40">
+        <div class="settings-subsection">
           <div class="mb-5">
             <div class="mb-2 flex items-end justify-between">
               <div>
@@ -934,15 +934,15 @@
           </div>
 
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div class="rounded-xl bg-white/70 p-3 text-center ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
+                <div class="px-3 py-2 text-center">
               <p class="text-xl font-bold text-slate-900 dark:text-[#e6edf3]">{storageStats.total_files}</p>
               <p class="settings-muted mt-0.5">{t('settingsStorage.screenshotsCount')}</p>
             </div>
-            <div class="rounded-xl bg-white/70 p-3 text-center ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
+                <div class="border-x border-slate-200/70 px-3 py-2 text-center dark:border-[#30363d]/70">
               <p class="text-xl font-bold text-slate-900 dark:text-[#e6edf3]">{storageStats.total_size_mb} MB</p>
               <p class="settings-muted mt-0.5">{t('settingsStorage.usedSpace')}</p>
             </div>
-            <div class="rounded-xl bg-white/70 p-3 text-center ring-1 ring-slate-200/70 dark:bg-[#161b22]/20 dark:ring-[#30363d]/70">
+                <div class="px-3 py-2 text-center">
               <p class="text-xl font-bold text-slate-900 dark:text-[#e6edf3]">{storageRetentionLabel}</p>
               <p class="settings-muted mt-0.5">{t('settingsStorage.retentionPeriod')}</p>
             </div>

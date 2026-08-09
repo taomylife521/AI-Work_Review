@@ -1,18 +1,107 @@
 //! Auto-extracted from the historical `commands.rs`. Behavior unchanged.
 
-use crate::error::AppError;
-#[cfg(target_os = "linux")]
-use crate::linux_session::{current_linux_desktop_environment, current_linux_desktop_session, LinuxDesktopSession};
 #[cfg(target_os = "linux")]
 use super::avatar::{
     gnome_avatar_extension_needs_relogin, is_gnome_avatar_extension_enabled,
     is_gnome_avatar_extension_installed,
 };
+use crate::error::AppError;
+#[cfg(target_os = "linux")]
+use crate::linux_session::{
+    current_linux_desktop_environment, current_linux_desktop_session, LinuxDesktopSession,
+};
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tauri::{State};
+use tauri::State;
+
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+const APP_ICON_CANVAS_SIZE: u32 = 256;
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+const APP_ICON_SAFE_SIZE: u32 = 208;
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+const APP_ICON_ALPHA_THRESHOLD: u8 = 8;
+#[cfg(any(target_os = "macos", test))]
+const MACOS_ICON_SOURCE_SIZE: u32 = 512;
+#[cfg(any(target_os = "macos", test))]
+const MACOS_ICON_CACHE_VERSION: &str = "v4";
+#[cfg(any(target_os = "windows", test))]
+const WINDOWS_ICON_CACHE_VERSION: &str = "v7";
+
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn app_icon_alpha_bounds(image: &image::RgbaImage) -> Option<(u32, u32, u32, u32)> {
+    let mut left = image.width();
+    let mut top = image.height();
+    let mut right = 0;
+    let mut bottom = 0;
+    let mut found = false;
+
+    for (x, y, pixel) in image.enumerate_pixels() {
+        if pixel[3] <= APP_ICON_ALPHA_THRESHOLD {
+            continue;
+        }
+        found = true;
+        left = left.min(x);
+        top = top.min(y);
+        right = right.max(x);
+        bottom = bottom.max(y);
+    }
+
+    found.then_some((left, top, right, bottom))
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn normalize_app_icon_rgba(image: image::RgbaImage) -> Option<Vec<u8>> {
+    let (left, top, right, bottom) = app_icon_alpha_bounds(&image)?;
+    let visible_width = right - left + 1;
+    let visible_height = bottom - top + 1;
+    let cropped =
+        image::imageops::crop_imm(&image, left, top, visible_width, visible_height).to_image();
+
+    let (target_width, target_height) = if visible_width >= visible_height {
+        (
+            APP_ICON_SAFE_SIZE,
+            ((u64::from(visible_height) * u64::from(APP_ICON_SAFE_SIZE)
+                + u64::from(visible_width) / 2)
+                / u64::from(visible_width))
+            .max(1) as u32,
+        )
+    } else {
+        (
+            ((u64::from(visible_width) * u64::from(APP_ICON_SAFE_SIZE)
+                + u64::from(visible_height) / 2)
+                / u64::from(visible_height))
+            .max(1) as u32,
+            APP_ICON_SAFE_SIZE,
+        )
+    };
+
+    let resized = image::imageops::resize(
+        &cropped,
+        target_width,
+        target_height,
+        image::imageops::FilterType::Lanczos3,
+    );
+    let mut canvas = image::RgbaImage::new(APP_ICON_CANVAS_SIZE, APP_ICON_CANVAS_SIZE);
+    let x = (APP_ICON_CANVAS_SIZE - target_width) / 2;
+    let y = (APP_ICON_CANVAS_SIZE - target_height) / 2;
+    image::imageops::overlay(&mut canvas, &resized, i64::from(x), i64::from(y));
+
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(canvas)
+        .write_to(&mut cursor, image::ImageFormat::Png)
+        .ok()?;
+    Some(cursor.into_inner())
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn normalize_app_icon_png(png_data: &[u8]) -> Option<Vec<u8>> {
+    let image = image::load_from_memory_with_format(png_data, image::ImageFormat::Png)
+        .ok()?
+        .into_rgba8();
+    normalize_app_icon_rgba(image)
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -322,7 +411,10 @@ fn push_normalized_macos_lookup_name(target: &mut Vec<String>, value: &str) {
 
 #[cfg(any(target_os = "macos", test))]
 fn macos_lookup_name_variants(value: &str) -> Vec<String> {
-    const ALIAS_GROUPS: &[&[&str]] = &[&["腾讯视频", "QQLive", "Tencent Video"]];
+    const ALIAS_GROUPS: &[&[&str]] = &[
+        &["腾讯视频", "QQLive", "Tencent Video"],
+        &["Cent", "Cent Browser", "centbrowser"],
+    ];
 
     let normalized = normalize_macos_app_lookup_name(value);
     if normalized.is_empty() {
@@ -389,10 +481,6 @@ fn score_normalized_macos_app_bundle_name(normalized_app: &str, normalized_bundl
     let mut score = 0;
     if normalized_app == normalized_bundle {
         score += 1000;
-    } else if normalized_app.contains(normalized_bundle)
-        || normalized_bundle.contains(normalized_app)
-    {
-        score += 500;
     }
 
     let app_tokens = macos_significant_name_tokens(normalized_app);
@@ -403,8 +491,10 @@ fn score_normalized_macos_app_bundle_name(normalized_app: &str, normalized_bundl
         .count() as i32;
     score += overlap_count * 160;
 
-    if let Some(first_token) = app_tokens.first() {
-        if normalized_bundle.starts_with(first_token) {
+    if let (Some(app_first_token), Some(bundle_first_token)) =
+        (app_tokens.first(), bundle_tokens.first())
+    {
+        if app_first_token == bundle_first_token {
             score += 80;
         }
     }
@@ -528,12 +618,10 @@ async fn get_app_icon_impl(
     use std::path::Path;
     use std::process::Command;
 
-    // 缓存目录：/tmp/work_review_icons_v2/
-    // v2：失效历史缓存。旧版缓存 key 仅含 app_name，曾把"executable_path 与 app_name 不一致"
-    // （如浏览器活动记录成 IDE 路径）的脏数据解析结果持久化，导致浏览器长期显示编译器图标。
-    let cache_dir = Path::new("/tmp/work_review_icons_v2");
+    // v4 从高分辨率 ICNS 裁切并输出 256px 图标，不复用 v3 的低分辨率缓存。
+    let cache_dir = PathBuf::from(format!("/tmp/work_review_icons_{MACOS_ICON_CACHE_VERSION}"));
     if !cache_dir.exists() {
-        let _ = std::fs::create_dir_all(cache_dir);
+        let _ = std::fs::create_dir_all(&cache_dir);
     }
 
     // 安全文件名：将空格和特殊字符替换为下划线
@@ -629,9 +717,17 @@ async fn get_app_icon_impl(
         std::process::id()
     );
 
+    let macos_icon_source_size = MACOS_ICON_SOURCE_SIZE.to_string();
     let sips_output = Command::new("sips")
         .args([
-            "-s", "format", "png", "-Z", "128", &icns_path, "--out", &temp_png,
+            "-s",
+            "format",
+            "png",
+            "-Z",
+            macos_icon_source_size.as_str(),
+            &icns_path,
+            "--out",
+            &temp_png,
         ])
         .output();
 
@@ -639,8 +735,14 @@ async fn get_app_icon_impl(
         if result.status.success() {
             if let Ok(png_data) = std::fs::read(&temp_png) {
                 let _ = std::fs::remove_file(&temp_png);
-                let base64_str =
-                    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png_data);
+                let Some(normalized_png) = normalize_app_icon_png(&png_data) else {
+                    log::debug!("图标归一化失败: {app_name}");
+                    return Ok(String::new());
+                };
+                let base64_str = base64::Engine::encode(
+                    &base64::engine::general_purpose::STANDARD,
+                    &normalized_png,
+                );
                 // 保存到缓存
                 let _ = std::fs::write(&cache_file, &base64_str);
                 log::debug!("图标已缓存: {} ({} bytes)", app_name, base64_str.len());
@@ -1019,19 +1121,11 @@ fn encode_windows_icon_base64(mut pixels: Vec<u8>, width: u32, height: u32) -> O
     }
 
     let image = image::RgbaImage::from_raw(width, height, pixels)?;
-    let mut dynamic_image = image::DynamicImage::ImageRgba8(image);
-    if width > 128 || height > 128 {
-        dynamic_image = dynamic_image.resize_exact(128, 128, image::imageops::FilterType::Lanczos3);
-    }
-
-    let mut cursor = std::io::Cursor::new(Vec::new());
-    dynamic_image
-        .write_to(&mut cursor, image::ImageFormat::Png)
-        .ok()?;
+    let normalized_png = normalize_app_icon_rgba(image)?;
 
     Some(base64::Engine::encode(
         &base64::engine::general_purpose::STANDARD,
-        cursor.into_inner(),
+        normalized_png,
     ))
 }
 
@@ -1090,8 +1184,6 @@ async fn get_app_icon_impl(
     app_name: &str,
     executable_path: Option<&str>,
 ) -> Result<String, AppError> {
-    const WINDOWS_ICON_CACHE_VERSION: &str = "v5";
-
     // 磁盘缓存：检查是否已有缓存
     let cache_dir = std::env::temp_dir().join("work_review_icons");
     let _ = std::fs::create_dir_all(&cache_dir);
@@ -1241,12 +1333,30 @@ pub async fn clear_background_image(
     Ok(())
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
+    fn test_alpha_bounds(image: &image::RgbaImage) -> Option<(u32, u32, u32, u32)> {
+        let mut left = image.width();
+        let mut top = image.height();
+        let mut right = 0;
+        let mut bottom = 0;
+        let mut found = false;
+
+        for (x, y, pixel) in image.enumerate_pixels() {
+            if pixel[3] <= 8 {
+                continue;
+            }
+            found = true;
+            left = left.min(x);
+            top = top.min(y);
+            right = right.max(x);
+            bottom = bottom.max(y);
+        }
+
+        found.then_some((left, top, right, bottom))
+    }
 
     #[cfg(target_os = "macos")]
     #[test]
@@ -1341,6 +1451,65 @@ mod tests {
         );
     }
 
+    #[test]
+    fn macos应用包名评分应兼容centbrowser历史名() {
+        assert!(macos_score_app_bundle_name("centbrowser", "Cent Browser") > 0);
+        assert!(macos_score_app_bundle_name("cent", "Cent Browser") > 0);
+        assert_eq!(
+            macos_score_app_bundle_name("centbrowser", "Tencent Lemon"),
+            0
+        );
+        assert_eq!(macos_score_app_bundle_name("cent", "Tencent Meeting"), 0);
+        assert_eq!(macos_score_app_bundle_name("centbrowser", "Centennial"), 0);
+        assert_eq!(macos_score_app_bundle_name("cent", "Centauri"), 0);
+    }
+
+    #[test]
+    fn 高分辨率png图标应按alpha边界等比放入统一安全画布() {
+        use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
+        use std::io::Cursor;
+
+        let mut source = RgbaImage::new(1024, 512);
+        for y in 128..384 {
+            for x in 256..768 {
+                source.put_pixel(x, y, Rgba([32, 96, 224, 255]));
+            }
+        }
+
+        let mut input = Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(source)
+            .write_to(&mut input, ImageFormat::Png)
+            .expect("构造 PNG 测试数据失败");
+
+        let normalized = normalize_app_icon_png(input.get_ref()).expect("图标应归一化成 PNG");
+        let output = image::load_from_memory_with_format(&normalized, ImageFormat::Png)
+            .expect("解析归一化 PNG 失败")
+            .into_rgba8();
+
+        assert_eq!(output.dimensions(), (256, 256));
+        assert_eq!(test_alpha_bounds(&output), Some((24, 76, 231, 179)));
+    }
+
+    #[test]
+    fn png图标归一化应拒绝全透明输入() {
+        use image::{DynamicImage, ImageFormat, RgbaImage};
+        use std::io::Cursor;
+
+        let mut input = Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(RgbaImage::new(32, 32))
+            .write_to(&mut input, ImageFormat::Png)
+            .expect("构造透明 PNG 测试数据失败");
+
+        assert!(normalize_app_icon_png(input.get_ref()).is_none());
+    }
+
+    #[test]
+    fn 应升级原生图标磁盘缓存版本() {
+        assert_eq!(MACOS_ICON_SOURCE_SIZE, 512);
+        assert_eq!(MACOS_ICON_CACHE_VERSION, "v4");
+        assert_eq!(WINDOWS_ICON_CACHE_VERSION, "v7");
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn 图标解析应忽略与app_name矛盾的executable_path() {
@@ -1372,5 +1541,4 @@ mod tests {
             Some("/Applications/Microsoft Edge.app")
         );
     }
-
 }

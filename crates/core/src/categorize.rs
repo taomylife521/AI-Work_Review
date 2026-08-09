@@ -127,6 +127,7 @@ pub fn normalize_display_app_name(app_name: &str) -> String {
         "chromium" => "Chromium".to_string(),
         "arc" => "Arc".to_string(),
         "zen browser" | "zen" => "Zen Browser".to_string(),
+        "cent" | "cent browser" | "centbrowser" => "Cent Browser".to_string(),
         "qqbrowser" | "qq browser" | "qq浏览器" => "QQ Browser".to_string(),
         "360se" | "360chrome" | "360 browser" | "360浏览器" => "360 Browser".to_string(),
         "sogouexplorer" | "sogou browser" | "搜狗浏览器" => "Sogou Browser".to_string(),
@@ -875,5 +876,16 @@ mod tests {
         assert_eq!(normalize_display_app_name("Lemon"), "Tencent Lemon");
         assert_eq!(normalize_display_app_name("Tencent Lemon"), "Tencent Lemon");
         assert_eq!(normalize_display_app_name("LEMON.exe"), "Tencent Lemon");
+    }
+
+    #[test]
+    fn normalize_display_app_name_returns_canonical_for_cent_browser() {
+        assert_eq!(normalize_display_app_name("cent"), "Cent Browser");
+        assert_eq!(normalize_display_app_name("cent browser"), "Cent Browser");
+        assert_eq!(normalize_display_app_name("centbrowser"), "Cent Browser");
+        assert_eq!(
+            normalize_display_app_name("centbrowser.exe"),
+            "Cent Browser"
+        );
     }
 }

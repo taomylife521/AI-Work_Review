@@ -3,6 +3,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { aiStore } from '$lib/stores/ai.js';
   import { locale, t } from '$lib/i18n/index.js';
+  import AssistantMemoryManager from './AssistantMemoryManager.svelte';
 
   export let config;
   export let providers = [];
@@ -15,17 +16,40 @@
   let aiSection = 'model';
 
   // ══════════ 语义记忆索引管理（查询走助手，管理入口在这里）══════════
-  let semanticStats = { totalChunks: 0, embeddedChunks: 0 };
+  const emptySemanticState = () => ({
+    status: 'idle',
+    rebuildRequired: true,
+    indexedActivities: 0,
+    totalActivities: 0,
+    lastError: null,
+  });
+  let semanticState = emptySemanticState();
   let semanticIndexing = false;
   let semanticIndexText = '';
   let semanticError = '';
   let semanticDestroyed = false;
-  $: semanticPending = Math.max(0, (semanticStats.totalChunks || 0) - (semanticStats.embeddedChunks || 0));
+
+  function semanticStatusKey() {
+    if (semanticState.status === 'building') return 'settingsAI.semanticMemory.statusBuilding';
+    if (semanticState.status === 'failed') return 'settingsAI.semanticMemory.statusFailed';
+    if (semanticState.rebuildRequired) return 'settingsAI.semanticMemory.statusRebuildRequired';
+    if (semanticState.status === 'ready') return 'settingsAI.semanticMemory.statusReady';
+    return 'settingsAI.semanticMemory.statusIdle';
+  }
+
+  function semanticActionKey() {
+    if (semanticState.status === 'failed') return 'settingsAI.semanticMemory.retryIndex';
+    if (semanticState.status === 'ready') return 'settingsAI.semanticMemory.rebuildIndex';
+    if (semanticState.rebuildRequired && semanticState.indexedActivities > 0) {
+      return 'settingsAI.semanticMemory.rebuildIndex';
+    }
+    return 'settingsAI.semanticMemory.buildIndex';
+  }
 
   async function refreshSemanticStats() {
     if (!config?.memory_semantic_enabled) return;
     try {
-      semanticStats = await invoke('semantic_memory_status');
+      semanticState = await invoke('semantic_memory_status');
     } catch (e) {
       console.warn('读取语义记忆状态失败:', e);
     }
@@ -35,26 +59,23 @@
     if (semanticIndexing) return;
     semanticIndexing = true;
     semanticError = '';
+    semanticIndexText = '';
     try {
-      // 前端驱动的渐进式索引：循环调用直到活动游标追平且无待嵌入块
-      for (let round = 0; round < 500; round += 1) {
-        if (semanticDestroyed) return;
+      // 后端持久化真实状态；前端只分批推进，直到状态不再是 building。
+      while (!semanticDestroyed) {
         const progress = await invoke('index_semantic_memory');
-        semanticStats = progress.stats;
-        semanticIndexText = t('memoryPage.indexProgress', {
-          embedded: progress.stats.embeddedChunks,
-          total: progress.stats.totalChunks,
+        semanticState = progress.state;
+        semanticIndexText = t('settingsAI.semanticMemory.progress', {
+          indexed: semanticState.indexedActivities ?? 0,
+          total: semanticState.totalActivities ?? 0,
         });
-        if (progress.activitiesDone && progress.pendingEmbeddings === 0) {
-          semanticIndexText = t('memoryPage.indexDone', { total: progress.stats.embeddedChunks });
-          break;
-        }
+        if (semanticState.status !== 'building') break;
       }
     } catch (e) {
       semanticError = String(e);
     } finally {
       semanticIndexing = false;
-      refreshSemanticStats();
+      await refreshSemanticStats();
     }
   }
 
@@ -553,7 +574,7 @@
       {#each [
         { id: 'model', label: t('settingsAI.sectionModel'), on: isTextModelConfigured },
         { id: 'web', label: t('settingsAI.sectionWeb'), on: Boolean(config.assistant_web_access_enabled) },
-        { id: 'memory', label: t('settingsAI.sectionMemory'), on: Boolean(config.memory_semantic_enabled) },
+        { id: 'memory', label: t('settingsAI.sectionMemory'), on: Boolean(config.memory_semantic_enabled || config.assistant_memory_enabled) },
       ] as section (section.id)}
         <button
           type="button"
@@ -954,33 +975,73 @@
             {/if}
           </div>
 
-          <!-- 索引管理：查询直接问助手（semantic_search 工具），这里只管建索引 -->
-          <div class="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1 text-xs text-slate-400 dark:text-[#636c76]">
-            <span>{t('memoryPage.indexStatus', { embedded: semanticStats.embeddedChunks ?? 0, total: semanticStats.totalChunks ?? 0 })}</span>
-            <button
-              type="button"
-              class="text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 dark:hover:text-indigo-300 disabled:opacity-50"
-              on:click={startSemanticIndexing}
-              disabled={semanticIndexing}
-            >
-              {#if semanticIndexing}
-                {semanticIndexText || t('memoryPage.indexing')}
-              {:else if semanticPending > 0 || (semanticStats.totalChunks ?? 0) === 0}
-                {t('memoryPage.startIndex')}
-              {:else}
-                {t('memoryPage.incrementalIndex')}
-              {/if}
-            </button>
-            {#if !semanticIndexing && semanticIndexText}
-              <span>{semanticIndexText}</span>
+          <!-- 索引管理：状态由后端持久化，未 ready 时助手自动降级为 FTS -->
+          <div class="space-y-2 rounded-lg border border-slate-200 px-3 py-2.5 dark:border-[#30363d]">
+            <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span class="settings-muted">
+                {t('settingsAI.semanticMemory.statusLabel')}：
+                <strong class="text-slate-700 dark:text-[#c9d1d9]">{t(semanticStatusKey())}</strong>
+              </span>
+              <button
+                type="button"
+                class="text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 dark:hover:text-indigo-300 disabled:opacity-50"
+                on:click={startSemanticIndexing}
+                disabled={semanticIndexing}
+              >
+                {semanticIndexing ? t('settingsAI.semanticMemory.statusBuilding') : t(semanticActionKey())}
+              </button>
+            </div>
+            <p class="settings-muted">
+              {t('settingsAI.semanticMemory.progress', {
+                indexed: semanticState.indexedActivities ?? 0,
+                total: semanticState.totalActivities ?? 0,
+              })}
+            </p>
+            {#if semanticState.lastError}
+              <p class="text-xs text-rose-500 dark:text-rose-400 break-words">
+                {t('settingsAI.semanticMemory.lastError', { error: semanticState.lastError })}
+              </p>
             {/if}
+            {#if semanticError}
+              <p class="text-xs text-rose-500 dark:text-rose-400 break-words">{semanticError}</p>
+            {/if}
+            {#if semanticIndexText}
+              <p class="settings-muted">{semanticIndexText}</p>
+            {/if}
+            <p class="settings-muted">{t('settingsAI.semanticMemory.ftsFallback')}</p>
           </div>
-          {#if semanticError}
-            <p class="text-xs text-rose-500 dark:text-rose-400 break-words">{semanticError}</p>
-          {/if}
           <p class="settings-muted">{t('settingsAI.semanticMemory.askHint')}</p>
         </div>
       {/if}
+
+      <div class="space-y-3 border-t border-slate-200 pt-4 dark:border-[#30363d]">
+        <label class="flex items-center justify-between gap-3 cursor-pointer">
+          <div class="min-w-0">
+            <span class="settings-text text-sm inline-flex items-center gap-2">
+              {t('settingsAI.assistantMemory.title')}
+              <span class="rounded-full px-1.5 py-0.5 text-[10px] font-medium {config.assistant_memory_enabled ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400' : 'bg-slate-100 text-slate-400 dark:bg-[#21262d] dark:text-[#636c76]'}">
+                {config.assistant_memory_enabled ? t('settingsAI.statusEnabled') : t('settingsAI.statusDisabled')}
+              </span>
+            </span>
+            <p class="settings-muted mt-0.5">{t('settingsAI.assistantMemory.hint')}</p>
+          </div>
+          <button
+            type="button"
+            class="switch-track shrink-0 {config.assistant_memory_enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-[#484f58]'}"
+            role="switch"
+            aria-label={t('settingsAI.assistantMemory.enabled')}
+            aria-checked={config.assistant_memory_enabled}
+            on:click={() => {
+              config.assistant_memory_enabled = !config.assistant_memory_enabled;
+              handleChange();
+            }}
+          >
+            <span class="switch-thumb {config.assistant_memory_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
+          </button>
+        </label>
+
+        <AssistantMemoryManager enabled={Boolean(config.assistant_memory_enabled)} {t} />
+      </div>
     </div>
     {/if}
   </div>

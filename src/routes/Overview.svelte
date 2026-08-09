@@ -1349,7 +1349,7 @@
   <!-- 洞察条：仅 today 模式、数据非空且上周同日基线可用时组句显示 -->
   {#if overviewMode === 'today' && insightSentence}
     <!-- 窄屏精修：flex-wrap 允许洞察句换行,链接自动下移到第二行,避免最小窗口横向溢出 -->
-    <div class="mb-4 flex flex-wrap items-center gap-3.5 rounded-[22px] border border-blue-100 bg-gradient-to-r from-blue-50 via-white to-white px-5 py-3.5 dark:border-blue-900/40 dark:from-blue-950/35 dark:via-[#161b22] dark:to-[#161b22]">
+    <div class="mb-4 flex flex-wrap items-center gap-3.5 rounded-lg border border-blue-100 bg-gradient-to-r from-blue-50 via-white to-white px-5 py-3.5 dark:border-blue-900/40 dark:from-blue-950/35 dark:via-[#161b22] dark:to-[#161b22]">
       <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-500 dark:bg-blue-900/40 dark:text-blue-300">
         <svg class="h-[17px] w-[17px]" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <path d="M12 2.5l2 6.4 6.5 2.1-6.5 2.1-2 6.4-2-6.4L3.5 11l6.5-2.1zM19 15.5l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9z" />
@@ -1368,13 +1368,13 @@
   <div class="overview-summary-grid grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
     {#if loading || !stats}
       {#each [1,2,3,4] as _}
-        <div class="min-h-[116px] rounded-2xl border border-slate-100 bg-white p-5 animate-pulse dark:border-[#30363d]/60 dark:bg-[#21262d]/80">
+        <div class="min-h-[116px] rounded-lg border border-slate-100 bg-white p-5 animate-pulse dark:border-[#30363d]/60 dark:bg-[#21262d]/80">
           <div class="flex h-full items-center justify-between gap-4">
             <div class="flex-1">
               <div class="h-3 rounded bg-slate-200 dark:bg-[#30363d] w-20"></div>
               <div class="mt-6 h-8 w-1/2 rounded bg-slate-200 dark:bg-[#30363d]"></div>
             </div>
-            <div class="h-11 w-11 rounded-2xl bg-slate-100 dark:bg-[#30363d] shrink-0"></div>
+            <div class="h-11 w-11 rounded-lg bg-slate-100 dark:bg-[#30363d] shrink-0"></div>
           </div>
         </div>
       {/each}
@@ -1480,13 +1480,13 @@
         <div class="mb-5 h-3.5 rounded-full bg-slate-200 dark:bg-[#30363d]"></div>
         <div class="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
           {#each [1,2,3,4] as _}
-            <div class="min-h-[88px] rounded-[22px] bg-slate-50/88 p-4 dark:bg-[#161b22]/30">
+            <div class="min-h-[88px] rounded-lg bg-slate-50/88 p-4 dark:bg-[#161b22]/30">
               <div class="h-3 w-16 rounded bg-slate-200 dark:bg-[#30363d]"></div>
               <div class="mt-4 h-7 w-20 rounded bg-slate-200 dark:bg-[#30363d]"></div>
             </div>
           {/each}
         </div>
-        <div class="rounded-[22px] bg-slate-50/90 p-4 dark:bg-[#161b22]/40">
+        <div class="rounded-lg bg-slate-50/90 p-4 dark:bg-[#161b22]/40">
           <div class="flex h-40 items-end gap-1.5">
             {#each Array(24) as _, hour}
               <div class="flex h-full flex-1 flex-col items-center justify-end">
@@ -1519,11 +1519,11 @@
             {#each compositionSegments as segment (segment.category)}
               <button
                 type="button"
-                class={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs transition-colors ${selectedCompositionCategory === segment.category ? 'bg-slate-100 text-slate-800 dark:bg-[#30363d] dark:text-[#e6edf3]' : 'text-slate-500 hover:bg-slate-50 dark:text-[#7d8590] dark:hover:bg-[#21262d]'}`}
+                class={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors ${selectedCompositionCategory === segment.category ? 'bg-slate-100 text-slate-800 dark:bg-[#30363d] dark:text-[#e6edf3]' : 'text-slate-500 hover:bg-slate-50 dark:text-[#7d8590] dark:hover:bg-[#21262d]'}`}
                 aria-pressed={selectedCompositionCategory === segment.category}
                 on:click={() => toggleCompositionCategory(segment.category)}
               >
-                <span class="inline-block h-2 w-2 rounded-[3px]" style={`background: ${segment.color};`}></span>
+                <span class="inline-block h-2 w-2 rounded-[var(--radius-xs)]" style={`background: ${segment.color};`}></span>
                 <span class="font-medium">{segment.name}</span>
                 {formatDurationLocalized(segment.duration, { compact: true })}
                 <span class="text-slate-400 dark:text-[#636c76]">{segment.percent}%</span>
@@ -1532,7 +1532,7 @@
           </div>
 
           {#if selectedCompositionSummary}
-            <div class="overview-composition-summary mx-auto mt-4 max-w-3xl rounded-2xl bg-slate-50/90 px-4 py-3 text-center dark:bg-[#161b22]/35">
+            <div class="overview-composition-summary mx-auto mt-4 max-w-3xl rounded-lg bg-slate-50/90 px-4 py-3 text-center dark:bg-[#161b22]/35">
               <div class="grid gap-2 sm:grid-cols-3">
                 <div class="overview-composition-kpi rounded-xl px-3 py-2 text-center">
                   <p class="text-[11px] text-slate-400 dark:text-[#636c76]">{t('overview.compositionDuration')}</p>
@@ -1611,7 +1611,7 @@
               on:click={() => openDomainDetail(domain)}
             >
               <span class="overview-domain-heading min-w-0">
-                <span class="block truncate text-[13px] font-semibold text-slate-700 dark:text-[#c9d1d9]">
+                <span class="overview-domain-name block truncate">
                   {getBrowserDomainDisplayLabel(domain)}
                 </span>
                 <span class="overview-domain-meta overview-domain-category-meta mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-slate-500 dark:text-[#7d8590]">
@@ -1787,7 +1787,7 @@
       {#if domainOverlayLoading}
         <div class="py-10 text-center text-sm text-slate-400 dark:text-[#636c76]">{t('common.loading')}</div>
       {:else if domainOverlayError}
-        <div class="mx-auto max-w-md rounded-2xl bg-red-50 px-4 py-5 text-center text-sm text-red-600 dark:bg-red-950/20 dark:text-red-300">
+        <div class="mx-auto max-w-md rounded-lg bg-red-50 px-4 py-5 text-center text-sm text-red-600 dark:bg-red-950/20 dark:text-red-300">
           <p>{t('overview.domainLoadFailed')}</p>
           <p class="mt-1 break-words text-xs opacity-80">{domainOverlayError}</p>
         </div>
@@ -1798,7 +1798,7 @@
             <button
               type="button"
               data-domain-summary
-              class="overview-domain-summary-row grid w-full grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-2xl border border-slate-200/80 px-4 py-3 text-start transition-colors hover:border-sky-200 hover:bg-sky-50/45 focus:outline-none focus:ring-2 focus:ring-sky-300 dark:border-[#30363d] dark:hover:border-sky-800/70 dark:hover:bg-sky-950/10"
+              class="overview-domain-summary-row grid w-full grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-lg border border-slate-200/80 px-4 py-3 text-start transition-colors hover:border-sky-200 hover:bg-sky-50/45 focus:outline-none focus:ring-2 focus:ring-sky-300 dark:border-[#30363d] dark:hover:border-sky-800/70 dark:hover:bg-sky-950/10"
               on:click={() => selectDomainFromCollection(domain)}
             >
               <span class="min-w-0">
@@ -1831,7 +1831,7 @@
       {:else if domainOverlayView === 'detail'}
       {#each (selectedDomainDetail ? [selectedDomainDetail] : []) as domain}
         {@const domainPresentation = buildDomainPresentation(domain)}
-        <div class="overview-domain-detail-source rounded-2xl bg-slate-50/80 p-3 dark:bg-[#21262d]/45">
+        <div class="overview-domain-detail-source rounded-lg bg-slate-50/80 p-3 dark:bg-[#21262d]/45">
           <div class="overview-domain-source-list flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-[#7d8590]">
             <span>{domainPresentation.sourceLabel || t('overview.domainSourcesUnknown')}</span>
             <span>{formatDurationLocalized(domain.duration, { compact: true })}</span>
@@ -1870,7 +1870,7 @@
                   {t('overview.currentCategory', { label: getDomainSemanticLabel(domain) })}
                 </span>
                 <button
-                  class="text-xs px-2 py-1 rounded-full border border-slate-200 dark:border-[#484f58] text-slate-700 dark:text-[#adbac7] hover:border-primary-300 hover:text-primary-600 transition-colors"
+                  class="text-xs px-2 py-1 rounded-lg border border-slate-200 dark:border-[#484f58] text-slate-700 dark:text-[#adbac7] hover:border-primary-300 hover:text-primary-600 transition-colors"
                   aria-haspopup="dialog"
                   aria-expanded={editingDomainKey === domain.domain}
                   aria-controls={`semantic-category-popover-${domain.domain}`}
@@ -1894,7 +1894,7 @@
             <div
               bind:this={semanticCategoryPopover}
               id={`semantic-category-popover-${domain.domain}`}
-              class="overview-semantic-popover fixed z-[160] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-xl dark:border-[#30363d] dark:bg-[#161b22] dark:shadow-black/30"
+                  class="overview-semantic-popover fixed z-[160] overflow-y-auto rounded-lg border border-slate-200 bg-white p-3 shadow-xl dark:border-[#30363d] dark:bg-[#161b22] dark:shadow-black/30"
               role="dialog"
               tabindex="-1"
               aria-label={t('overview.changeCategory')}
@@ -2105,7 +2105,7 @@
     role="presentation"
     on:click|self={cancelDeleteSemanticCategory}
   >
-    <div use:trapFocus role="dialog" aria-modal="true" class="w-full max-w-sm rounded-2xl border border-slate-200 dark:border-[#30363d] bg-white dark:bg-[#161b22] shadow-2xl p-6 mx-4">
+        <div use:trapFocus role="dialog" aria-modal="true" class="w-full max-w-sm rounded-xl border border-slate-200 dark:border-[#30363d] bg-white dark:bg-[#161b22] shadow-2xl p-6 mx-4">
       <h3 class="text-base font-semibold text-slate-900 dark:text-[#e6edf3]">{t('overview.deleteSemanticCategoryTitle')}</h3>
       <p class="mt-2 text-sm text-slate-700 dark:text-[#7d8590] leading-relaxed">
         {t('overview.deleteSemanticCategoryMessage', { category: pendingDeleteSemanticCategory.name })}

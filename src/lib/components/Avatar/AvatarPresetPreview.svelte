@@ -21,7 +21,7 @@
   $: previewMotionBeat = presetOption.previewMotionBeat ?? 18;
 </script>
 
-<div class="pointer-events-none h-full w-full overflow-hidden rounded-[20px]">
+<div class="pointer-events-none h-full w-full overflow-hidden rounded-lg">
   <div class="h-full w-full scale-[1.08] origin-center">
     <AvatarCanvas
       state={previewState}

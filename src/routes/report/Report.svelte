@@ -19,6 +19,7 @@
     reportSectionMarkdownForDisplay,
     reportSectionMarkdownForStorage,
   } from './reportSections.js';
+  import { createReportGenerationOwnership, createReportRequestSnapshot, shiftIsoDate } from './reportDateNavigation.js';
   import LocalizedDatePicker from '../../lib/components/LocalizedDatePicker.svelte';
 
   function getLocalDateString() {
@@ -27,16 +28,7 @@
   }
 
   function getYesterdayDateString() {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    return `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
-  }
-
-  // ISO 日期偏移工具（KPI 上周同日基线共用）
-  function shiftIsoDate(dateValue, offsetDays) {
-    const next = new Date(`${dateValue}T12:00:00`);
-    next.setDate(next.getDate() + offsetDays);
-    return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`;
+    return shiftIsoDate(getLocalDateString(), -1);
   }
 
   let report = null;
@@ -56,6 +48,7 @@
   let config = null;
   let lastLoadedDate = '';
   let reportRequestId = 0;
+  const reportGenerationOwnership = createReportGenerationOwnership();
   let exportInProgress = false;
   let promptSaving = false;
   let cacheData = null;
@@ -100,40 +93,44 @@
   }
 
   async function loadReport(previousReport = null) {
-    const requestId = ++reportRequestId;
+    const { requestId, targetDate, targetLocale, targetCacheKey } = createReportRequestSnapshot(
+      ++reportRequestId,
+      selectedDate,
+      currentLocale,
+    );
     freshStats = null;
     lastWeekStats = null;
 
     // 并行加载实时统计 + 上周同日基线（KPI 参照系）
-    invoke('get_daily_stats', { date: selectedDate })
+    invoke('get_daily_stats', { date: targetDate })
       .then(stats => { if (requestId === reportRequestId) freshStats = stats; })
       .catch(() => {});
-    invoke('get_daily_stats', { date: shiftIsoDate(selectedDate, -7) })
+    invoke('get_daily_stats', { date: shiftIsoDate(targetDate, -7) })
       .then(stats => { if (requestId === reportRequestId) lastWeekStats = stats; })
       .catch(() => {});
 
     // 乐观更新：先显示缓存数据
-    let cacheData;
-    const unsubscribe = cache.subscribe(c => { cacheData = c; });
+    let cachedState;
+    const unsubscribe = cache.subscribe(c => { cachedState = c; });
     unsubscribe();
 
-    if (cacheData.reports[currentReportCacheKey]?.data) {
-      report = cacheData.reports[currentReportCacheKey].data;
+    if (cachedState.reports[targetCacheKey]?.data) {
+      report = cachedState.reports[targetCacheKey].data;
       isYesterdayReport = false;
       loading = false;
 
       // 缓存有效则直接返回
-      if (cache.isValid(cacheData.reports[currentReportCacheKey], 'reports')) {
+      if (cache.isValid(cachedState.reports[targetCacheKey], 'reports')) {
         return;
       }
 
       // 后台静默刷新
       try {
-        const savedReport = await invoke('get_saved_report', { date: selectedDate, locale: currentLocale });
+        const savedReport = await invoke('get_saved_report', { date: targetDate, locale: targetLocale });
         if (requestId !== reportRequestId) return;
         if (savedReport) {
           report = savedReport;
-          cache.setReport(currentReportCacheKey, savedReport);
+          cache.setReport(targetCacheKey, savedReport);
         }
       } catch (e) {
         console.warn('后台刷新日报失败:', e);
@@ -143,30 +140,38 @@
       loading = true;
       error = null;
       try {
-        const savedReport = await invoke('get_saved_report', { date: selectedDate, locale: currentLocale });
+        const savedReport = await invoke('get_saved_report', { date: targetDate, locale: targetLocale });
         if (requestId !== reportRequestId) return;
         if (savedReport) {
           report = savedReport;
           isYesterdayReport = false;
-          cache.setReport(currentReportCacheKey, savedReport);
+          cache.setReport(targetCacheKey, savedReport);
         } else {
-          if (!savedReport && previousReport?.date === selectedDate && previousReport?.content) {
+          if (
+            !savedReport
+            && previousReport?.date === targetDate
+            && previousReport?.content
+            && reportGenerationOwnership.claim(requestId, cacheData.reportGenerating)
+          ) {
             cache.setReportGenerating(true);
-            await invoke('generate_report', { date: selectedDate, force: false, locale: currentLocale });
-            const localizedReport = await invoke('get_saved_report', { date: selectedDate, locale: currentLocale });
+            await invoke('generate_report', { date: targetDate, force: false, locale: targetLocale });
+            if (requestId !== reportRequestId) return;
+            const localizedReport = await invoke('get_saved_report', { date: targetDate, locale: targetLocale });
+            if (requestId !== reportRequestId) return;
 
             if (localizedReport) {
               report = localizedReport;
               isYesterdayReport = false;
-              cache.setReport(currentReportCacheKey, localizedReport);
+              cache.setReport(targetCacheKey, localizedReport);
               return;
             }
           }
 
           // 如果选择今天且今天无日报，尝试加载昨日日报
-          if (selectedDate === getLocalDateString()) {
-            const yesterday = getYesterdayDateString();
-            const yesterdayReport = await invoke('get_saved_report', { date: yesterday, locale: currentLocale });
+          if (targetDate === getLocalDateString()) {
+            const yesterday = shiftIsoDate(targetDate, -1);
+            const yesterdayReport = await invoke('get_saved_report', { date: yesterday, locale: targetLocale });
+            if (requestId !== reportRequestId) return;
             if (yesterdayReport) {
               report = yesterdayReport;
               isYesterdayReport = true;
@@ -180,12 +185,22 @@
           }
         }
       } catch (e) {
-        error = formatUserError(e, t('common.loadFailedRetry'));
+        if (requestId === reportRequestId) {
+          error = formatUserError(e, t('common.loadFailedRetry'));
+        }
       } finally {
-        cache.setReportGenerating(false);
-        loading = false;
+        if (requestId === reportRequestId) {
+          loading = false;
+        }
+        if (reportGenerationOwnership.release(requestId)) {
+          cache.setReportGenerating(false);
+        }
       }
     }
+  }
+
+  function selectPreviousDay() {
+    selectDate(shiftIsoDate(selectedDate, -1));
   }
 
   function selectDate(date) {
@@ -194,20 +209,29 @@
   }
 
   async function generateReport(force = true) {
+    const { requestId, targetDate, targetLocale, targetCacheKey } = createReportRequestSnapshot(
+      ++reportRequestId,
+      selectedDate,
+      currentLocale,
+    );
+    if (!reportGenerationOwnership.claim(requestId, cacheData.reportGenerating)) return;
     cache.setReportGenerating(true);
     error = null;
     try {
       if (config?.ai_mode === 'summary') {
         await persistReportPrompt();
+        if (requestId !== reportRequestId) return;
       }
-      await invoke('generate_report', { date: selectedDate, force, locale: currentLocale });
-      const savedReport = await invoke('get_saved_report', { date: selectedDate, locale: currentLocale });
-      report = savedReport || { date: selectedDate, content: '', created_at: Date.now() / 1000 };
+      await invoke('generate_report', { date: targetDate, force, locale: targetLocale });
+      if (requestId !== reportRequestId) return;
+      const savedReport = await invoke('get_saved_report', { date: targetDate, locale: targetLocale });
+      if (requestId !== reportRequestId) return;
+      report = savedReport || { date: targetDate, content: '', created_at: Date.now() / 1000 };
       isYesterdayReport = false;
-      cache.setReport(currentReportCacheKey, report);
+      cache.setReport(targetCacheKey, report);
       // 历史周条即时点亮当天（无需重新探测整周）
-      if (savedReport && selectedDate in weekReportStatus) {
-        weekReportStatus = { ...weekReportStatus, [selectedDate]: true };
+      if (savedReport && targetDate in weekReportStatus) {
+        weekReportStatus = { ...weekReportStatus, [targetDate]: true };
       }
 
       if (
@@ -220,9 +244,13 @@
         showToast(t('report.promptApplied'), 'success');
       }
     } catch (e) {
-      error = formatUserError(e, t('common.loadFailedRetry'));
+      if (requestId === reportRequestId) {
+        error = formatUserError(e, t('common.loadFailedRetry'));
+      }
     } finally {
-      cache.setReportGenerating(false);
+      if (reportGenerationOwnership.release(requestId)) {
+        cache.setReportGenerating(false);
+      }
     }
   }
 
@@ -841,6 +869,13 @@
       <div class="report-hero-actions">
         <div class="page-toolbar-end">
           <button
+            type="button"
+            class="page-control-btn"
+            on:click={selectPreviousDay}
+          >
+            {t('report.previousDay')}
+          </button>
+          <button
             class="page-control-btn {selectedDate === getLocalDateString() ? 'page-control-btn-active' : ''}"
             on:click={() => selectDate(getLocalDateString())}
           >
@@ -1025,7 +1060,7 @@
                 </button>
                 <button
                   type="button"
-                  class="absolute -top-1.5 left-1/2 -translate-x-1/2 flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-xs leading-none text-white opacity-0 shadow-sm transition-opacity hover:bg-blue-600 group-hover/preset:opacity-100 focus-visible:opacity-100 dark:shadow-none"
+                  class="absolute -top-1.5 left-1/2 -translate-x-1/2 flex h-5 w-5 items-center justify-center rounded-[var(--radius-sm)] bg-blue-500 text-xs leading-none text-white opacity-0 shadow-sm transition-opacity hover:bg-blue-600 group-hover/preset:opacity-100 focus-visible:opacity-100 dark:shadow-none"
                   title={t('report.editPreset')}
                   on:click|stopPropagation={() => {
                     editingPresetIndex = i;
@@ -1036,7 +1071,7 @@
                 >✎</button>
                 <button
                   type="button"
-                  class="absolute -top-1.5 -end-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs leading-none text-white opacity-0 shadow-sm transition-opacity hover:bg-red-600 group-hover/preset:opacity-100 focus-visible:opacity-100 dark:shadow-none"
+                  class="absolute -top-1.5 -end-1.5 flex h-5 w-5 items-center justify-center rounded-[var(--radius-sm)] bg-red-500 text-xs leading-none text-white opacity-0 shadow-sm transition-opacity hover:bg-red-600 group-hover/preset:opacity-100 focus-visible:opacity-100 dark:shadow-none"
                   title={t('common.delete')}
                   on:click|stopPropagation={() => deletePreset(i)}
                 >×</button>

@@ -6,7 +6,7 @@ use crate::error::AppError;
 use crate::work_intelligence::TodoExtractionResult;
 use crate::AppState;
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle};
+use tauri::AppHandle;
 
 /// 从问题中提取时间范围关键词，返回 (date_from, date_to)
 ///
@@ -132,12 +132,16 @@ pub(crate) fn validate_relative_path(path: &str) -> Result<(), AppError> {
 
     let p = Path::new(path);
     if p.is_absolute() {
-        return Err(AppError::Unknown("非法路径：不允许使用绝对路径".to_string()));
+        return Err(AppError::Unknown(
+            "非法路径：不允许使用绝对路径".to_string(),
+        ));
     }
     if p.components()
         .any(|c| matches!(c, Component::ParentDir | Component::Prefix(_)))
     {
-        return Err(AppError::Unknown("非法路径：不允许包含 .. 等越界路径".to_string()));
+        return Err(AppError::Unknown(
+            "非法路径：不允许包含 .. 等越界路径".to_string(),
+        ));
     }
     Ok(())
 }
@@ -276,6 +280,9 @@ pub(crate) fn persist_app_config(
     state: &Arc<Mutex<AppState>>,
 ) -> Result<(), AppError> {
     config.normalize();
+    let new_embedding_config_fingerprint =
+        super::semantic_memory::embedding_config_fingerprint(&config);
+    let new_privacy_fingerprint = super::semantic_memory::privacy_fingerprint(&config.privacy);
     let (
         previous_avatar_enabled,
         previous_avatar_scale,
@@ -291,17 +298,26 @@ pub(crate) fn persist_app_config(
     ) = {
         let mut state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
         let previous_config = state.config.clone();
+        let previous_embedding_config_fingerprint =
+            super::semantic_memory::embedding_config_fingerprint(&previous_config);
+        let previous_privacy_fingerprint =
+            super::semantic_memory::privacy_fingerprint(&previous_config.privacy);
 
-        // 更新配置
-        state.config = config.clone();
-        state.storage_manager.update_config(config.storage.clone());
-        state.screenshot_service.update_config(&config.storage);
+        // Embedding 或隐私规则变化时必须先失效旧向量，再保存并启用新配置。
+        // API Key 不参与指纹，因此单纯轮换密钥不会触发无必要的全量重建。
+        if previous_embedding_config_fingerprint != new_embedding_config_fingerprint
+            || previous_privacy_fingerprint != new_privacy_fingerprint
+        {
+            super::semantic_memory::invalidate_semantic_memory_index(&state.database)?;
+        }
 
-        // 保存到文件
+        // 先持久化文件；失败时内存配置和运行时隐私过滤器保持旧值。
         let config_path = state.config_path.clone();
         config.save(&config_path)?;
 
-        // 更新隐私过滤器
+        state.config = config.clone();
+        state.storage_manager.update_config(config.storage.clone());
+        state.screenshot_service.update_config(&config.storage);
         state.privacy_filter.update_config(&config.privacy);
         state.avatar_state = crate::avatar_engine::apply_avatar_visual_settings(
             state.avatar_state.clone(),
@@ -427,14 +443,11 @@ fn refresh_avatar_state_for_current_window(app: &AppHandle, state: &Arc<Mutex<Ap
     true
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::database::{BrowserUsage, DailyStats, DomainUsage, UrlDetail, UrlUsage};
     use crate::privacy::apply_excluded_domains_to_stats;
-
 
     #[test]
     fn 概览统计应过滤排除域名并重算浏览器时长() {
@@ -693,5 +706,4 @@ mod tests {
         assert_eq!(from.as_deref(), Some(prev_first.as_str()));
         assert_eq!(to.as_deref(), Some(today_str().as_str()));
     }
-
 }

@@ -95,12 +95,10 @@ test('统一底板结构下，卡片感应集中在 frame 层，内层容器不�
 test('外围主卡片四角应使用同一套圆角，frame 不应硬裁剪滚动条', async () => {
   const appCssSource = await readFile(new URL('./app.css', import.meta.url), 'utf8');
 
-  assert.match(appCssSource, /--app-shell-frame-radius:\s*2rem/);
-  assert.match(appCssSource, /--app-shell-inner-radius:\s*1\.78rem/);
-  assert.match(appCssSource, /\.app-shell-sidebar-frame,\s*\.app-shell-main-frame\s*\{[^}]*border-radius:\s*var\(--app-shell-frame-radius\)/);
+  assert.match(appCssSource, /\.app-shell-sidebar-frame,\s*\.app-shell-main-frame\s*\{[^}]*border-radius:\s*var\(--radius-lg\)/);
   assert.doesNotMatch(appCssSource, /\.app-shell-sidebar-frame,\s*\.app-shell-main-frame\s*\{[^}]*overflow:\s*hidden/);
-  assert.match(appCssSource, /\.app-shell-sidebar\s*\{[\s\S]*border-radius:\s*var\(--app-shell-inner-radius\)/);
-  assert.match(appCssSource, /\.app-shell-main\s*\{[\s\S]*border-radius:\s*var\(--app-shell-inner-radius\)/);
+  assert.match(appCssSource, /\.app-shell-sidebar\s*\{[\s\S]*border-radius:\s*var\(--radius-lg\)/);
+  assert.match(appCssSource, /\.app-shell-main\s*\{[\s\S]*border-radius:\s*var\(--radius-lg\)/);
 });
 
 test('主内容滚动条应从圆角裁剪边界内缩，避免顶部和底部被遮住', async () => {
@@ -110,7 +108,7 @@ test('主内容滚动条应从圆角裁剪边界内缩，避免顶部和底部�
   assert.match(appCssSource, /\.app-shell-main-scroll\s*\{[\s\S]*scrollbar-gutter:\s*stable/);
   assert.match(appCssSource, /\.app-shell-main-scroll\s*\{[\s\S]*scrollbar-width:\s*thin/);
   assert.match(appCssSource, /\.app-shell-main-scroll\s*\{[\s\S]*scrollbar-color:\s*rgba\(100,\s*116,\s*139,\s*0\.42\)\s*transparent/);
-  assert.match(appCssSource, /\.app-shell-main-scroll\s*\{[\s\S]*border-radius:\s*calc\(var\(--app-shell-inner-radius\) - 0\.18rem\)/);
+  assert.match(appCssSource, /\.app-shell-main-scroll\s*\{[\s\S]*border-radius:\s*var\(--radius-md\)/);
   assert.match(appCssSource, /\.app-shell-main-scroll\s*\{[\s\S]*margin-right:\s*0\.42rem/);
   assert.match(appCssSource, /\.app-shell-main-scroll\s*\{[\s\S]*padding-right:\s*0\.28rem/);
   assert.match(appCssSource, /\.app-shell-main-scroll\s*\{[\s\S]*padding-bottom:\s*0\.12rem/);

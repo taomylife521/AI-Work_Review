@@ -519,7 +519,7 @@
         {#each AVATAR_PRESET_OPTIONS as preset}
           <button
             type="button"
-            class="rounded-2xl border p-3 text-left transition {config.avatar_preset === preset.id ? 'border-primary-500 bg-primary-50/70 shadow-sm dark:shadow-none dark:border-primary-400 dark:bg-primary-500/10' : 'border-slate-200 bg-white hover:border-slate-300 dark:border-[#30363d] dark:bg-[#161b22]/60 dark:hover:border-[#484f58]'}"
+            class="rounded-[var(--radius-md)] border p-3 text-left transition {config.avatar_preset === preset.id ? 'border-primary-500 bg-primary-50/70 shadow-sm dark:shadow-none dark:border-primary-400 dark:bg-primary-500/10' : 'border-slate-200 bg-white hover:border-slate-300 dark:border-[#30363d] dark:bg-[#161b22]/60 dark:hover:border-[#484f58]'}"
             on:click={() => selectAvatarPreset(preset.id)}
             aria-pressed={config.avatar_preset === preset.id}
           >

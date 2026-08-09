@@ -22,6 +22,99 @@ test('时间线应通过显式函数判断重点卡片并读取缩略图', async
   assert.match(source, /shouldPreferTimelineFallbackIcon/);
 });
 
+test('时间线应用图标应使用统一安全区并在原生图片失败时回退', async () => {
+  const source = await readFile(new URL('./Timeline.svelte', import.meta.url), 'utf8');
+
+  assert.match(source, /let failedTimelineIconKeys = new Set\(\)/);
+  assert.match(source, /function handleTimelineIconError\(activity\)/);
+  assert.match(source, /on:error=\{\(\) => handleTimelineIconError\(activity\)\}/);
+  assert.match(source, /timeline-app-icon-has-image/);
+  assert.match(
+    source,
+    /\.timeline-app-icon-has-image\s*\{[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/
+  );
+  assert.match(
+    source,
+    /\.timeline-app-icon-image\s*\{[^}]*width:\s*100%;[^}]*height:\s*100%;[^}]*object-fit:\s*contain;/
+  );
+  assert.match(
+    source,
+    /:global\(\.dark\) \.timeline-app-icon-has-image\s*\{[^}]*background:\s*transparent;/
+  );
+  assert.doesNotMatch(source, /\.timeline-app-icon-image\s*\{[^}]*1\.9rem/);
+});
+
+test('时间线仅应在存在有效图片源时使用图片态底板，加载失败后回退普通底板', async () => {
+  const source = await readFile(new URL('./Timeline.svelte', import.meta.url), 'utf8');
+  const markup = source.slice(source.indexOf('<!-- 时间线列表 -->'), source.indexOf('<style>'));
+  const iconResolver = source.slice(
+    source.indexOf('function getTimelineIconSrc(activity)'),
+    source.indexOf('function handleTimelineIconError(activity)'),
+  );
+
+  assert.equal(
+    (markup.match(/class:timeline-app-icon-has-image=\{Boolean\(getTimelineIconSrc\(activity\)\)\}/g) || []).length,
+    2,
+    '重点卡片与紧凑卡片都应按图片源条件添加图片态 class',
+  );
+  assert.equal(
+    (markup.match(/class:timeline-app-icon-has-image=\{Boolean\(getTimelineIconSrc\(selectedActivity\)\)\}/g) || []).length,
+    1,
+    '详情图标应按图片源条件添加图片态 class',
+  );
+  assert.doesNotMatch(
+    markup,
+    /class="[^"]*timeline-app-icon-has-image[^"]*"/,
+    '图片态 class 不得静态常驻',
+  );
+  assert.match(
+    iconResolver,
+    /if \(failedTimelineIconKeys\.has\(iconKey\)\) \{\s*return null;\s*\}/,
+    '图片加载失败后应返回空源并恢复普通图标底板',
+  );
+});
+
+test('时间线取得有效原生图标后应优先于字母兜底', async () => {
+  const source = await readFile(new URL('./Timeline.svelte', import.meta.url), 'utf8');
+  const iconResolver = source.slice(
+    source.indexOf('function getTimelineIconSrc(activity)'),
+    source.indexOf('function handleTimelineIconError(activity)'),
+  );
+
+  const nativeIconBranch = iconResolver.indexOf('hasUsableTimelineNativeIcon(base64)');
+  const fallbackBranch = iconResolver.indexOf('shouldPreferTimelineFallbackIcon(activity)');
+
+  assert.notEqual(nativeIconBranch, -1);
+  assert.notEqual(fallbackBranch, -1);
+  assert.ok(nativeIconBranch < fallbackBranch, '有效原生图标必须先于字母兜底返回');
+});
+
+test('时间线结构容器与普通控件应使用统一圆角令牌', async () => {
+  const source = await readFile(new URL('./Timeline.svelte', import.meta.url), 'utf8');
+  const expected = [
+    ['timeline-action-confirm-dialog', 'var\\(--radius-lg\\)'],
+    ['timeline-entry-card', 'var\\(--radius-md\\)'],
+    ['timeline-featured-image', 'var\\(--radius-md\\)'],
+    ['timeline-app-icon', 'var\\(--radius-md\\)'],
+    ['timeline-load-more-btn', 'var\\(--radius-md\\)'],
+    ['timeline-detail-drawer', 'var\\(--radius-lg\\)'],
+    ['timeline-detail-preview-frame', 'var\\(--radius-md\\)'],
+    ['timeline-category-trigger', 'var\\(--radius-md\\)'],
+    ['timeline-category-popover', 'var\\(--radius-md\\)'],
+    ['timeline-category-option', 'var\\(--radius-sm\\)'],
+  ];
+
+  for (const [className, radius] of expected) {
+    assert.match(
+      source,
+      new RegExp(`\\.${className}\\s*\\{[^}]*border-radius:\\s*${radius};`),
+      className,
+    );
+  }
+
+  assert.doesNotMatch(source, /border-radius:\s*(?:1(?:\.\d+)?rem|0\.8[5-9]rem|0\.9rem)/);
+});
+
 test('时间线重点卡片应使用横向标题区与胶囊分类，避免标题和分类互相挤压', async () => {
   const source = await readFile(new URL('./Timeline.svelte', import.meta.url), 'utf8');
 

@@ -45,7 +45,7 @@
     height: 1.25rem;
     border: 2px solid rgba(120, 113, 108, 0.24);
     border-top-color: #d97706;
-    border-radius: 999px;
+    border-radius: var(--radius-full);
     animation: summary-route-spin 700ms linear infinite;
   }
 

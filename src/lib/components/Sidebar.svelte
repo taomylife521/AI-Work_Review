@@ -134,7 +134,7 @@
         </div>
         <button
           on:click={toggleRecording}
-          class="sidebar-recording-toggle mt-0.5 shrink-0 px-3 py-1.5 text-[11px] font-semibold rounded-full transition-all
+          class="sidebar-recording-toggle mt-0.5 shrink-0 px-3 py-1.5 text-[11px] font-semibold rounded-lg transition-all
             {isPaused 
               ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-300' 
               : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-[#30363d] dark:text-[#adbac7]'}"
@@ -216,7 +216,7 @@
         <div class="relative" bind:this={localeMenuContainer}>
           <button
             type="button"
-            class="sidebar-locale-switch locale-switch inline-flex h-8 min-w-[72px] items-center justify-center gap-1.5 rounded-full border border-slate-200/80 bg-white/90 px-3 text-[11px] font-semibold tracking-normal text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] outline-none dark:shadow-none transition hover:border-slate-300 hover:text-slate-900 focus:ring-2 focus:ring-slate-300 dark:border-[#30363d]/80 dark:bg-[#161b22]/80 dark:text-[#c9d1d9] dark:hover:border-[#484f58] dark:hover:text-[#e6edf3] dark:focus:ring-primary-600"
+            class="sidebar-locale-switch locale-switch inline-flex h-8 min-w-[72px] items-center justify-center gap-1.5 rounded-lg border border-slate-200/80 bg-white/90 px-3 text-[11px] font-semibold tracking-normal text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] outline-none dark:shadow-none transition hover:border-slate-300 hover:text-slate-900 focus:ring-2 focus:ring-slate-300 dark:border-[#30363d]/80 dark:bg-[#161b22]/80 dark:text-[#c9d1d9] dark:hover:border-[#484f58] dark:hover:text-[#e6edf3] dark:focus:ring-primary-600"
             aria-label={translate('sidebar.localeButtonTitle')}
             aria-haspopup="menu"
             aria-expanded={localeMenuOpen}
@@ -235,7 +235,7 @@
 
           {#if localeMenuOpen}
             <div
-              class="absolute bottom-full start-0 mb-2 min-w-[148px] rounded-2xl border border-slate-200/80 bg-white/96 p-1.5 shadow-xl dark:shadow-[0_12px_32px_rgba(0,0,0,0.5)] backdrop-blur dark:border-[#30363d]/80 dark:bg-[#161b22]/96"
+              class="absolute bottom-full start-0 mb-2 min-w-[148px] rounded-[var(--radius-md)] border border-slate-200/80 bg-white/96 p-1.5 shadow-xl dark:shadow-[0_12px_32px_rgba(0,0,0,0.5)] backdrop-blur dark:border-[#30363d]/80 dark:bg-[#161b22]/96"
               role="menu"
             >
               {#each localeOptions as option}

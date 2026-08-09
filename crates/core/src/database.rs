@@ -2,7 +2,7 @@
 
 use crate::error::{AppError, Result};
 use chrono::{Local, MappedLocalTime, NaiveDateTime, TimeZone};
-use rusqlite::{params, Connection, Row};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
 use std::path::Path;
@@ -41,8 +41,7 @@ fn local_hour_bounds(date: chrono::NaiveDate, hour: u32) -> Result<(i64, i64)> {
     let hour = hour.min(23);
     let start = safe_local_timestamp(date.and_hms_opt(hour, 0, 0).unwrap());
     let end_naive = if hour == 23 {
-        date.succ_opt()
-            .and_then(|next| next.and_hms_opt(0, 0, 0))
+        date.succ_opt().and_then(|next| next.and_hms_opt(0, 0, 0))
     } else {
         date.and_hms_opt(hour + 1, 0, 0)
     }
@@ -378,6 +377,53 @@ pub struct SemanticMemoryStats {
     pub last_indexed_activity_id: i64,
 }
 
+/// 当前重建代际中等待发送到嵌入服务的语义块。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingSemanticMemoryChunk {
+    pub id: i64,
+    pub content: String,
+    pub app_name: String,
+    pub title: String,
+    pub browser_url: Option<String>,
+    pub last_activity_id: i64,
+}
+
+/// 语义记忆索引单例状态。
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticMemoryIndexState {
+    /// 当前重建代际；索引失效时清空，同一指纹的并发任务也必须不同。
+    #[serde(default)]
+    pub build_id: String,
+    pub embedding_fingerprint: String,
+    pub privacy_fingerprint: String,
+    pub rebuild_required: bool,
+    pub status: String,
+    pub indexed_activities: usize,
+    pub total_activities: usize,
+    pub last_error: Option<String>,
+    pub updated_at: i64,
+}
+
+/// 用户确认后持久化的显式长期记忆。
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AssistantUserMemory {
+    pub id: i64,
+    pub memory_type: String,
+    pub memory_key: String,
+    pub value_text: String,
+    pub recall_policy: String,
+    pub sensitivity: String,
+    pub source_kind: String,
+    pub source_conversation_id: Option<i64>,
+    pub source_request_id: Option<String>,
+    pub revision: i64,
+    pub expires_at: Option<i64>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 /// 把归一化 f32 向量编码为 LE 字节（存 BLOB）。
 pub fn encode_embedding(vector: &[f32]) -> Vec<u8> {
     let mut out = Vec::with_capacity(vector.len() * 4);
@@ -444,6 +490,28 @@ pub struct MemorySearchItem {
     pub browser_url: Option<String>,
     pub duration: Option<i64>,
     pub score: i64,
+}
+
+const ASSISTANT_USER_MEMORY_COLUMNS: &str = "id, memory_type, memory_key, value_text, recall_policy, sensitivity, source_kind, source_conversation_id, source_request_id, revision, expires_at, created_at, updated_at";
+/// 仅用于持久化语义索引活动游标，不属于可检索、可嵌入的真实记忆块。
+pub const SEMANTIC_MEMORY_CURSOR_CHUNK_KEY: &str = "__cursor__";
+
+fn assistant_user_memory_from_row(row: &Row<'_>) -> rusqlite::Result<AssistantUserMemory> {
+    Ok(AssistantUserMemory {
+        id: row.get(0)?,
+        memory_type: row.get(1)?,
+        memory_key: row.get(2)?,
+        value_text: row.get(3)?,
+        recall_policy: row.get(4)?,
+        sensitivity: row.get(5)?,
+        source_kind: row.get(6)?,
+        source_conversation_id: row.get(7)?,
+        source_request_id: row.get(8)?,
+        revision: row.get(9)?,
+        expires_at: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
+    })
 }
 
 /// 规范化 URL（用于合并判断）
@@ -888,6 +956,55 @@ impl Database {
             [],
         )?;
 
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS semantic_memory_state (
+                singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+                embedding_fingerprint TEXT NOT NULL DEFAULT '',
+                privacy_fingerprint TEXT NOT NULL DEFAULT '',
+                rebuild_required INTEGER NOT NULL DEFAULT 1,
+                status TEXT NOT NULL DEFAULT 'idle',
+                indexed_activities INTEGER NOT NULL DEFAULT 0,
+                total_activities INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                updated_at INTEGER NOT NULL
+            )",
+            [],
+        )?;
+        // 兼容旧数据库：首次升级时补充重建代际列；重复执行时忽略 duplicate column。
+        let _ = conn.execute(
+            "ALTER TABLE semantic_memory_state ADD COLUMN build_id TEXT NOT NULL DEFAULT ''",
+            [],
+        );
+        conn.execute(
+            "INSERT OR IGNORE INTO semantic_memory_state (singleton_id, updated_at) VALUES (1, ?1)",
+            params![chrono::Utc::now().timestamp()],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS assistant_user_memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                memory_type TEXT NOT NULL,
+                memory_key TEXT NOT NULL,
+                value_text TEXT NOT NULL,
+                recall_policy TEXT NOT NULL DEFAULT 'relevant',
+                sensitivity TEXT NOT NULL DEFAULT 'normal',
+                source_kind TEXT NOT NULL DEFAULT 'explicit_chat',
+                source_conversation_id INTEGER,
+                source_request_id TEXT,
+                revision INTEGER NOT NULL DEFAULT 1,
+                expires_at INTEGER,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                UNIQUE(memory_type, memory_key)
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_assistant_user_memories_policy_updated
+             ON assistant_user_memories (recall_policy, updated_at DESC)",
+            [],
+        )?;
+
         // === FTS5 全文检索索引 ===
         // activities FTS: 索引窗口标题、OCR 文本、应用名、浏览器 URL
         conn.execute_batch(
@@ -989,7 +1106,7 @@ impl Database {
         Ok(())
     }
 
-    /// 插入活动记录
+    /// 插入活动记录。若语义索引已就绪，新活动会在同一事务中立即将其标记为陈旧。
     pub fn insert_activity(&self, activity: &Activity) -> Result<i64> {
         let conn = self.conn.lock().map_err(|e| {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
@@ -1000,8 +1117,9 @@ impl Database {
             .as_deref()
             .map(normalize_url)
             .filter(|url| !url.is_empty());
+        let tx = conn.unchecked_transaction()?;
 
-        conn.execute(
+        tx.execute(
             "INSERT INTO activities (timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url, executable_path, semantic_category, semantic_confidence, screenshot_url)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
@@ -1019,8 +1137,21 @@ impl Database {
                 activity.screenshot_url,
             ],
         )?;
+        let activity_id = tx.last_insert_rowid();
 
-        Ok(conn.last_insert_rowid())
+        tx.execute(
+            "UPDATE semantic_memory_state
+             SET rebuild_required = CASE WHEN status = 'ready' THEN 1 ELSE rebuild_required END,
+                 status = CASE WHEN status = 'ready' THEN 'idle' ELSE status END,
+                 build_id = CASE WHEN status = 'ready' THEN '' ELSE build_id END,
+                 total_activities = (SELECT COUNT(*) FROM activities),
+                 updated_at = ?1
+             WHERE singleton_id = 1",
+            params![chrono::Utc::now().timestamp()],
+        )?;
+        tx.commit()?;
+
+        Ok(activity_id)
     }
 
     /// 获取指定应用最近24小时内的最新一条活动记录
@@ -1223,7 +1354,6 @@ impl Database {
 
         Ok(())
     }
-
 
     /// 更新活动的 OCR 文本
     pub fn update_activity_ocr(&self, id: i64, ocr_text: Option<String>) -> Result<()> {
@@ -1449,21 +1579,36 @@ impl Database {
         Ok(count)
     }
 
-
-    /// 删除指定日期之前的所有活动记录（使用时间戳范围查询以利用索引）
+    /// 删除指定日期之前的所有活动记录（使用时间戳范围查询以利用索引）。
+    /// 活动、摘要缓存与语义索引失效在同一事务中提交。
     pub fn delete_activities_before_date(&self, before_date: &str) -> Result<usize> {
+        let date_parsed = chrono::NaiveDate::parse_from_str(before_date, "%Y-%m-%d")
+            .map_err(|e| AppError::Config(e.to_string()))?;
+        let upper_ts = safe_local_timestamp(date_parsed.and_hms_opt(0, 0, 0).unwrap());
         let conn = self
             .conn
             .lock()
-            .map_err(|e| crate::error::AppError::Unknown(format!("数据库锁获取失败: {e}")))?;
-        let date_parsed = chrono::NaiveDate::parse_from_str(before_date, "%Y-%m-%d")
-            .map_err(|e| crate::error::AppError::Config(e.to_string()))?;
-        let upper_ts = safe_local_timestamp(date_parsed.and_hms_opt(0, 0, 0).unwrap());
-        let count = conn.execute(
+            .map_err(|e| AppError::Unknown(format!("数据库锁获取失败: {e}")))?;
+        let tx = conn.unchecked_transaction()?;
+        let dates = {
+            let mut stmt = tx.prepare("SELECT timestamp FROM activities WHERE timestamp < ?1")?;
+            let dates = stmt
+                .query_map(params![upper_ts], |row| row.get::<_, i64>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+                .into_iter()
+                .map(Self::ts_to_local_date)
+                .filter(|date| !date.is_empty())
+                .collect::<std::collections::HashSet<_>>();
+            dates
+        };
+        let deleted = tx.execute(
             "DELETE FROM activities WHERE timestamp < ?1",
-            rusqlite::params![upper_ts],
+            params![upper_ts],
         )?;
-        Ok(count)
+        Self::invalidate_daily_cache(&tx, &dates)?;
+        Self::clear_memory_chunks_and_mark_rebuild_required_on(&tx)?;
+        tx.commit()?;
+        Ok(deleted)
     }
 
     /// Unix 时间戳 → 本地时区日期字符串（YYYY-MM-DD）
@@ -1475,13 +1620,23 @@ impl Database {
             .unwrap_or_default()
     }
 
-    /// 失效指定日期集合的日报与小时摘要缓存（删除活动后调用，确保下次显示基于剩余数据重算）
-    fn invalidate_daily_cache(conn: &Connection, dates: &std::collections::HashSet<String>) {
+    /// 失效指定日期集合的日报与小时摘要缓存。
+    fn invalidate_daily_cache(
+        conn: &Connection,
+        dates: &std::collections::HashSet<String>,
+    ) -> Result<()> {
         for date in dates {
-            let _ = conn.execute("DELETE FROM daily_reports WHERE date = ?1", params![date]);
-            let _ = conn.execute("DELETE FROM daily_reports_localized WHERE date = ?1", params![date]);
-            let _ = conn.execute("DELETE FROM hourly_summaries WHERE date = ?1", params![date]);
+            conn.execute("DELETE FROM daily_reports WHERE date = ?1", params![date])?;
+            conn.execute(
+                "DELETE FROM daily_reports_localized WHERE date = ?1",
+                params![date],
+            )?;
+            conn.execute(
+                "DELETE FROM hourly_summaries WHERE date = ?1",
+                params![date],
+            )?;
         }
+        Ok(())
     }
 
     /// 删除单条活动记录，返回删除数量和截图路径（供上层删截图文件）
@@ -1490,58 +1645,61 @@ impl Database {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
         let tx = conn.unchecked_transaction()?;
-
-        // 先取出该条记录的截图路径与时间戳
-        let row: (String, i64) = conn
+        let row = tx
             .query_row(
                 "SELECT screenshot_path, timestamp FROM activities WHERE id = ?1",
                 params![id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
             )
-            .unwrap_or_default();
-        let paths: Vec<String> = if row.0.is_empty() {
-            Vec::new()
-        } else {
-            vec![row.0]
-        };
-        let mut dates = std::collections::HashSet::new();
-        if row.1 > 0 {
-            dates.insert(Self::ts_to_local_date(row.1));
-        }
+            .optional()?;
+        let paths = row
+            .as_ref()
+            .map(|(path, _)| path)
+            .filter(|path| !path.is_empty())
+            .cloned()
+            .into_iter()
+            .collect();
+        let dates = row
+            .map(|(_, timestamp)| Self::ts_to_local_date(timestamp))
+            .filter(|date| !date.is_empty())
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
 
-        let deleted = conn.execute("DELETE FROM activities WHERE id = ?1", params![id])?;
-        Self::invalidate_daily_cache(&conn, &dates);
+        let deleted = tx.execute("DELETE FROM activities WHERE id = ?1", params![id])?;
+        Self::invalidate_daily_cache(&tx, &dates)?;
+        Self::clear_memory_chunks_and_mark_rebuild_required_on(&tx)?;
         tx.commit()?;
         Ok((deleted, paths))
     }
 
     /// 删除指定日期全天（本地时区）的活动记录，返回删除数量和截图路径
     pub fn delete_activities_by_date(&self, date: &str) -> Result<(usize, Vec<String>)> {
+        let date_parsed = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+            .map_err(|e| AppError::Config(e.to_string()))?;
+        let (start_ts, end_ts) = local_day_bounds(date_parsed)?;
         let conn = self.conn.lock().map_err(|e| {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
         let tx = conn.unchecked_transaction()?;
-
-        let date_parsed = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
-            .map_err(|e| AppError::Config(e.to_string()))?;
-        let (start_ts, end_ts) = local_day_bounds(date_parsed)?;
-
-        let mut stmt = conn.prepare(
-            "SELECT screenshot_path FROM activities WHERE timestamp >= ?1 AND timestamp < ?2",
-        )?;
-        let paths: Vec<String> = stmt
-            .query_map(params![start_ts, end_ts], |row| row.get::<_, String>(0))?
-            .filter_map(|r| r.ok())
-            .filter(|p| !p.is_empty())
-            .collect();
-
-        let deleted = conn.execute(
+        let paths = {
+            let mut stmt = tx.prepare(
+                "SELECT screenshot_path FROM activities WHERE timestamp >= ?1 AND timestamp < ?2",
+            )?;
+            let paths = stmt
+                .query_map(params![start_ts, end_ts], |row| row.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+                .into_iter()
+                .filter(|path| !path.is_empty())
+                .collect::<Vec<_>>();
+            paths
+        };
+        let deleted = tx.execute(
             "DELETE FROM activities WHERE timestamp >= ?1 AND timestamp < ?2",
             params![start_ts, end_ts],
         )?;
-        let mut dates = std::collections::HashSet::new();
-        dates.insert(date.to_string());
-        Self::invalidate_daily_cache(&conn, &dates);
+        let dates = std::iter::once(date.to_string()).collect();
+        Self::invalidate_daily_cache(&tx, &dates)?;
+        Self::clear_memory_chunks_and_mark_rebuild_required_on(&tx)?;
         tx.commit()?;
         Ok((deleted, paths))
     }
@@ -1556,30 +1714,34 @@ impl Database {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
         let tx = conn.unchecked_transaction()?;
-
-        let mut stmt = conn.prepare(
-            "SELECT screenshot_path, timestamp FROM activities WHERE timestamp >= ?1 AND timestamp < ?2",
-        )?;
-        let rows: Vec<(String, i64)> = stmt
-            .query_map(params![start_ts, end_ts], |row| Ok((row.get(0)?, row.get(1)?)))?
-            .filter_map(|r| r.ok())
-            .collect();
-        let paths: Vec<String> = rows
+        let rows = {
+            let mut stmt = tx.prepare(
+                "SELECT screenshot_path, timestamp FROM activities
+                 WHERE timestamp >= ?1 AND timestamp < ?2",
+            )?;
+            let rows = stmt
+                .query_map(params![start_ts, end_ts], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            rows
+        };
+        let paths = rows
             .iter()
-            .filter(|(p, _)| !p.is_empty())
-            .map(|(p, _)| p.clone())
+            .filter(|(path, _)| !path.is_empty())
+            .map(|(path, _)| path.clone())
             .collect();
-        let dates: std::collections::HashSet<String> = rows
+        let dates = rows
             .iter()
-            .map(|(_, ts)| Self::ts_to_local_date(*ts))
-            .filter(|d| !d.is_empty())
-            .collect();
-
-        let deleted = conn.execute(
+            .map(|(_, timestamp)| Self::ts_to_local_date(*timestamp))
+            .filter(|date| !date.is_empty())
+            .collect::<std::collections::HashSet<_>>();
+        let deleted = tx.execute(
             "DELETE FROM activities WHERE timestamp >= ?1 AND timestamp < ?2",
             params![start_ts, end_ts],
         )?;
-        Self::invalidate_daily_cache(&conn, &dates);
+        Self::invalidate_daily_cache(&tx, &dates)?;
+        Self::clear_memory_chunks_and_mark_rebuild_required_on(&tx)?;
         tx.commit()?;
         Ok((deleted, paths))
     }
@@ -1594,60 +1756,54 @@ impl Database {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
         let tx = conn.unchecked_transaction()?;
-
-        let (paths, dates, deleted) = match date_range {
+        let rows = match date_range {
             Some((start_ts, end_ts)) => {
-                let mut stmt = conn.prepare(
+                let mut stmt = tx.prepare(
                     "SELECT screenshot_path, timestamp FROM activities
                      WHERE app_name = ?1 AND timestamp >= ?2 AND timestamp < ?3",
                 )?;
-                let rows: Vec<(String, i64)> = stmt
+                let rows = stmt
                     .query_map(params![app_name, start_ts, end_ts], |row| {
-                        Ok((row.get(0)?, row.get(1)?))
+                        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
                     })?
-                    .filter_map(|r| r.ok())
-                    .collect();
-                let paths: Vec<String> = rows
-                    .iter()
-                    .filter(|(p, _)| !p.is_empty())
-                    .map(|(p, _)| p.clone())
-                    .collect();
-                let dates: std::collections::HashSet<String> = rows
-                    .iter()
-                    .map(|(_, ts)| Self::ts_to_local_date(*ts))
-                    .filter(|d| !d.is_empty())
-                    .collect();
-                let deleted = conn.execute(
-                    "DELETE FROM activities
-                     WHERE app_name = ?1 AND timestamp >= ?2 AND timestamp < ?3",
-                    params![app_name, start_ts, end_ts],
-                )?;
-                (paths, dates, deleted)
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                rows
             }
             None => {
-                let mut stmt = conn.prepare(
+                let mut stmt = tx.prepare(
                     "SELECT screenshot_path, timestamp FROM activities WHERE app_name = ?1",
                 )?;
-                let rows: Vec<(String, i64)> = stmt
-                    .query_map(params![app_name], |row| Ok((row.get(0)?, row.get(1)?)))?
-                    .filter_map(|r| r.ok())
-                    .collect();
-                let paths: Vec<String> = rows
-                    .iter()
-                    .filter(|(p, _)| !p.is_empty())
-                    .map(|(p, _)| p.clone())
-                    .collect();
-                let dates: std::collections::HashSet<String> = rows
-                    .iter()
-                    .map(|(_, ts)| Self::ts_to_local_date(*ts))
-                    .filter(|d| !d.is_empty())
-                    .collect();
-                let deleted =
-                    conn.execute("DELETE FROM activities WHERE app_name = ?1", params![app_name])?;
-                (paths, dates, deleted)
+                let rows = stmt
+                    .query_map(params![app_name], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                rows
             }
         };
-        Self::invalidate_daily_cache(&conn, &dates);
+        let paths = rows
+            .iter()
+            .filter(|(path, _)| !path.is_empty())
+            .map(|(path, _)| path.clone())
+            .collect();
+        let dates = rows
+            .iter()
+            .map(|(_, timestamp)| Self::ts_to_local_date(*timestamp))
+            .filter(|date| !date.is_empty())
+            .collect::<std::collections::HashSet<_>>();
+        let deleted = match date_range {
+            Some((start_ts, end_ts)) => tx.execute(
+                "DELETE FROM activities
+                 WHERE app_name = ?1 AND timestamp >= ?2 AND timestamp < ?3",
+                params![app_name, start_ts, end_ts],
+            )?,
+            None => tx.execute(
+                "DELETE FROM activities WHERE app_name = ?1",
+                params![app_name],
+            )?,
+        };
+        Self::invalidate_daily_cache(&tx, &dates)?;
+        Self::clear_memory_chunks_and_mark_rebuild_required_on(&tx)?;
         tx.commit()?;
         Ok((deleted, paths))
     }
@@ -2022,9 +2178,7 @@ impl Database {
                                 })
                                 .collect();
                             url_details.sort_by(|a, b| {
-                                b.duration
-                                    .cmp(&a.duration)
-                                    .then_with(|| a.url.cmp(&b.url))
+                                b.duration.cmp(&a.duration).then_with(|| a.url.cmp(&b.url))
                             });
                             let domain_duration: i64 = url_details.iter().map(|u| u.duration).sum();
                             DomainUsage {
@@ -2981,8 +3135,15 @@ impl Database {
 
         // Rust 侧只对归一化后同名（忽略大小写）的应用做二次合并
         let mut merged: HashMap<String, AppCategorySnapshot> = HashMap::new();
-        for (raw_name, category, total_duration, count, latest_timestamp, executable_path, screenshot_url) in
-            rows
+        for (
+            raw_name,
+            category,
+            total_duration,
+            count,
+            latest_timestamp,
+            executable_path,
+            screenshot_url,
+        ) in rows
         {
             let normalized_name = crate::categorize::normalize_display_app_name(&raw_name);
             let key = normalized_name.to_lowercase();
@@ -3468,10 +3629,7 @@ impl Database {
     }
 
     /// 会话列表（按最近更新排序），附带消息数。
-    pub fn list_assistant_conversations(
-        &self,
-        limit: usize,
-    ) -> Result<Vec<AssistantConversation>> {
+    pub fn list_assistant_conversations(&self, limit: usize) -> Result<Vec<AssistantConversation>> {
         let conn = self.conn.lock().map_err(|e| {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
@@ -3547,7 +3705,6 @@ impl Database {
         Ok(id)
     }
 
-
     /// 删除会话及其全部消息。
     pub fn delete_assistant_conversation(&self, conversation_id: i64) -> Result<()> {
         let conn = self.conn.lock().map_err(|e| {
@@ -3567,6 +3724,676 @@ impl Database {
     // ══════════════════════════════════════════════════════════
     // 语义记忆（屏幕级数字记忆）
     // ══════════════════════════════════════════════════════════
+
+    // ══════════════════════════════════════════════════════════
+    // 用户显式长期记忆
+    // ══════════════════════════════════════════════════════════
+
+    fn validate_user_memory_fields(
+        memory_type: &str,
+        memory_key: &str,
+        value_text: &str,
+        recall_policy: &str,
+        sensitivity: &str,
+    ) -> Result<()> {
+        const MEMORY_TYPES: &[&str] = &[
+            "preference",
+            "workflow",
+            "profile",
+            "goal",
+            "project",
+            "constraint",
+        ];
+        const RECALL_POLICIES: &[&str] = &["always", "relevant", "manual"];
+        const SENSITIVITIES: &[&str] = &["normal", "caution"];
+
+        if !MEMORY_TYPES.contains(&memory_type) {
+            return Err(AppError::Config(format!(
+                "不支持的长期记忆类型: {memory_type}"
+            )));
+        }
+        let memory_key = memory_key.trim();
+        if memory_key.is_empty() || value_text.trim().is_empty() {
+            return Err(AppError::Config(
+                "长期记忆的 key 和内容不能为空".to_string(),
+            ));
+        }
+        if memory_key.chars().count() > 64 {
+            return Err(AppError::Config(
+                "长期记忆 key 不能超过 64 个字符".to_string(),
+            ));
+        }
+        if !memory_key
+            .chars()
+            .all(|character| character.is_alphanumeric() || matches!(character, '_' | '-' | '.'))
+        {
+            return Err(AppError::Config(
+                "长期记忆 key 只能包含字母、数字、下划线、连字符和点".to_string(),
+            ));
+        }
+        if !RECALL_POLICIES.contains(&recall_policy) {
+            return Err(AppError::Config(format!(
+                "不支持的长期记忆召回策略: {recall_policy}"
+            )));
+        }
+        if !SENSITIVITIES.contains(&sensitivity) {
+            return Err(AppError::Config(format!(
+                "不支持的长期记忆敏感级别: {sensitivity}"
+            )));
+        }
+        if sensitivity == "caution" && recall_policy == "always" {
+            return Err(AppError::Config(
+                "谨慎级长期记忆不能设置为 always 召回".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_user_memory(
+        &self,
+        memory_type: &str,
+        memory_key: &str,
+        value_text: &str,
+        recall_policy: &str,
+        sensitivity: &str,
+        source_kind: &str,
+        source_conversation_id: Option<i64>,
+        source_request_id: Option<&str>,
+        expires_at: Option<i64>,
+    ) -> Result<AssistantUserMemory> {
+        Self::validate_user_memory_fields(
+            memory_type,
+            memory_key,
+            value_text,
+            recall_policy,
+            sensitivity,
+        )?;
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let now = chrono::Utc::now().timestamp();
+        conn.execute(
+            "INSERT INTO assistant_user_memories
+                 (memory_type, memory_key, value_text, recall_policy, sensitivity, source_kind,
+                  source_conversation_id, source_request_id, revision, expires_at, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9, ?10, ?10)",
+            params![
+                memory_type,
+                memory_key.trim(),
+                value_text.trim(),
+                recall_policy,
+                sensitivity,
+                if source_kind.trim().is_empty() {
+                    "explicit_chat"
+                } else {
+                    source_kind
+                },
+                source_conversation_id,
+                source_request_id,
+                expires_at,
+                now,
+            ],
+        )?;
+        let id = conn.last_insert_rowid();
+        conn.query_row(
+            &format!(
+                "SELECT {ASSISTANT_USER_MEMORY_COLUMNS} FROM assistant_user_memories WHERE id = ?1"
+            ),
+            params![id],
+            assistant_user_memory_from_row,
+        )
+        .map_err(AppError::Database)
+    }
+
+    pub fn get_user_memory(&self, id: i64) -> Result<Option<AssistantUserMemory>> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        conn.query_row(
+            &format!(
+                "SELECT {ASSISTANT_USER_MEMORY_COLUMNS} FROM assistant_user_memories WHERE id = ?1"
+            ),
+            params![id],
+            assistant_user_memory_from_row,
+        )
+        .optional()
+        .map_err(AppError::Database)
+    }
+
+    pub fn list_user_memories(
+        &self,
+        memory_type: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<AssistantUserMemory>> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let now = chrono::Utc::now().timestamp();
+        let limit = limit.clamp(1, 500) as i64;
+        let rows = if let Some(memory_type) = memory_type.filter(|value| !value.trim().is_empty()) {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {ASSISTANT_USER_MEMORY_COLUMNS}
+                 FROM assistant_user_memories
+                 WHERE memory_type = ?1 AND (expires_at IS NULL OR expires_at > ?2)
+                 ORDER BY updated_at DESC, id DESC LIMIT ?3"
+            ))?;
+            let rows = stmt
+                .query_map(
+                    params![memory_type, now, limit],
+                    assistant_user_memory_from_row,
+                )?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            rows
+        } else {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {ASSISTANT_USER_MEMORY_COLUMNS}
+                 FROM assistant_user_memories
+                 WHERE expires_at IS NULL OR expires_at > ?1
+                 ORDER BY updated_at DESC, id DESC LIMIT ?2"
+            ))?;
+            let rows = stmt
+                .query_map(params![now, limit], assistant_user_memory_from_row)?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            rows
+        };
+        Ok(rows)
+    }
+
+    pub fn search_user_memories(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<AssistantUserMemory>> {
+        let query = query.trim();
+        if query.is_empty() {
+            return self.list_user_memories(None, limit);
+        }
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let now = chrono::Utc::now().timestamp();
+        let pattern = format!("%{}%", query.to_lowercase());
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {ASSISTANT_USER_MEMORY_COLUMNS}
+             FROM assistant_user_memories
+             WHERE (expires_at IS NULL OR expires_at > ?1)
+               AND LOWER(memory_type || ' ' || memory_key || ' ' || value_text) LIKE ?2
+             ORDER BY updated_at DESC, id DESC LIMIT ?3"
+        ))?;
+        let rows = stmt.query_map(
+            params![now, pattern, limit.clamp(1, 100) as i64],
+            assistant_user_memory_from_row,
+        )?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(AppError::Database)
+    }
+
+    pub fn recall_user_memories(&self, query: &str) -> Result<Vec<AssistantUserMemory>> {
+        const MAX_TOTAL: usize = 12;
+        const MAX_ALWAYS: i64 = 8;
+        const MAX_RELEVANT: i64 = 6;
+        const MAX_CHARACTERS: usize = 2400;
+
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let now = chrono::Utc::now().timestamp();
+        let mut candidates = Vec::new();
+        {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {ASSISTANT_USER_MEMORY_COLUMNS}
+                 FROM assistant_user_memories
+                 WHERE recall_policy = 'always' AND sensitivity != 'caution'
+                   AND (expires_at IS NULL OR expires_at > ?1)
+                 ORDER BY updated_at DESC, id DESC LIMIT ?2"
+            ))?;
+            candidates.extend(
+                stmt.query_map(params![now, MAX_ALWAYS], assistant_user_memory_from_row)?
+                    .collect::<std::result::Result<Vec<_>, _>>()?,
+            );
+        }
+
+        let query = query.trim();
+        if !query.is_empty() {
+            let pattern = format!("%{}%", query.to_lowercase());
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {ASSISTANT_USER_MEMORY_COLUMNS}
+                 FROM assistant_user_memories
+                 WHERE recall_policy = 'relevant'
+                   AND (expires_at IS NULL OR expires_at > ?1)
+                   AND LOWER(memory_type || ' ' || memory_key || ' ' || value_text) LIKE ?2
+                 ORDER BY updated_at DESC, id DESC LIMIT ?3"
+            ))?;
+            candidates.extend(
+                stmt.query_map(
+                    params![now, pattern, MAX_RELEVANT],
+                    assistant_user_memory_from_row,
+                )?
+                .collect::<std::result::Result<Vec<_>, _>>()?,
+            );
+        }
+
+        let mut recalled = Vec::new();
+        let mut characters = 0usize;
+        for memory in candidates {
+            if recalled.len() >= MAX_TOTAL {
+                break;
+            }
+            let memory_characters = memory.memory_key.chars().count()
+                + memory.value_text.chars().count()
+                + memory.memory_type.chars().count();
+            if characters.saturating_add(memory_characters) > MAX_CHARACTERS {
+                continue;
+            }
+            characters += memory_characters;
+            recalled.push(memory);
+        }
+        Ok(recalled)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_user_memory(
+        &self,
+        id: i64,
+        expected_revision: i64,
+        memory_type: &str,
+        memory_key: &str,
+        value_text: &str,
+        recall_policy: &str,
+        sensitivity: &str,
+        expires_at: Option<i64>,
+    ) -> Result<AssistantUserMemory> {
+        Self::validate_user_memory_fields(
+            memory_type,
+            memory_key,
+            value_text,
+            recall_policy,
+            sensitivity,
+        )?;
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let now = chrono::Utc::now().timestamp();
+        let updated = conn.execute(
+            "UPDATE assistant_user_memories
+             SET memory_type = ?1, memory_key = ?2, value_text = ?3, recall_policy = ?4,
+                 sensitivity = ?5, expires_at = ?6, revision = revision + 1, updated_at = ?7
+             WHERE id = ?8 AND revision = ?9",
+            params![
+                memory_type,
+                memory_key.trim(),
+                value_text.trim(),
+                recall_policy,
+                sensitivity,
+                expires_at,
+                now,
+                id,
+                expected_revision,
+            ],
+        )?;
+        if updated == 0 {
+            return Err(AppError::Config(
+                "长期记忆不存在或 revision 已变化".to_string(),
+            ));
+        }
+        conn.query_row(
+            &format!(
+                "SELECT {ASSISTANT_USER_MEMORY_COLUMNS} FROM assistant_user_memories WHERE id = ?1"
+            ),
+            params![id],
+            assistant_user_memory_from_row,
+        )
+        .map_err(AppError::Database)
+    }
+
+    pub fn forget_user_memory(&self, id: i64, expected_revision: i64) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let deleted = conn.execute(
+            "DELETE FROM assistant_user_memories WHERE id = ?1 AND revision = ?2",
+            params![id, expected_revision],
+        )?;
+        if deleted == 0 {
+            return Err(AppError::Config(
+                "长期记忆不存在或 revision 已变化".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn clear_user_memories(&self) -> Result<usize> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        conn.execute("DELETE FROM assistant_user_memories", [])
+            .map_err(AppError::Database)
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // 语义记忆（屏幕级数字记忆）
+    // ══════════════════════════════════════════════════════════
+
+    fn semantic_memory_state_from_connection(
+        conn: &Connection,
+    ) -> Result<SemanticMemoryIndexState> {
+        conn.query_row(
+            "SELECT build_id, embedding_fingerprint, privacy_fingerprint, rebuild_required, status,
+                    indexed_activities, total_activities, last_error, updated_at
+             FROM semantic_memory_state WHERE singleton_id = 1",
+            [],
+            |row| {
+                Ok(SemanticMemoryIndexState {
+                    build_id: row.get(0)?,
+                    embedding_fingerprint: row.get(1)?,
+                    privacy_fingerprint: row.get(2)?,
+                    rebuild_required: row.get::<_, i64>(3)? != 0,
+                    status: row.get(4)?,
+                    indexed_activities: row.get::<_, i64>(5)?.max(0) as usize,
+                    total_activities: row.get::<_, i64>(6)?.max(0) as usize,
+                    last_error: row.get(7)?,
+                    updated_at: row.get(8)?,
+                })
+            },
+        )
+        .map_err(AppError::Database)
+    }
+
+    pub fn get_semantic_memory_state(&self) -> Result<SemanticMemoryIndexState> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        Self::semantic_memory_state_from_connection(&conn)
+    }
+
+    /// 声明一个新的语义重建代际。此阶段用于模型探测，不清空旧块；
+    /// 探测失败时可按 build_id 精确记录失败，且不会误伤后来任务。
+    pub fn begin_semantic_memory_build(
+        &self,
+        build_id: &str,
+        embedding_fingerprint: &str,
+        privacy_fingerprint: &str,
+    ) -> Result<SemanticMemoryIndexState> {
+        if build_id.trim().is_empty() {
+            return Err(AppError::Config("语义重建 build_id 不能为空".to_string()));
+        }
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        conn.execute(
+            "UPDATE semantic_memory_state
+             SET build_id = ?1,
+                 embedding_fingerprint = ?2,
+                 privacy_fingerprint = ?3,
+                 rebuild_required = 1,
+                 status = 'building',
+                 indexed_activities = 0,
+                 total_activities = (SELECT COUNT(*) FROM activities),
+                 last_error = NULL,
+                 updated_at = ?4
+             WHERE singleton_id = 1",
+            params![
+                build_id,
+                embedding_fingerprint,
+                privacy_fingerprint,
+                chrono::Utc::now().timestamp(),
+            ],
+        )?;
+        Self::semantic_memory_state_from_connection(&conn)
+    }
+
+    /// 模型探测成功后激活指定代际，并在同一事务中清空旧语义块。
+    pub fn activate_semantic_memory_build(
+        &self,
+        build_id: &str,
+        expected_embedding_fingerprint: &str,
+        final_embedding_fingerprint: &str,
+        privacy_fingerprint: &str,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let tx = conn.unchecked_transaction()?;
+        let updated = tx.execute(
+            "UPDATE semantic_memory_state
+             SET embedding_fingerprint = ?1,
+                 rebuild_required = 1,
+                 status = 'building',
+                 indexed_activities = 0,
+                 total_activities = (SELECT COUNT(*) FROM activities),
+                 last_error = NULL,
+                 updated_at = ?2
+             WHERE singleton_id = 1
+               AND build_id = ?3
+               AND status = 'building'
+               AND embedding_fingerprint = ?4
+               AND privacy_fingerprint = ?5",
+            params![
+                final_embedding_fingerprint,
+                chrono::Utc::now().timestamp(),
+                build_id,
+                expected_embedding_fingerprint,
+                privacy_fingerprint,
+            ],
+        )?;
+        if updated == 1 {
+            tx.execute("DELETE FROM memory_chunks", [])?;
+        }
+        tx.commit()?;
+        Ok(updated == 1)
+    }
+
+    /// 判断数据库是否仍由指定代际、指纹的任务占有。
+    pub fn is_semantic_memory_build_current(
+        &self,
+        build_id: &str,
+        embedding_fingerprint: &str,
+        privacy_fingerprint: &str,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let active = conn.query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM semantic_memory_state
+                 WHERE singleton_id = 1
+                   AND build_id = ?1
+                   AND status = 'building'
+                   AND embedding_fingerprint = ?2
+                   AND privacy_fingerprint = ?3
+             )",
+            params![build_id, embedding_fingerprint, privacy_fingerprint],
+            |row| row.get::<_, i64>(0),
+        )?;
+        Ok(active != 0)
+    }
+
+    /// 仅将指定代际标记为失败；同指纹的新任务不会被旧任务覆盖。
+    pub fn fail_semantic_memory_build(
+        &self,
+        build_id: &str,
+        embedding_fingerprint: &str,
+        privacy_fingerprint: &str,
+        error: &str,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let updated = conn.execute(
+            "UPDATE semantic_memory_state
+             SET rebuild_required = 1,
+                 status = 'failed',
+                 last_error = ?1,
+                 updated_at = ?2
+             WHERE singleton_id = 1
+               AND build_id = ?3
+               AND status = 'building'
+               AND embedding_fingerprint = ?4
+               AND privacy_fingerprint = ?5",
+            params![
+                error.chars().take(500).collect::<String>(),
+                chrono::Utc::now().timestamp(),
+                build_id,
+                embedding_fingerprint,
+                privacy_fingerprint,
+            ],
+        )?;
+        Ok(updated == 1)
+    }
+
+    pub fn update_semantic_memory_state(&self, state: &SemanticMemoryIndexState) -> Result<()> {
+        if !matches!(
+            state.status.as_str(),
+            "idle" | "building" | "ready" | "failed"
+        ) {
+            return Err(AppError::Config(format!(
+                "不支持的语义记忆状态: {}",
+                state.status
+            )));
+        }
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        conn.execute(
+            "INSERT INTO semantic_memory_state
+                 (singleton_id, build_id, embedding_fingerprint, privacy_fingerprint, rebuild_required,
+                  status, indexed_activities, total_activities, last_error, updated_at)
+             VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(singleton_id) DO UPDATE SET
+                 build_id = excluded.build_id,
+                 embedding_fingerprint = excluded.embedding_fingerprint,
+                 privacy_fingerprint = excluded.privacy_fingerprint,
+                 rebuild_required = excluded.rebuild_required,
+                 status = excluded.status,
+                 indexed_activities = excluded.indexed_activities,
+                 total_activities = excluded.total_activities,
+                 last_error = excluded.last_error,
+                 updated_at = excluded.updated_at",
+            params![
+                state.build_id,
+                state.embedding_fingerprint,
+                state.privacy_fingerprint,
+                state.rebuild_required as i64,
+                state.status,
+                state.indexed_activities as i64,
+                state.total_activities as i64,
+                state.last_error,
+                chrono::Utc::now().timestamp(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// 仅当数据库仍处于指定的重建任务时更新状态，防止删除或配置变化后的旧任务
+    /// 把 `idle/rebuild_required` 覆盖回 `ready` 或 `failed`。
+    pub fn update_semantic_memory_state_if_current_build(
+        &self,
+        expected_build_id: &str,
+        expected_embedding_fingerprint: &str,
+        expected_privacy_fingerprint: &str,
+        state: &SemanticMemoryIndexState,
+    ) -> Result<bool> {
+        if !matches!(
+            state.status.as_str(),
+            "idle" | "building" | "ready" | "failed"
+        ) {
+            return Err(AppError::Config(format!(
+                "不支持的语义记忆状态: {}",
+                state.status
+            )));
+        }
+        if state.build_id != expected_build_id
+            || state.embedding_fingerprint != expected_embedding_fingerprint
+            || state.privacy_fingerprint != expected_privacy_fingerprint
+        {
+            return Err(AppError::Config(
+                "语义记忆条件更新的 build_id 或指纹不一致".to_string(),
+            ));
+        }
+
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let updated = conn.execute(
+            "UPDATE semantic_memory_state
+             SET build_id = ?1,
+                 embedding_fingerprint = ?2,
+                 privacy_fingerprint = ?3,
+                 rebuild_required = ?4,
+                 status = ?5,
+                 indexed_activities = ?6,
+                 total_activities = (SELECT COUNT(*) FROM activities),
+                 last_error = ?7,
+                 updated_at = ?8
+             WHERE singleton_id = 1
+               AND build_id = ?9
+               AND status = 'building'
+               AND embedding_fingerprint = ?10
+               AND privacy_fingerprint = ?11
+               AND (
+                   ?5 <> 'ready'
+                   OR (
+                       NOT EXISTS (
+                           SELECT 1 FROM activities
+                           WHERE id > (
+                               SELECT COALESCE(MAX(last_activity_id), 0)
+                               FROM memory_chunks
+                           )
+                       )
+                       AND NOT EXISTS (
+                           SELECT 1 FROM memory_chunks
+                           WHERE chunk_key != ?12 AND embedding IS NULL
+                       )
+                   )
+               )",
+            params![
+                state.build_id,
+                state.embedding_fingerprint,
+                state.privacy_fingerprint,
+                state.rebuild_required as i64,
+                state.status,
+                state.indexed_activities as i64,
+                state.last_error,
+                chrono::Utc::now().timestamp(),
+                expected_build_id,
+                expected_embedding_fingerprint,
+                expected_privacy_fingerprint,
+                SEMANTIC_MEMORY_CURSOR_CHUNK_KEY,
+            ],
+        )?;
+        Ok(updated == 1)
+    }
+
+    fn clear_memory_chunks_and_mark_rebuild_required_on(conn: &Connection) -> Result<()> {
+        conn.execute("DELETE FROM memory_chunks", [])?;
+        conn.execute(
+            "INSERT INTO semantic_memory_state
+                 (singleton_id, rebuild_required, status, indexed_activities,
+                  total_activities, last_error, updated_at)
+             VALUES (1, 1, 'idle', 0, (SELECT COUNT(*) FROM activities), NULL, ?1)
+             ON CONFLICT(singleton_id) DO UPDATE SET
+                 build_id = '',
+                 rebuild_required = 1,
+                 status = 'idle',
+                 indexed_activities = 0,
+                 total_activities = (SELECT COUNT(*) FROM activities),
+                 last_error = NULL,
+                 updated_at = excluded.updated_at",
+            params![chrono::Utc::now().timestamp()],
+        )?;
+        Ok(())
+    }
+
+    pub fn clear_memory_chunks_and_mark_rebuild_required(&self) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let tx = conn.unchecked_transaction()?;
+        Self::clear_memory_chunks_and_mark_rebuild_required_on(&tx)?;
+        tx.commit()?;
+        Ok(())
+    }
 
     /// 按 id 游标增量读取活动记录（含 OCR 文本），供语义索引消费。
     pub fn get_activities_after_id(&self, after_id: i64, limit: usize) -> Result<Vec<Activity>> {
@@ -3598,6 +4425,19 @@ impl Database {
         })?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(AppError::Database)
+    }
+
+    /// 判断游标之后是否仍有尚未消费的活动。
+    pub fn has_activities_after_id(&self, after_id: i64) -> Result<bool> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let exists = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM activities WHERE id > ?1)",
+            params![after_id],
+            |row| row.get::<_, i64>(0),
+        )?;
+        Ok(exists != 0)
     }
 
     /// 写入/更新记忆块。内容变化时清空 embedding（待重嵌入）。
@@ -3634,18 +4474,129 @@ impl Database {
         Ok(())
     }
 
+    /// 仅在指定重建代际仍有效、且来源活动仍存在时写入/更新记忆块。
+    #[allow(clippy::too_many_arguments)]
+    pub fn upsert_memory_chunk_if_current_build(
+        &self,
+        build_id: &str,
+        embedding_fingerprint: &str,
+        privacy_fingerprint: &str,
+        chunk_key: &str,
+        date: &str,
+        app_name: &str,
+        title: &str,
+        browser_url: Option<&str>,
+        content: &str,
+        last_activity_id: i64,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let now = chrono::Utc::now().timestamp();
+        let updated = conn.execute(
+            "INSERT INTO memory_chunks
+                 (chunk_key, date, app_name, title, browser_url, content, embedding, last_activity_id, updated_at)
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7, ?8
+             WHERE EXISTS (
+                 SELECT 1 FROM semantic_memory_state
+                 WHERE singleton_id = 1
+                   AND build_id = ?9
+                   AND status = 'building'
+                   AND embedding_fingerprint = ?10
+                   AND privacy_fingerprint = ?11
+             )
+               AND (?1 = ?12 OR EXISTS (SELECT 1 FROM activities WHERE id = ?7))
+             ON CONFLICT(chunk_key) DO UPDATE SET
+                 last_activity_id = excluded.last_activity_id,
+                 updated_at = excluded.updated_at,
+                 content = CASE
+                     WHEN LENGTH(excluded.content) > LENGTH(memory_chunks.content)
+                     THEN excluded.content ELSE memory_chunks.content END,
+                 embedding = CASE
+                     WHEN LENGTH(excluded.content) > LENGTH(memory_chunks.content)
+                     THEN NULL ELSE memory_chunks.embedding END",
+            params![
+                chunk_key,
+                date,
+                app_name,
+                title,
+                browser_url,
+                content,
+                last_activity_id,
+                now,
+                build_id,
+                embedding_fingerprint,
+                privacy_fingerprint,
+                SEMANTIC_MEMORY_CURSOR_CHUNK_KEY,
+            ],
+        )?;
+        Ok(updated == 1)
+    }
+
+    /// 仅返回指定重建代际的待嵌入块；来源活动必须仍然存在。
+    pub fn get_unembedded_memory_chunks_if_current_build(
+        &self,
+        build_id: &str,
+        embedding_fingerprint: &str,
+        privacy_fingerprint: &str,
+        limit: usize,
+    ) -> Result<Vec<PendingSemanticMemoryChunk>> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT mc.id, mc.content, mc.app_name, mc.title, mc.browser_url, mc.last_activity_id
+             FROM memory_chunks mc
+             WHERE mc.embedding IS NULL
+               AND mc.chunk_key != ?1
+               AND EXISTS (SELECT 1 FROM activities a WHERE a.id = mc.last_activity_id)
+               AND EXISTS (
+                   SELECT 1 FROM semantic_memory_state state
+                   WHERE state.singleton_id = 1
+                     AND state.build_id = ?2
+                     AND state.status = 'building'
+                     AND state.embedding_fingerprint = ?3
+                     AND state.privacy_fingerprint = ?4
+               )
+             ORDER BY mc.id ASC LIMIT ?5",
+        )?;
+        let rows = stmt.query_map(
+            params![
+                SEMANTIC_MEMORY_CURSOR_CHUNK_KEY,
+                build_id,
+                embedding_fingerprint,
+                privacy_fingerprint,
+                limit as i64,
+            ],
+            |row| {
+                Ok(PendingSemanticMemoryChunk {
+                    id: row.get(0)?,
+                    content: row.get(1)?,
+                    app_name: row.get(2)?,
+                    title: row.get(3)?,
+                    browser_url: row.get(4)?,
+                    last_activity_id: row.get(5)?,
+                })
+            },
+        )?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(AppError::Database)
+    }
+
     /// 取待嵌入的记忆块（id, content）。
     pub fn get_unembedded_memory_chunks(&self, limit: usize) -> Result<Vec<(i64, String)>> {
         let conn = self.conn.lock().map_err(|e| {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
         let mut stmt = conn.prepare(
-            "SELECT id, content FROM memory_chunks WHERE embedding IS NULL
-             ORDER BY id ASC LIMIT ?1",
+            "SELECT id, content FROM memory_chunks
+             WHERE embedding IS NULL AND chunk_key != ?1
+             ORDER BY id ASC LIMIT ?2",
         )?;
-        let rows = stmt.query_map(params![limit as i64], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-        })?;
+        let rows = stmt.query_map(
+            params![SEMANTIC_MEMORY_CURSOR_CHUNK_KEY, limit as i64],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+        )?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(AppError::Database)
     }
@@ -3662,17 +4613,60 @@ impl Database {
         Ok(())
     }
 
+    /// 仅在语义块内容和当前重建指纹仍匹配时写入嵌入。
+    /// 异步嵌入期间索引可能被清空并复用 SQLite 行 ID；同时校验内容可避免旧向量
+    /// 落到新一轮重建的不同语义块上。
+    pub fn set_memory_chunk_embedding_if_current_build(
+        &self,
+        expected_build_id: &str,
+        chunk_id: i64,
+        expected_content: &str,
+        embedding: &[u8],
+        expected_embedding_fingerprint: &str,
+        expected_privacy_fingerprint: &str,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let updated = conn.execute(
+            "UPDATE memory_chunks
+             SET embedding = ?1
+             WHERE id = ?2
+               AND content = ?3
+               AND embedding IS NULL
+               AND chunk_key != ?4
+               AND EXISTS (
+                   SELECT 1 FROM semantic_memory_state
+                   WHERE singleton_id = 1
+                     AND build_id = ?5
+                     AND status = 'building'
+                     AND embedding_fingerprint = ?6
+                     AND privacy_fingerprint = ?7
+               )",
+            params![
+                embedding,
+                chunk_id,
+                expected_content,
+                SEMANTIC_MEMORY_CURSOR_CHUNK_KEY,
+                expected_build_id,
+                expected_embedding_fingerprint,
+                expected_privacy_fingerprint,
+            ],
+        )?;
+        Ok(updated == 1)
+    }
+
     /// 索引状态：总块数 / 已嵌入块数 / 活动 id 游标。
     pub fn semantic_memory_stats(&self) -> Result<SemanticMemoryStats> {
         let conn = self.conn.lock().map_err(|e| {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
         let (total, embedded, cursor): (i64, i64, i64) = conn.query_row(
-            "SELECT COUNT(*),
-                    COUNT(embedding),
+            "SELECT COALESCE(SUM(CASE WHEN chunk_key != ?1 THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN chunk_key != ?1 AND embedding IS NOT NULL THEN 1 ELSE 0 END), 0),
                     COALESCE(MAX(last_activity_id), 0)
              FROM memory_chunks",
-            [],
+            params![SEMANTIC_MEMORY_CURSOR_CHUNK_KEY],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
         Ok(SemanticMemoryStats {
@@ -3694,9 +4688,10 @@ impl Database {
         })?;
         let mut stmt = conn.prepare(
             "SELECT id, date, app_name, title, browser_url, content, embedding
-             FROM memory_chunks WHERE embedding IS NOT NULL",
+             FROM memory_chunks
+             WHERE embedding IS NOT NULL AND chunk_key != ?1",
         )?;
-        let mut rows = stmt.query([])?;
+        let mut rows = stmt.query(params![SEMANTIC_MEMORY_CURSOR_CHUNK_KEY])?;
 
         // 小顶堆语义：保留分数最高的 limit 条（用 Vec + 阈值淘汰，K 很小）
         let mut top: Vec<SemanticMemoryHit> = Vec::with_capacity(limit + 1);
@@ -3712,9 +4707,7 @@ impl Database {
                 .map(|(a, b)| a * b)
                 .sum();
             let score = f64::from(score);
-            if top.len() >= limit
-                && top.last().map(|h| h.score).unwrap_or(f64::MIN) >= score
-            {
+            if top.len() >= limit && top.last().map(|h| h.score).unwrap_or(f64::MIN) >= score {
                 continue;
             }
             let content: String = row.get(5)?;
@@ -3742,7 +4735,6 @@ impl Database {
         Ok(top)
     }
 
-
     /// 获取活跃洞察（未归档，confidence > 0.3），按置信度降序。
     pub fn get_active_insights(&self, limit: usize) -> Result<Vec<WorkInsight>> {
         let conn = self.conn.lock().map_err(|e| {
@@ -3769,7 +4761,6 @@ impl Database {
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(AppError::Database)
     }
-
 
     /// 检查是否存在相似洞察（同类型 + 内容包含关键词），用于去重。
     pub fn has_similar_insight(&self, insight_type: &str, keyword: &str) -> Result<bool> {
@@ -3990,8 +4981,10 @@ mod tests {
     use super::{
         apply_flex_overtime_correction, local_day_bounds, local_hour_bounds,
         local_hour_end_timestamp, safe_local_timestamp, Activity, Database,
+        SemanticMemoryIndexState,
     };
     use chrono::{TimeZone, Timelike};
+    use rusqlite::params;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -4811,7 +5804,10 @@ mod tests {
 
         // 自定义分类 key 应原样保留，不应被归到 "other"（回归 #109）
         assert!(
-            stats.category_usage.iter().any(|c| c.category == "design_custom"),
+            stats
+                .category_usage
+                .iter()
+                .any(|c| c.category == "design_custom"),
             "自定义分类应出现在时间分配里，而不是被吞掉"
         );
         assert!(
@@ -5061,12 +6057,7 @@ mod tests {
             .get_daily_stats_with_segments_filtered(date, &[], &[], &excluded_domains)
             .expect("读取隐私过滤后的主统计失败");
         let buckets = db
-            .get_hourly_app_breakdown_range_filtered(
-                date,
-                date,
-                &[],
-                &excluded_domains,
-            )
+            .get_hourly_app_breakdown_range_filtered(date, date, &[], &excluded_domains)
             .expect("读取隐私过滤后的每小时应用明细失败");
 
         assert_eq!(stats.total_duration, 10 * 60);
@@ -5853,5 +6844,903 @@ mod tests {
 
         let _ = std::fs::remove_file(source_path);
         let _ = std::fs::remove_file(backup_path);
+    }
+
+    fn sample_activity(timestamp: i64, app_name: &str) -> Activity {
+        Activity {
+            id: None,
+            timestamp,
+            app_name: app_name.to_string(),
+            window_title: "测试活动".to_string(),
+            screenshot_path: "test.png".to_string(),
+            ocr_text: Some("测试 OCR".to_string()),
+            category: "development".to_string(),
+            duration: 60,
+            browser_url: None,
+            executable_path: None,
+            semantic_category: None,
+            semantic_confidence: None,
+            screenshot_url: None,
+        }
+    }
+
+    fn seed_activity_deletion_state(name: &str) -> (PathBuf, Database, i64, i64, String) {
+        let db_path = temp_db_path(name);
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let timestamp = local_ts("2026-08-04", 10, 0);
+        let activity_id = db
+            .insert_activity(&sample_activity(timestamp, "Code"))
+            .expect("插入活动失败");
+        db.upsert_memory_chunk(
+            "2026-08-04|Code|测试活动",
+            "2026-08-04",
+            "Code",
+            "测试活动",
+            None,
+            "测试语义内容",
+            activity_id,
+        )
+        .expect("插入语义块失败");
+        {
+            let conn = db.conn.lock().expect("获取数据库锁失败");
+            conn.execute(
+                "INSERT INTO daily_reports (date, content, ai_mode, created_at) VALUES (?1, '日报', 'test', ?2)",
+                params!["2026-08-04", timestamp],
+            )
+            .expect("插入日报失败");
+            conn.execute(
+                "INSERT INTO daily_reports_localized (date, locale, content, ai_mode, created_at) VALUES (?1, 'zh-CN', '日报', 'test', ?2)",
+                params!["2026-08-04", timestamp],
+            )
+            .expect("插入本地化日报失败");
+            conn.execute(
+                "INSERT INTO hourly_summaries (date, hour, summary, main_apps, activity_count, total_duration, created_at) VALUES (?1, 10, '摘要', 'Code', 1, 60, ?2)",
+                params!["2026-08-04", timestamp],
+            )
+            .expect("插入小时摘要失败");
+        }
+        (
+            db_path,
+            db,
+            activity_id,
+            timestamp,
+            "2026-08-04".to_string(),
+        )
+    }
+
+    fn assert_activity_deletion_invalidated(db: &Database, date: &str) {
+        let conn = db.conn.lock().expect("获取数据库锁失败");
+        let activity_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM activities", [], |row| row.get(0))
+            .expect("查询活动数量失败");
+        let chunk_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM memory_chunks", [], |row| row.get(0))
+            .expect("查询语义块数量失败");
+        let report_count: i64 = conn
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM daily_reports WHERE date = ?1) +
+                        (SELECT COUNT(*) FROM daily_reports_localized WHERE date = ?1) +
+                        (SELECT COUNT(*) FROM hourly_summaries WHERE date = ?1)",
+                params![date],
+                |row| row.get(0),
+            )
+            .expect("查询摘要数量失败");
+        drop(conn);
+        let state = db
+            .get_semantic_memory_state()
+            .expect("读取语义记忆状态失败");
+        assert_eq!(activity_count, 0);
+        assert_eq!(chunk_count, 0);
+        assert_eq!(report_count, 0);
+        assert!(state.rebuild_required);
+        assert_eq!(state.status, "idle");
+        assert_eq!(state.indexed_activities, 0);
+    }
+
+    #[test]
+    fn 语义状态与长期记忆核心crud应可用() {
+        let db_path = temp_db_path("semantic-user-memory-crud");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+
+        let initial = db
+            .get_semantic_memory_state()
+            .expect("读取初始语义状态失败");
+        assert!(initial.rebuild_required);
+        assert_eq!(initial.status, "idle");
+
+        db.update_semantic_memory_state(&SemanticMemoryIndexState {
+            build_id: "ready-build".to_string(),
+            embedding_fingerprint: "embedding-v1".to_string(),
+            privacy_fingerprint: "privacy-v1".to_string(),
+            rebuild_required: false,
+            status: "ready".to_string(),
+            indexed_activities: 3,
+            total_activities: 3,
+            last_error: None,
+            updated_at: 0,
+        })
+        .expect("更新语义状态失败");
+        let ready = db
+            .get_semantic_memory_state()
+            .expect("读取更新后的语义状态失败");
+        assert_eq!(ready.embedding_fingerprint, "embedding-v1");
+        assert!(!ready.rebuild_required);
+        assert_eq!(ready.status, "ready");
+
+        let now = chrono::Utc::now().timestamp();
+        let created = db
+            .create_user_memory(
+                "preference",
+                "editor_theme",
+                "深色主题",
+                "always",
+                "normal",
+                "explicit_chat",
+                Some(7),
+                Some("request-1"),
+                None,
+            )
+            .expect("创建长期记忆失败");
+        assert_eq!(created.revision, 1);
+        assert!(db
+            .create_user_memory(
+                "preference",
+                "editor_theme",
+                "浅色主题",
+                "always",
+                "normal",
+                "explicit_chat",
+                None,
+                None,
+                None,
+            )
+            .is_err());
+
+        let updated = db
+            .update_user_memory(
+                created.id,
+                created.revision,
+                "preference",
+                "editor_theme",
+                "深色主题并使用大字号",
+                "always",
+                "normal",
+                None,
+            )
+            .expect("更新长期记忆失败");
+        assert_eq!(updated.revision, 2);
+        assert!(db
+            .update_user_memory(
+                created.id,
+                created.revision,
+                "preference",
+                "editor_theme",
+                "旧版本覆盖",
+                "always",
+                "normal",
+                None,
+            )
+            .is_err());
+
+        db.create_user_memory(
+            "project",
+            "rust_project",
+            "当前项目使用 Rust 和 SQLite",
+            "relevant",
+            "normal",
+            "explicit_chat",
+            None,
+            None,
+            None,
+        )
+        .expect("创建相关记忆失败");
+        db.create_user_memory(
+            "goal",
+            "expired_goal",
+            "已经过期的目标",
+            "relevant",
+            "normal",
+            "explicit_chat",
+            None,
+            None,
+            Some(now - 1),
+        )
+        .expect("创建过期记忆失败");
+        db.create_user_memory(
+            "constraint",
+            "manual_only",
+            "仅手动查询",
+            "manual",
+            "normal",
+            "explicit_chat",
+            None,
+            None,
+            None,
+        )
+        .expect("创建手动记忆失败");
+
+        let search = db
+            .search_user_memories("Rust", 10)
+            .expect("搜索长期记忆失败");
+        assert_eq!(search.len(), 1);
+        assert_eq!(search[0].memory_key, "rust_project");
+        let recalled = db.recall_user_memories("Rust").expect("召回长期记忆失败");
+        assert!(recalled
+            .iter()
+            .any(|item| item.memory_key == "editor_theme"));
+        assert!(recalled
+            .iter()
+            .any(|item| item.memory_key == "rust_project"));
+        assert!(!recalled
+            .iter()
+            .any(|item| item.memory_key == "expired_goal"));
+        assert!(!recalled.iter().any(|item| item.memory_key == "manual_only"));
+
+        db.forget_user_memory(updated.id, updated.revision)
+            .expect("硬删除长期记忆失败");
+        assert!(db
+            .get_user_memory(updated.id)
+            .expect("读取已删除记忆失败")
+            .is_none());
+        assert_eq!(db.clear_user_memories().expect("清空长期记忆失败"), 3);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 长期记忆键应限制长度和安全字符() {
+        let db_path = temp_db_path("user-memory-key-validation");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let invalid_keys = [
+            "answer\nstyle",
+            "answer\u{0007}style",
+            "[/用户确认的长期记忆]",
+            "answer style",
+            "answer/style",
+        ];
+
+        for memory_key in invalid_keys {
+            assert!(
+                db.create_user_memory(
+                    "preference",
+                    memory_key,
+                    "先给结论",
+                    "relevant",
+                    "normal",
+                    "manual",
+                    None,
+                    None,
+                    None,
+                )
+                .is_err(),
+                "非法长期记忆 key 应被拒绝: {memory_key:?}"
+            );
+        }
+
+        let oversized_key = "a".repeat(65);
+        assert!(db
+            .create_user_memory(
+                "preference",
+                &oversized_key,
+                "先给结论",
+                "relevant",
+                "normal",
+                "manual",
+                None,
+                None,
+                None,
+            )
+            .is_err());
+
+        let valid = db
+            .create_user_memory(
+                "preference",
+                "回答风格.v2",
+                "先给结论",
+                "relevant",
+                "normal",
+                "manual",
+                None,
+                None,
+                None,
+            )
+            .expect("Unicode 字母数字及安全分隔符应可用");
+        assert_eq!(valid.memory_key, "回答风格.v2");
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 所有活动删除入口应同时失效摘要与语义索引() {
+        let (path, db, _, _, date) = seed_activity_deletion_state("delete-before-date");
+        assert_eq!(db.delete_activities_before_date("2026-08-05").unwrap(), 1);
+        assert_activity_deletion_invalidated(&db, &date);
+        let _ = std::fs::remove_file(path);
+
+        let (path, db, id, _, date) = seed_activity_deletion_state("delete-by-id");
+        assert_eq!(db.delete_activity_by_id(id).unwrap().0, 1);
+        assert_activity_deletion_invalidated(&db, &date);
+        let _ = std::fs::remove_file(path);
+
+        let (path, db, _, _, date) = seed_activity_deletion_state("delete-by-date");
+        assert_eq!(db.delete_activities_by_date(&date).unwrap().0, 1);
+        assert_activity_deletion_invalidated(&db, &date);
+        let _ = std::fs::remove_file(path);
+
+        let (path, db, _, timestamp, date) = seed_activity_deletion_state("delete-by-range");
+        assert_eq!(
+            db.delete_activities_by_range(timestamp, timestamp + 1)
+                .unwrap()
+                .0,
+            1
+        );
+        assert_activity_deletion_invalidated(&db, &date);
+        let _ = std::fs::remove_file(path);
+
+        let (path, db, _, _, date) = seed_activity_deletion_state("delete-by-app");
+        assert_eq!(db.delete_activities_by_app("Code", None).unwrap().0, 1);
+        assert_activity_deletion_invalidated(&db, &date);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn 删除活动时语义状态更新失败应回滚整笔事务() {
+        let (db_path, db, activity_id, _, date) = seed_activity_deletion_state("delete-rollback");
+        {
+            let conn = db.conn.lock().expect("获取数据库锁失败");
+            conn.execute_batch(
+                "CREATE TRIGGER block_semantic_state_update
+                 BEFORE UPDATE ON semantic_memory_state
+                 BEGIN SELECT RAISE(ABORT, 'blocked'); END;",
+            )
+            .expect("创建失败触发器失败");
+        }
+
+        assert!(db.delete_activity_by_id(activity_id).is_err());
+        let conn = db.conn.lock().expect("获取数据库锁失败");
+        let activity_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM activities", [], |row| row.get(0))
+            .unwrap();
+        let chunk_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM memory_chunks", [], |row| row.get(0))
+            .unwrap();
+        let summary_count: i64 = conn
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM daily_reports WHERE date = ?1) +
+                        (SELECT COUNT(*) FROM daily_reports_localized WHERE date = ?1) +
+                        (SELECT COUNT(*) FROM hourly_summaries WHERE date = ?1)",
+                params![date],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(activity_count, 1);
+        assert_eq!(chunk_count, 1);
+        assert_eq!(summary_count, 3);
+        drop(conn);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 语义游标占位块不应参与嵌入与块统计() {
+        let db_path = temp_db_path("semantic-cursor-sentinel");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+
+        db.upsert_memory_chunk(
+            "normal-chunk",
+            "2026-08-05",
+            "Code",
+            "正常内容",
+            None,
+            "正常语义内容",
+            10,
+        )
+        .expect("写入正常语义块失败");
+        db.upsert_memory_chunk(
+            "__cursor__",
+            "1970-01-01",
+            "__cursor__",
+            "__cursor__",
+            None,
+            "__cursor__",
+            20,
+        )
+        .expect("写入语义游标失败");
+
+        let pending = db
+            .get_unembedded_memory_chunks(10)
+            .expect("读取待嵌入语义块失败");
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].1, "正常语义内容");
+
+        let stats = db.semantic_memory_stats().expect("读取语义统计失败");
+        assert_eq!(stats.total_chunks, 1);
+        assert_eq!(stats.embedded_chunks, 0);
+        assert_eq!(stats.last_indexed_activity_id, 20);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 旧重建任务不得把嵌入写入复用id的新语义块() {
+        let db_path = temp_db_path("semantic-stale-embedding");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let building = SemanticMemoryIndexState {
+            build_id: "build-a".to_string(),
+            embedding_fingerprint: "embedding-a:3".to_string(),
+            privacy_fingerprint: "privacy-a".to_string(),
+            rebuild_required: true,
+            status: "building".to_string(),
+            indexed_activities: 0,
+            total_activities: 1,
+            last_error: None,
+            updated_at: 0,
+        };
+        db.update_semantic_memory_state(&building)
+            .expect("进入语义重建状态失败");
+        db.upsert_memory_chunk("old", "2026-08-05", "Code", "旧内容", None, "旧内容", 1)
+            .expect("写入旧语义块失败");
+        let old_pending = db
+            .get_unembedded_memory_chunks(1)
+            .expect("读取旧语义块失败");
+        let old_id = old_pending[0].0;
+
+        db.clear_memory_chunks_and_mark_rebuild_required()
+            .expect("失效旧语义索引失败");
+        let new_building = SemanticMemoryIndexState {
+            build_id: "build-b".to_string(),
+            ..building.clone()
+        };
+        db.update_semantic_memory_state(&new_building)
+            .expect("启动新一轮语义重建失败");
+        {
+            let conn = db.conn.lock().expect("锁定测试数据库失败");
+            conn.execute(
+                "INSERT INTO memory_chunks
+                     (id, chunk_key, date, app_name, title, browser_url, content,
+                      embedding, last_activity_id, updated_at)
+                 VALUES (?1, 'new', '2026-08-05', 'Code', '新内容', NULL,
+                         '新内容', NULL, 2, 0)",
+                params![old_id],
+            )
+            .expect("以旧行 ID 写入新语义块失败");
+        }
+        let new_pending = db
+            .get_unembedded_memory_chunks(1)
+            .expect("读取新语义块失败");
+        assert_eq!(
+            new_pending[0].0, old_id,
+            "测试需要覆盖 SQLite 行 ID 复用场景"
+        );
+
+        let written = db
+            .set_memory_chunk_embedding_if_current_build(
+                "build-a",
+                old_id,
+                "旧内容",
+                &[1, 2, 3],
+                "embedding-a:3",
+                "privacy-a",
+            )
+            .expect("条件写入旧嵌入失败");
+        assert!(!written);
+        assert_eq!(
+            db.get_unembedded_memory_chunks(1)
+                .expect("复核新语义块失败")[0]
+                .1,
+            "新内容"
+        );
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 新增活动应使就绪语义索引立即失效() {
+        let db_path = temp_db_path("semantic-ready-stale-on-insert");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        db.update_semantic_memory_state(&SemanticMemoryIndexState {
+            build_id: "ready-build".to_string(),
+            embedding_fingerprint: "embedding-a:3".to_string(),
+            privacy_fingerprint: "privacy-a".to_string(),
+            rebuild_required: false,
+            status: "ready".to_string(),
+            indexed_activities: 0,
+            total_activities: 0,
+            last_error: None,
+            updated_at: 0,
+        })
+        .expect("写入就绪状态失败");
+
+        db.insert_activity(&sample_activity(local_ts("2026-08-05", 12, 0), "Code"))
+            .expect("插入新活动失败");
+
+        let state = db
+            .get_semantic_memory_state()
+            .expect("读取新增活动后的语义状态失败");
+        assert_ne!(state.status, "ready");
+        assert!(state.rebuild_required);
+        assert_eq!(state.total_activities, 1);
+        assert!(state.build_id.is_empty(), "失效后必须撤销旧构建代际");
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 同指纹新重建必须阻止旧build更新状态和写块() {
+        let db_path = temp_db_path("semantic-build-generation");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let activity_id = db
+            .insert_activity(&sample_activity(local_ts("2026-08-05", 13, 0), "Code"))
+            .expect("插入活动失败");
+        db.begin_semantic_memory_build("build-a", "embedding-a:3", "privacy-a")
+            .expect("启动旧重建失败");
+        db.begin_semantic_memory_build("build-b", "embedding-a:3", "privacy-a")
+            .expect("启动新重建失败");
+
+        let stale_upsert = db
+            .upsert_memory_chunk_if_current_build(
+                "build-a",
+                "embedding-a:3",
+                "privacy-a",
+                "old",
+                "2026-08-05",
+                "Code",
+                "旧内容",
+                None,
+                "不得写入",
+                activity_id,
+            )
+            .expect("执行旧任务条件写块失败");
+        assert!(!stale_upsert);
+
+        let mut stale_ready = db.get_semantic_memory_state().expect("读取新重建状态失败");
+        stale_ready.build_id = "build-a".to_string();
+        stale_ready.status = "ready".to_string();
+        stale_ready.rebuild_required = false;
+        let stale_update = db
+            .update_semantic_memory_state_if_current_build(
+                "build-a",
+                "embedding-a:3",
+                "privacy-a",
+                &stale_ready,
+            )
+            .expect("执行旧任务条件状态更新失败");
+        assert!(!stale_update);
+
+        let current = db
+            .get_semantic_memory_state()
+            .expect("读取最终语义状态失败");
+        assert_eq!(current.build_id, "build-b");
+        assert_eq!(current.status, "building");
+        let chunk_count: i64 = db
+            .conn
+            .lock()
+            .expect("锁定数据库失败")
+            .query_row("SELECT COUNT(*) FROM memory_chunks", [], |row| row.get(0))
+            .expect("查询语义块失败");
+        assert_eq!(chunk_count, 0);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 旧build失败不得误伤同指纹的新任务() {
+        let db_path = temp_db_path("semantic-stale-failure");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        db.begin_semantic_memory_build("build-a", "embedding-a:3", "privacy-a")
+            .expect("启动旧重建失败");
+        db.begin_semantic_memory_build("build-b", "embedding-a:3", "privacy-a")
+            .expect("启动新重建失败");
+
+        let failed = db
+            .fail_semantic_memory_build("build-a", "embedding-a:3", "privacy-a", "旧任务失败")
+            .expect("记录旧任务失败状态失败");
+        assert!(!failed);
+        let current = db.get_semantic_memory_state().expect("读取新任务状态失败");
+        assert_eq!(current.build_id, "build-b");
+        assert_eq!(current.status, "building");
+        assert_eq!(current.last_error, None);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 已失效重建不得被旧任务覆盖为就绪() {
+        let db_path = temp_db_path("semantic-stale-state");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let building = SemanticMemoryIndexState {
+            build_id: "build-a".to_string(),
+            embedding_fingerprint: "embedding-a:3".to_string(),
+            privacy_fingerprint: "privacy-a".to_string(),
+            rebuild_required: true,
+            status: "building".to_string(),
+            indexed_activities: 0,
+            total_activities: 1,
+            last_error: None,
+            updated_at: 0,
+        };
+        db.update_semantic_memory_state(&building)
+            .expect("进入语义重建状态失败");
+        db.clear_memory_chunks_and_mark_rebuild_required()
+            .expect("失效语义索引失败");
+
+        let ready = SemanticMemoryIndexState {
+            rebuild_required: false,
+            status: "ready".to_string(),
+            indexed_activities: 1,
+            ..building
+        };
+        let updated = db
+            .update_semantic_memory_state_if_current_build(
+                "build-a",
+                "embedding-a:3",
+                "privacy-a",
+                &ready,
+            )
+            .expect("条件更新语义状态失败");
+        assert!(!updated);
+        let current = db
+            .get_semantic_memory_state()
+            .expect("读取失效后的语义状态失败");
+        assert_eq!(current.status, "idle");
+        assert!(current.rebuild_required);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn building期间新增活动不得被旧进度原子标记为ready() {
+        let db_path = temp_db_path("semantic-ready-race-with-new-activity");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let mut stale_ready = db
+            .begin_semantic_memory_build("build-a", "embedding-a:3", "privacy-a")
+            .expect("启动语义重建失败");
+
+        db.insert_activity(&sample_activity(local_ts("2026-08-05", 14, 0), "Code"))
+            .expect("重建期间插入新活动失败");
+        stale_ready.status = "ready".to_string();
+        stale_ready.rebuild_required = false;
+        stale_ready.total_activities = 0;
+
+        let updated = db
+            .update_semantic_memory_state_if_current_build(
+                "build-a",
+                "embedding-a:3",
+                "privacy-a",
+                &stale_ready,
+            )
+            .expect("尝试提交旧完成进度失败");
+        assert!(!updated, "游标之后仍有活动时不得进入 ready");
+        let current = db
+            .get_semantic_memory_state()
+            .expect("读取并发插入后的语义状态失败");
+        assert_eq!(current.status, "building");
+        assert!(current.rebuild_required);
+        assert_eq!(current.total_activities, 1);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 未嵌入块存在时不得原子标记为ready() {
+        let db_path = temp_db_path("semantic-ready-with-pending-embedding");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let activity_id = db
+            .insert_activity(&sample_activity(local_ts("2026-08-05", 14, 30), "Code"))
+            .expect("插入活动失败");
+        let mut ready = db
+            .begin_semantic_memory_build("build-a", "embedding-a:3", "privacy-a")
+            .expect("启动语义重建失败");
+        assert!(db
+            .upsert_memory_chunk_if_current_build(
+                "build-a",
+                "embedding-a:3",
+                "privacy-a",
+                "chunk-a",
+                "2026-08-05",
+                "Code",
+                "待嵌入内容",
+                None,
+                "待嵌入内容",
+                activity_id,
+            )
+            .expect("写入待嵌入块失败"));
+        ready.status = "ready".to_string();
+        ready.rebuild_required = false;
+        ready.indexed_activities = 1;
+
+        let updated = db
+            .update_semantic_memory_state_if_current_build(
+                "build-a",
+                "embedding-a:3",
+                "privacy-a",
+                &ready,
+            )
+            .expect("尝试在待嵌入状态完成重建失败");
+        assert!(!updated, "存在未嵌入真实块时不得进入 ready");
+        assert_eq!(
+            db.get_semantic_memory_state()
+                .expect("读取待嵌入状态失败")
+                .status,
+            "building"
+        );
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn ready状态总活动数必须使用数据库实时计数() {
+        let db_path = temp_db_path("semantic-ready-live-total");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let mut ready = db
+            .begin_semantic_memory_build("build-a", "embedding-a:3", "privacy-a")
+            .expect("启动语义重建失败");
+        ready.status = "ready".to_string();
+        ready.rebuild_required = false;
+        ready.total_activities = 999;
+
+        assert!(db
+            .update_semantic_memory_state_if_current_build(
+                "build-a",
+                "embedding-a:3",
+                "privacy-a",
+                &ready,
+            )
+            .expect("完成空索引重建失败"));
+        let current = db
+            .get_semantic_memory_state()
+            .expect("读取完成后的语义状态失败");
+        assert_eq!(current.status, "ready");
+        assert_eq!(current.total_activities, 0);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 来源活动删除后当前build也不得写入语义块() {
+        let db_path = temp_db_path("semantic-source-deleted-before-upsert");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let activity_id = db
+            .insert_activity(&sample_activity(local_ts("2026-08-05", 15, 0), "Code"))
+            .expect("插入来源活动失败");
+        db.begin_semantic_memory_build("build-a", "embedding-a:3", "privacy-a")
+            .expect("启动语义重建失败");
+        db.conn
+            .lock()
+            .expect("锁定测试数据库失败")
+            .execute("DELETE FROM activities WHERE id = ?1", params![activity_id])
+            .expect("删除来源活动失败");
+
+        let written = db
+            .upsert_memory_chunk_if_current_build(
+                "build-a",
+                "embedding-a:3",
+                "privacy-a",
+                "chunk-a",
+                "2026-08-05",
+                "Code",
+                "已删除来源",
+                None,
+                "不得落库",
+                activity_id,
+            )
+            .expect("执行来源校验写块失败");
+        assert!(!written);
+        assert_eq!(
+            db.conn
+                .lock()
+                .expect("锁定测试数据库失败")
+                .query_row("SELECT COUNT(*) FROM memory_chunks", [], |row| row
+                    .get::<_, i64>(0))
+                .expect("查询语义块数量失败"),
+            0
+        );
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 旧build不得读取新任务占用期间的待嵌入块() {
+        let db_path = temp_db_path("semantic-stale-pending-read");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let activity_id = db
+            .insert_activity(&sample_activity(local_ts("2026-08-05", 15, 30), "Code"))
+            .expect("插入来源活动失败");
+        db.begin_semantic_memory_build("build-a", "embedding-a:3", "privacy-a")
+            .expect("启动旧语义重建失败");
+        assert!(db
+            .upsert_memory_chunk_if_current_build(
+                "build-a",
+                "embedding-a:3",
+                "privacy-a",
+                "chunk-a",
+                "2026-08-05",
+                "Code",
+                "待嵌入",
+                None,
+                "待嵌入",
+                activity_id,
+            )
+            .expect("写入待嵌入块失败"));
+        db.begin_semantic_memory_build("build-b", "embedding-a:3", "privacy-a")
+            .expect("启动新语义重建失败");
+
+        let stale_pending = db
+            .get_unembedded_memory_chunks_if_current_build(
+                "build-a",
+                "embedding-a:3",
+                "privacy-a",
+                10,
+            )
+            .expect("旧任务读取待嵌入块失败");
+        assert!(stale_pending.is_empty());
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 当前build失败应可靠记录错误() {
+        let db_path = temp_db_path("semantic-current-build-failure");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        db.begin_semantic_memory_build("build-a", "embedding-probe", "privacy-a")
+            .expect("启动语义探测失败");
+
+        assert!(db
+            .fail_semantic_memory_build("build-a", "embedding-probe", "privacy-a", "模型探测失败",)
+            .expect("记录当前任务失败状态失败"));
+        let current = db.get_semantic_memory_state().expect("读取失败状态失败");
+        assert_eq!(current.build_id, "build-a");
+        assert_eq!(current.status, "failed");
+        assert!(current.rebuild_required);
+        assert_eq!(current.last_error.as_deref(), Some("模型探测失败"));
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 活动追平且全部嵌入后当前build应可标记为ready() {
+        let db_path = temp_db_path("semantic-ready-after-embedding");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let activity_id = db
+            .insert_activity(&sample_activity(local_ts("2026-08-05", 16, 0), "Code"))
+            .expect("插入来源活动失败");
+        let mut ready = db
+            .begin_semantic_memory_build("build-a", "embedding-a:3", "privacy-a")
+            .expect("启动语义重建失败");
+        assert!(db
+            .upsert_memory_chunk_if_current_build(
+                "build-a",
+                "embedding-a:3",
+                "privacy-a",
+                "chunk-a",
+                "2026-08-05",
+                "Code",
+                "已嵌入",
+                None,
+                "已嵌入",
+                activity_id,
+            )
+            .expect("写入语义块失败"));
+        let pending = db
+            .get_unembedded_memory_chunks_if_current_build(
+                "build-a",
+                "embedding-a:3",
+                "privacy-a",
+                1,
+            )
+            .expect("读取待嵌入块失败");
+        assert_eq!(pending.len(), 1);
+        assert!(db
+            .set_memory_chunk_embedding_if_current_build(
+                "build-a",
+                pending[0].id,
+                &pending[0].content,
+                &[1, 2, 3],
+                "embedding-a:3",
+                "privacy-a",
+            )
+            .expect("写入嵌入失败"));
+        ready.status = "ready".to_string();
+        ready.rebuild_required = false;
+        ready.indexed_activities = 1;
+
+        assert!(db
+            .update_semantic_memory_state_if_current_build(
+                "build-a",
+                "embedding-a:3",
+                "privacy-a",
+                &ready,
+            )
+            .expect("完成语义重建失败"));
+        let current = db.get_semantic_memory_state().expect("读取就绪状态失败");
+        assert_eq!(current.status, "ready");
+        assert!(!current.rebuild_required);
+        assert_eq!(current.total_activities, 1);
+        let _ = std::fs::remove_file(db_path);
     }
 }

@@ -26,11 +26,11 @@
   };
 
   $: cardClass = embedded
-    ? 'block min-h-[108px] rounded-[22px] bg-slate-50/88 px-4 py-4 dark:bg-[#161b22]/30'
-    : 'block min-h-[116px] rounded-2xl border border-slate-200/80 bg-white p-5 dark:border-[#30363d]/60 dark:bg-[#21262d]/80';
+    ? 'block min-h-[108px] rounded-lg bg-slate-50/88 px-4 py-4 dark:bg-[#161b22]/30'
+    : 'block min-h-[116px] rounded-lg border border-slate-200/80 bg-white p-5 dark:border-[#30363d]/60 dark:bg-[#21262d]/80';
   $: iconClass = embedded
-    ? `flex h-10 w-10 items-center justify-center rounded-2xl ${iconBgs[color]} ${iconColors[color]} shrink-0`
-    : `flex h-11 w-11 items-center justify-center rounded-2xl border border-white/80 shadow-sm dark:shadow-none dark:border-[#30363d]/80 ${iconBgs[color]} ${iconColors[color]} shrink-0`;
+    ? `flex h-10 w-10 items-center justify-center rounded-lg ${iconBgs[color]} ${iconColors[color]} shrink-0`
+    : `flex h-11 w-11 items-center justify-center rounded-lg border border-white/80 shadow-sm dark:shadow-none dark:border-[#30363d]/80 ${iconBgs[color]} ${iconColors[color]} shrink-0`;
   $: valueClass = embedded
     ? 'mt-4 whitespace-nowrap text-[1.9rem] font-semibold leading-none text-slate-900 dark:text-[#e6edf3]'
     : 'mt-6 whitespace-nowrap text-[2.15rem] font-semibold leading-none text-slate-900 dark:text-[#e6edf3]';

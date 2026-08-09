@@ -1118,7 +1118,7 @@
               aria-label={t('ask.stopGenerating')}
               title={t('ask.stopGenerating')}
             >
-              <span class="h-2.5 w-2.5 rounded-[3px] bg-current" aria-hidden="true"></span>
+              <span class="h-2.5 w-2.5 rounded-[var(--radius-xs)] bg-current" aria-hidden="true"></span>
             </button>
           {:else}
             <button
