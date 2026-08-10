@@ -1,18 +1,29 @@
-<script>
-  import { t } from '$lib/i18n/index.js';
+<script lang="ts">
+  import { t } from '$lib/i18n/index.ts';
   import { invoke } from '@tauri-apps/api/core';
   import { createEventDispatcher } from 'svelte';
 
-  export let localStatus = { enabled: false, baseUrl: '', tokenPreview: '' };
+  interface LocalApiStatus {
+    enabled: boolean;
+    baseUrl: string;
+    tokenPreview: string;
+  }
 
-  const dispatch = createEventDispatcher();
+  interface ToastDetail {
+    message: string;
+    type: 'success' | 'error';
+  }
+
+  export let localStatus: LocalApiStatus = { enabled: false, baseUrl: '', tokenPreview: '' };
+
+  const dispatch = createEventDispatcher<{ toast: ToastDetail }>();
   let examplesExpanded = false;
   let activeApiCategory = 'all';
 
   $: curlToken = localStatus.tokenPreview || '';
   $: curlBase = localStatus.baseUrl || 'http://127.0.0.1:47831';
 
-  function curlCommand(method, path, body) {
+  function curlCommand(method: string, path: string, body?: Record<string, unknown>): string {
     const headers = ['-H', '"Content-Type: application/json"'];
     if (curlToken && curlToken !== '—') {
       headers.push('-H', `"Authorization: Bearer ${curlToken}"`);
@@ -24,7 +35,7 @@
     return parts.join(' \\\n  ');
   }
 
-  async function copyCurl(cmd) {
+  async function copyCurl(cmd: string): Promise<void> {
     try {
       await navigator.clipboard.writeText(cmd);
       dispatch('toast', { message: t('nodeGatewayPage.curlCopied'), type: 'success' });

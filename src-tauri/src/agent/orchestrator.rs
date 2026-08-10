@@ -1,9 +1,7 @@
-//! Stage 5: Orchestrator — Agent 的"指挥官"
+//! Agent 请求编排
 //!
 //! 路由决策：简单 → FastPath，复杂 → AgentPath
 //! 降级策略：Agent 失败 → FastPath → FallbackPath
-//!
-//! 对应 Python: 05_orchestrator.py 里的 Orchestrator 类
 
 use super::events::{StreamEvent, StreamEventSender};
 use super::executor::{AgentExecutor, AgentRunError};
@@ -44,8 +42,6 @@ pub struct RouteDecision {
 
 /// 路由决策 — 根据问题内容判断走哪条路径
 ///
-/// 对应 Python: route_query()
-/// 面试核心：这个函数决定了每个请求的命运。
 /// 规则越简单越好——复杂的判断交给 Agent 自己做。
 pub fn route_query(question: &str, has_model: bool) -> RouteDecision {
     let q = question.trim().to_lowercase();
@@ -227,8 +223,6 @@ pub struct Orchestrator;
 
 impl Orchestrator {
     /// 处理用户请求的总入口
-    ///
-    /// 对应 Python: Orchestrator.handle()
     #[allow(clippy::too_many_arguments)]
     pub async fn handle(
         question: &str,
@@ -478,7 +472,10 @@ pub fn fast_answer(
     // 查全量（10000 条）反而信息量过大不聚焦。parse_temporal_range 在没匹配到
     // 任何时间词时返回 (None, None)，这里兜底成今天的日期范围。
     if date_from.is_none() && date_to.is_none() {
-        let today = chrono::Local::now().date_naive().format("%Y-%m-%d").to_string();
+        let today = chrono::Local::now()
+            .date_naive()
+            .format("%Y-%m-%d")
+            .to_string();
         date_from = Some(today.clone());
         date_to = Some(today);
     }
@@ -675,7 +672,6 @@ mod tests {
         Database::new(&path).expect("创建测试数据库失败")
     }
 
-
     #[test]
     fn test_route_greeting_without_model() {
         let d = route_query("你好", false);
@@ -821,7 +817,10 @@ mod tests {
         assert_eq!(route_query("你能干什么", false).path, QueryPath::Direct);
         assert_eq!(route_query("你会什么", false).path, QueryPath::Direct);
         assert_eq!(route_query("介绍一下你自己", false).path, QueryPath::Direct);
-        assert_eq!(route_query("what can you do", false).path, QueryPath::Direct);
+        assert_eq!(
+            route_query("what can you do", false).path,
+            QueryPath::Direct
+        );
     }
 
     #[test]

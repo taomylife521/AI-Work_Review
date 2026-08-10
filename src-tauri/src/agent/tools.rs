@@ -74,8 +74,7 @@ fn resolve_category_key(input: &str) -> Option<String> {
 
 /// 一个工具的完整定义（Schema + 执行函数）
 ///
-/// 对应 Python 里的：
-///   search_memory_schema() + search_memory_execute() 的组合
+/// 将供模型读取的参数 Schema 与实际执行函数绑定在一起。
 pub struct ToolDefinition {
     /// 工具名称
     pub name: &'static str,
@@ -702,9 +701,6 @@ impl<'a> ToolContext<'a> {
 // ══════════════════════════════════════════════════════════
 
 /// search_memory 工具的 Schema
-///
-/// 对应 Python: search_memory_schema()
-/// 输出的 JSON 和 Python 版完全一致
 fn search_memory_parameters() -> Value {
     json!({
         "type": "object",
@@ -727,8 +723,6 @@ fn search_memory_parameters() -> Value {
 }
 
 /// analyze_intents 工具的 Schema
-///
-/// 对应 Python: analyze_intents_schema()
 fn analyze_intents_parameters() -> Value {
     json!({
         "type": "object",
@@ -907,8 +901,7 @@ fn user_memory_write_parameters(include_identity: bool) -> Value {
 
 /// search_memory 的执行函数
 ///
-/// 对应 Python: search_memory_execute()
-/// 但这里调用的是真实的 database.search_memory()！
+/// 调用正式数据库实现，并在返回模型前执行隐私过滤。
 fn search_memory_execute(ctx: &ToolContext, args: Value) -> Result<String, String> {
     let query = args["query"]
         .as_str()
@@ -992,8 +985,7 @@ fn search_memory_execute(ctx: &ToolContext, args: Value) -> Result<String, Strin
 
 /// analyze_intents 的执行函数
 ///
-/// 对应 Python: analyze_intents_execute()
-/// 调用真实的 work_intelligence.analyze_intents()
+/// 调用正式的工作意图分析实现。
 fn analyze_intents_execute(ctx: &ToolContext, args: Value) -> Result<String, String> {
     let date_from = args["date_from"]
         .as_str()
@@ -2303,8 +2295,7 @@ async fn semantic_search_tool(ctx: &ToolContext<'_>, args: Value) -> Result<Stri
 
 /// 工具注册中心
 ///
-/// 对应 Python: ToolRegistry 类
-/// 职责完全一样：注册工具 → 返回定义给 LLM → 执行 LLM 选择的工具
+/// 负责注册工具、向模型提供定义并执行模型选择的工具。
 pub struct ToolRegistry {
     tools: HashMap<&'static str, ToolDefinition>,
 }

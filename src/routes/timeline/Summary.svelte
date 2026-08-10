@@ -1,8 +1,8 @@
-<script>
+<script lang="ts">
   import { onMount } from 'svelte';
   import { replace, params } from 'svelte-spa-router';
-  import { t } from '$lib/i18n/index.js';
-  import { isValidLocalDateString } from '$lib/utils/dateValidation.js';
+  import { t } from '$lib/i18n/index.ts';
+  import { isValidLocalDateString } from '$lib/utils/dateValidation.ts';
 
   function getLocalDateString() {
     const now = new Date();

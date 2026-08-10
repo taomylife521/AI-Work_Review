@@ -21,8 +21,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: node --test（全量前端测试）
-        run: node --test
+      - name: TypeScript 与 Svelte 检查
+        run: npm run check
+      - name: 全量前端测试
+        run: npm run test:frontend
       - name: 生产构建
         run: npm run build
 

@@ -1,9 +1,7 @@
-//! Stage 2: Model 层 — Agent 的"嘴巴"
+//! Agent 模型适配层
 //!
 //! 职责：把统一的消息格式翻译成各家 API 的请求格式，
 //!       把各家 API 的响应翻译回统一格式。
-//!
-//! 对应 Python: 02_model.py 里的 Message/ToolCall/LlmResponse/Provider
 
 use crate::config::{AiProvider, ModelConfig};
 use crate::error::AppError;
@@ -59,7 +57,6 @@ async fn send_with_retry(request: reqwest::RequestBuilder) -> Result<reqwest::Re
 // ══════════════════════════════════════════════════════════
 // 第一部分：统一的消息格式
 // ══════════════════════════════════════════════════════════
-// 对应 Python: class Message / ToolCall / LlmResponse
 
 /// LLM 想调用的工具
 #[derive(Debug, Clone)]
@@ -164,8 +161,6 @@ impl Message {
 /// 这是你现有的 `generate_text_answer_with_model` 的升级版：
 /// - 旧版：只能发 system + user，收纯文字
 /// - 新版：支持发 messages + tools，收文字或 tool_calls
-///
-/// 对应 Python: provider.chat(messages, tools) -> LlmResponse
 pub async fn chat_with_tools(
     model_config: &ModelConfig,
     system_prompt: &str,
@@ -851,7 +846,9 @@ impl OpenAiStreamAssembler {
         let delta = &choice["delta"];
         if let Some(tcs) = delta["tool_calls"].as_array() {
             for tc in tcs {
-                let idx = tc["index"].as_u64().unwrap_or(self.partial_calls.len() as u64) as usize;
+                let idx = tc["index"]
+                    .as_u64()
+                    .unwrap_or(self.partial_calls.len() as u64) as usize;
                 while self.partial_calls.len() <= idx {
                     self.partial_calls
                         .push((String::new(), String::new(), String::new()));
@@ -1073,7 +1070,8 @@ async fn chat_ollama_streaming(
         body["tools"] = json!(tools);
     }
 
-    let response = ensure_stream_status(client.post(&url).json(&body).send().await?, "Ollama").await?;
+    let response =
+        ensure_stream_status(client.post(&url).json(&body).send().await?, "Ollama").await?;
 
     let mut assembler = OllamaStreamAssembler::default();
     drive_stream(response, |line| {
@@ -1135,7 +1133,8 @@ impl ClaudeStreamAssembler {
                     Some("input_json_delta") => {
                         let index = payload["index"].as_u64().unwrap_or(0);
                         if let Some(slot) = self.tools.get_mut(&index) {
-                            slot.2.push_str(delta["partial_json"].as_str().unwrap_or(""));
+                            slot.2
+                                .push_str(delta["partial_json"].as_str().unwrap_or(""));
                         }
                         None
                     }
@@ -1216,7 +1215,8 @@ async fn chat_claude_streaming(
         format!("{endpoint}/messages")
     };
 
-    let (claude_messages, system_content, claude_tools) = build_claude_request_parts(messages, tools);
+    let (claude_messages, system_content, claude_tools) =
+        build_claude_request_parts(messages, tools);
 
     let mut body = json!({
         "model": model_config.model,
@@ -1326,11 +1326,7 @@ impl GeminiStreamAssembler {
             } else {
                 Some(self.text)
             },
-            tool_calls: if has_tools {
-                Some(tool_calls)
-            } else {
-                None
-            },
+            tool_calls: if has_tools { Some(tool_calls) } else { None },
             stop_reason,
         }
     }

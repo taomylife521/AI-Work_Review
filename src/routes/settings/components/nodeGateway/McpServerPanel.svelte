@@ -1,21 +1,30 @@
-<script>
-  import { t } from '$lib/i18n/index.js';
+<script lang="ts">
+  import { t } from '$lib/i18n/index.ts';
   import { createEventDispatcher } from 'svelte';
 
-  export let config;
+  interface McpServerConfig {
+    mcp_server_enabled: boolean;
+  }
+
+  interface ToastDetail {
+    message: string;
+    type: 'success' | 'error';
+  }
+
+  export let config: McpServerConfig;
   export let saving = false;
   export let mcpDbPath = '';
   export let mcpConfigPath = '';
   export let mcpConfigJson = '';
 
-  const dispatch = createEventDispatcher();
+  const dispatch = createEventDispatcher<{ save: null; toast: ToastDetail }>();
 
   function toggle() {
     config.mcp_server_enabled = !config.mcp_server_enabled;
     dispatch('save');
   }
 
-  async function copyPath(text, labelKey) {
+  async function copyPath(text: string, labelKey: string): Promise<void> {
     try {
       await navigator.clipboard.writeText(text);
       dispatch('toast', { message: t('nodeGatewayPage.mcpServerPathCopied', { label: t(`nodeGatewayPage.${labelKey}`) }), type: 'success' });

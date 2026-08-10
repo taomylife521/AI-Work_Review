@@ -6,6 +6,7 @@ dist/
 src-tauri/target/
 test_uia/target/
 test_uia/*.txt
+*.tsbuildinfo
 
 # IDE
 .idea/
@@ -38,8 +39,8 @@ npm-debug.log*
 src/lib/components/Avatar/AvatarCanvasLive2D.svelte
 
 # Tauri
-src-tauri/target/
 src-tauri/WixTools/
+/src-tauri/gen/schemas/
 
 # Python
 __pycache__/
@@ -48,6 +49,14 @@ __pycache__/
 .Python
 /env/
 /venv/
+/learning/
+
+# GitHub Actions 发布临时产物
+/all-artifacts/
+/release_notes.md
+/updater.json
+/updater-ghproxy.json
+/updater-ghp.json
 
 # Bot config
 bots/config.json
@@ -55,6 +64,8 @@ bots/config.json
 # Project docs (local only)
 plan-*.md
 TEST_REPORT_*.md
+/docs/superpowers/plans/
+/docs/superpowers/specs/
 src-tauri/icons.backup/
 .worktrees/
 .superpowers/
@@ -62,6 +73,6 @@ src-tauri/icons.backup/
 /target/
 
 # 会话工作文件（plan-*.md 匹配不到根目录 plan.md，显式列出）
-plan.md
+/plan.md
 .claude/
 .zcode/

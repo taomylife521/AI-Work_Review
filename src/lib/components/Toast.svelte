@@ -1,14 +1,14 @@
-<script>
-  import { toast, clearToast } from '$lib/stores/toast.js';
+<script lang="ts">
+  import { toast, clearToast, type ToastType } from '$lib/stores/toast.ts';
 
-  const iconMap = {
+  const iconMap: Record<ToastType, string> = {
     success: 'M5 13l4 4L19 7',
     error: 'M6 18L18 6M6 6l12 12',
     warning: 'M12 9v4m0 4h.01M10.29 3.86l-7.5 13A1 1 0 003.65 18h16.7a1 1 0 00.86-1.5l-7.5-13a1 1 0 00-1.72 0z',
     info: 'M13 16h-1v-4h-1m1-4h.01M12 22a10 10 0 110-20 10 10 0 010 20z',
   };
 
-  const colorMap = {
+  const colorMap: Record<ToastType, string> = {
     success: 'bg-slate-800 dark:bg-[#30363d] text-white dark:text-[#c9d1d9]',
     error: 'bg-red-600 text-white',
     warning: 'bg-amber-500 text-white',
@@ -16,8 +16,8 @@
   };
 
   $: toastState = $toast;
-  $: iconPath = iconMap[toastState?.type] || iconMap.info;
-  $: toastClass = colorMap[toastState?.type] || colorMap.info;
+  $: iconPath = iconMap[toastState?.type ?? 'info'];
+  $: toastClass = colorMap[toastState?.type ?? 'info'];
 </script>
 
 {#if toastState}

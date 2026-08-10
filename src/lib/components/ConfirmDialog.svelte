@@ -1,8 +1,12 @@
-<script>
-  import { confirmDialog, resolveConfirm } from '$lib/stores/confirm.js';
-  import { trapFocus } from '$lib/utils/focusTrap.js';
+<script lang="ts">
+  import {
+    confirmDialog,
+    resolveConfirm,
+    type ConfirmTone,
+  } from '$lib/stores/confirm.ts';
+  import { trapFocus } from '$lib/utils/focusTrap.ts';
 
-  const toneMap = {
+  const toneMap: Record<ConfirmTone, { iconBg: string; button: string }> = {
     info: {
       iconBg: 'bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-300',
       button: 'bg-indigo-500 hover:bg-indigo-600 text-white',
@@ -18,9 +22,9 @@
   };
 
   $: dialogState = $confirmDialog;
-  $: tone = toneMap[dialogState?.tone] || toneMap.info;
+  $: tone = toneMap[dialogState?.tone ?? 'info'];
 
-  function handleKeydown(event) {
+  function handleKeydown(event: KeyboardEvent): void {
     if (event.key === 'Escape') {
       resolveConfirm(false);
     }

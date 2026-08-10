@@ -1,6 +1,28 @@
-<script>
-  export let followup = null;
-  export let copy = null;
+<script lang="ts">
+  interface AvatarFollowup {
+    projectKey?: string;
+  }
+
+  interface AvatarFollowupCopy {
+    surfaceClass: string;
+    dismissLabel: string;
+    badgeClass: string;
+    personaLabel: string;
+    title: string;
+    summary: string;
+    meta: string;
+    primaryClass: string;
+    openTimeline: string;
+    focus: string;
+    focusFull: string;
+    remember: string;
+    rememberFull: string;
+    snooze: string;
+    snoozeFull: string;
+  }
+
+  export let followup: AvatarFollowup | null = null;
+  export let copy: AvatarFollowupCopy | null = null;
   export let flipLeft = false;
   export let onTimeline = () => {};
   export let onFocus = () => {};

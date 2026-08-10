@@ -372,7 +372,7 @@ npm run tauri:dev    # 开发
 npm run tauri:build  # 构建
 ```
 
-要求：Node.js 18+ / Rust stable / Tauri 2 CLI · 技术栈：Tauri 2 + Rust + Svelte 4 + SQLite
+要求：Node.js 22+ / Rust stable / Tauri 2 CLI · 技术栈：Tauri 2 + Rust + Svelte 4 + SQLite
 
 ---
 

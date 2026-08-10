@@ -1,8 +1,14 @@
-<script>
-  import { formatBubbleMessage } from './bubbleMessage.js';
-  import { t } from '$lib/i18n/index.js';
+<script lang="ts">
+  import { formatBubbleMessage } from './bubbleMessage.ts';
+  import { t } from '$lib/i18n/index.ts';
 
-  export let bubble = null;
+  interface AvatarBubble {
+    message?: unknown;
+    tone?: string;
+    persistent?: boolean;
+  }
+
+  export let bubble: AvatarBubble | null = null;
   export let flipLeft = false;
   export let onClose = () => {};
 

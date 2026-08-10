@@ -1,13 +1,15 @@
-<script>
+<script lang="ts">
   export let title = '';
   export let value = '';
   export let icon = '';
-  export let color = 'indigo';
-  export let href = null;
-  export let embedded = false;
-  export let subtitle = null;
+  type StatsCardColor = 'indigo' | 'emerald' | 'amber' | 'rose' | 'blue' | 'violet';
 
-  const iconColors = {
+  export let color: StatsCardColor = 'indigo';
+  export let href: string | null = null;
+  export let embedded = false;
+  export let subtitle: string | null = null;
+
+  const iconColors: Record<StatsCardColor, string> = {
     indigo: 'text-indigo-500 dark:text-indigo-400',
     emerald: 'text-emerald-500 dark:text-emerald-400',
     amber: 'text-amber-500 dark:text-amber-400',
@@ -16,7 +18,7 @@
     violet: 'text-violet-500 dark:text-violet-400',
   };
 
-  const iconBgs = {
+  const iconBgs: Record<StatsCardColor, string> = {
     indigo: 'bg-indigo-50 dark:bg-indigo-950/40',
     emerald: 'bg-emerald-50 dark:bg-emerald-950/40',
     amber: 'bg-amber-50 dark:bg-amber-950/40',

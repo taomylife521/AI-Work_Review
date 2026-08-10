@@ -1,22 +1,126 @@
-<script>
+<script lang="ts">
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { aiStore } from '$lib/stores/ai.js';
-  import { locale, t } from '$lib/i18n/index.js';
+  import { aiStore } from '$lib/stores/ai.ts';
+  import type { AiTestStatus } from '$lib/stores/ai.ts';
+  import { locale, t } from '$lib/i18n/index.ts';
+  import type { Locale } from '$lib/i18n/index.ts';
   import AssistantMemoryManager from './AssistantMemoryManager.svelte';
 
-  export let config;
-  export let providers = [];
+  type AiMode = 'local' | 'summary';
+  type SemanticStatus = 'idle' | 'building' | 'ready' | 'failed';
+  type ProviderId =
+    | 'ollama'
+    | 'openai'
+    | 'siliconflow'
+    | 'deepseek'
+    | 'qwen'
+    | 'zhipu'
+    | 'moonshot'
+    | 'doubao'
+    | 'minimax'
+    | 'gemini'
+    | 'claude'
+    | 'openrouter'
+    | 'groq'
+    | 'xai'
+    | 'mistral'
+    | 'lmstudio'
+    | 'custom';
 
-  const dispatch = createEventDispatcher();
+  interface TextModelConfig {
+    provider: ProviderId;
+    endpoint: string;
+    model: string;
+    api_key: string | null;
+  }
+
+  interface AiSettingsConfig {
+    ai_mode: AiMode;
+    text_model: TextModelConfig;
+    assistant_web_access_enabled: boolean;
+    assistant_search_provider: 'duckduckgo' | 'tavily' | 'bocha';
+    assistant_search_api_key: string;
+    memory_semantic_enabled: boolean;
+    embedding_provider: 'ollama' | 'openai';
+    embedding_endpoint: string;
+    embedding_model: string;
+    embedding_api_key: string;
+    assistant_memory_enabled: boolean;
+  }
+
+  interface AiProvider {
+    id: ProviderId;
+    name: string;
+    description: string;
+    default_endpoint: string;
+    default_model: string;
+    requires_api_key: boolean;
+  }
+
+  interface AiModeOption {
+    value: AiMode;
+    labelKey: string;
+    descriptionKey: string;
+    requiresText: boolean;
+  }
+
+  interface LocalizedAiMode extends AiModeOption {
+    label: string;
+    description: string;
+  }
+
+  interface SemanticMemoryState {
+    status: SemanticStatus;
+    rebuildRequired: boolean;
+    indexedActivities: number;
+    totalActivities: number;
+    lastError: string | null;
+  }
+
+  interface SemanticIndexProgress {
+    state: SemanticMemoryState;
+  }
+
+  interface ProviderConfigCache {
+    endpoint: string;
+    model: string;
+    api_key: string;
+  }
+
+  interface ProviderLabel {
+    name: string;
+    description: string;
+  }
+
+  interface SearchTestResult {
+    resultCount?: number;
+    latencyMs?: number;
+  }
+
+  interface EmbeddingTestResult {
+    dimension?: number;
+    latencyMs?: number;
+  }
+
+  interface ModelTestResult {
+    success: boolean;
+    response_time_ms?: number | null;
+    message?: string | null;
+  }
+
+  export let config: AiSettingsConfig;
+  export let providers: AiProvider[] = [];
+
+  const dispatch = createEventDispatcher<{ change: AiSettingsConfig }>();
   $: currentLocale = $locale;
-  let aiModes = [];
-  let localizedProviders = [];
+  let aiModes: LocalizedAiMode[] = [];
+  let localizedProviders: AiProvider[] = [];
   // 三入口分区：模型配置 / 助手联网 / 语义记忆（点击切换，互不打扰）
   let aiSection = 'model';
 
   // ══════════ 语义记忆索引管理（查询走助手，管理入口在这里）══════════
-  const emptySemanticState = () => ({
+  const emptySemanticState = (): SemanticMemoryState => ({
     status: 'idle',
     rebuildRequired: true,
     indexedActivities: 0,
@@ -49,7 +153,7 @@
   async function refreshSemanticStats() {
     if (!config?.memory_semantic_enabled) return;
     try {
-      semanticState = await invoke('semantic_memory_status');
+      semanticState = await invoke<SemanticMemoryState>('semantic_memory_status');
     } catch (e) {
       console.warn('读取语义记忆状态失败:', e);
     }
@@ -63,7 +167,7 @@
     try {
       // 后端持久化真实状态；前端只分批推进，直到状态不再是 building。
       while (!semanticDestroyed) {
-        const progress = await invoke('index_semantic_memory');
+        const progress = await invoke<SemanticIndexProgress>('index_semantic_memory');
         semanticState = progress.state;
         semanticIndexText = t('settingsAI.semanticMemory.progress', {
           indexed: semanticState.indexedActivities ?? 0,
@@ -80,7 +184,7 @@
   }
 
   // 日报生成模式：基础模板 vs AI 增强
-  const aiModeConfigs = [
+  const aiModeConfigs: AiModeOption[] = [
     {
       value: 'local',
       labelKey: 'settingsAI.modeLocal',
@@ -103,7 +207,7 @@
     }));
   }
 
-  const providerLabels = {
+  const providerLabels: Record<ProviderId, Partial<Record<Locale, ProviderLabel>>> = {
     ollama: {
       'zh-CN': { name: 'Ollama (本地)', description: '本机运行开源模型，数据不出本机' },
       en: { name: 'Ollama (Local)', description: 'Runs open models on your device, data stays local' },
@@ -191,7 +295,7 @@
     },
   };
 
-  function getLocalizedProvider(provider) {
+  function getLocalizedProvider(provider: AiProvider): AiProvider {
     const localized = providerLabels[provider?.id]?.[currentLocale];
     if (!localized) {
       return provider;
@@ -208,7 +312,7 @@
   }
 
   // 提供商默认配置
-  function getProviderDefaults(providerId) {
+  function getProviderDefaults(providerId: ProviderId) {
     const provider = localizedProviders.find(p => p.id === providerId);
     return {
       endpoint: provider?.default_endpoint || '',
@@ -218,11 +322,11 @@
   }
 
   // 从全局 store 订阅测试状态
-  let textTestStatus = null;
+  let textTestStatus: AiTestStatus = null;
   let textTestMessage = '';
   let textConnectionVerified = false;
   let showApiKey = false;
-  let fetchedModels = [];
+  let fetchedModels: string[] = [];
   let modelsLoading = false;
   let modelsError = '';
   let modelsLoaded = 0;
@@ -255,7 +359,7 @@
   $: isAiMode = config.ai_mode === 'summary';
 
   // 每个 provider 的配置缓存（切换时保留配置）
-  let providerConfigs = {};
+  let providerConfigs: Partial<Record<ProviderId, ProviderConfigCache>> = {};
   let configInitialized = false;
 
   $: if (config?.text_model?.provider && !configInitialized) {
@@ -268,7 +372,7 @@
   }
 
   // 服务商品牌色（卡片网格头像底色，参考各家官方主色的近似值）
-  const PROVIDER_BRAND = {
+  const PROVIDER_BRAND: Record<ProviderId, string> = {
     ollama: '#111827',
     openai: '#10a37f',
     siliconflow: '#6e4ff6',
@@ -288,13 +392,13 @@
     custom: '#64748b',
   };
 
-  /** 品牌图标加载失败 → 回退到字母块（图标需运行 scripts/fetch-provider-icons.mjs 落盘） */
-  let providerIconFailed = {};
+  /** 品牌图标加载失败 → 回退到字母块（图标需运行 scripts/fetch-provider-icons.ts 落盘） */
+  let providerIconFailed: Partial<Record<ProviderId, boolean>> = {};
 
   // ══════════ 联网搜索 / 嵌入模型 连通性测试 ══════════
-  let webTestStatus = null; // null | 'testing' | 'success' | 'error'
+  let webTestStatus: AiTestStatus = null;
   let webTestMessage = '';
-  let memTestStatus = null;
+  let memTestStatus: AiTestStatus = null;
   let memTestMessage = '';
 
   async function testWebSearch() {
@@ -302,7 +406,7 @@
     webTestStatus = 'testing';
     webTestMessage = '';
     try {
-      const result = await invoke('test_assistant_search', {
+      const result = await invoke<SearchTestResult>('test_assistant_search', {
         provider: config.assistant_search_provider,
         apiKey: config.assistant_search_api_key,
       });
@@ -322,7 +426,7 @@
     memTestStatus = 'testing';
     memTestMessage = '';
     try {
-      const result = await invoke('test_embedding_model', {
+      const result = await invoke<EmbeddingTestResult>('test_embedding_model', {
         provider: config.embedding_provider,
         endpoint: config.embedding_endpoint,
         model: config.embedding_model,
@@ -339,19 +443,17 @@
     }
   }
 
-  function providerInitial(id) {
+  function providerInitial(id: string): string {
     return String(id || '?').charAt(0).toUpperCase();
   }
 
   /** 卡片点击入口：复用 handleProviderChange 的缓存/默认值/状态重置逻辑。 */
-  function selectProvider(providerId) {
+  function selectProvider(providerId: ProviderId) {
     if ((config.text_model?.provider || 'ollama') === providerId) return;
-    handleProviderChange({ target: { value: providerId } });
+    handleProviderChange(providerId);
   }
 
-  function handleProviderChange(e) {
-    const providerId = e.target.value;
-
+  function handleProviderChange(providerId: ProviderId) {
     // 缓存当前 provider 配置
     if (config.text_model.provider) {
       providerConfigs[config.text_model.provider] = {
@@ -390,11 +492,11 @@
     dispatch('change', config);
   }
 
-  function shouldHideRawMessage(message) {
+  function shouldHideRawMessage(message: string): boolean {
     return currentLocale === 'en' && /[一-鿿]/.test(message);
   }
 
-  function parseTestErrorMessage(raw) {
+  function parseTestErrorMessage(raw: unknown): string | null {
     const msg = String(raw || '').trim();
     if (!msg) return null;
 
@@ -431,7 +533,7 @@
     return null;
   }
 
-  function formatTestError(raw) {
+  function formatTestError(raw: unknown): string {
     const parsed = parseTestErrorMessage(raw);
     if (parsed) return parsed;
     const rawTrimmed = String(raw || '').trim();
@@ -442,7 +544,7 @@
   async function testTextModel() {
     aiStore.startTesting();
     try {
-      const result = await invoke('test_model', {
+      const result = await invoke<ModelTestResult>('test_model', {
         modelConfig: {
           provider: config.text_model.provider,
           endpoint: config.text_model.endpoint,
@@ -477,7 +579,7 @@
 
     modelsLoading = true;
     try {
-      const models = await invoke('fetch_models', {
+      const models = await invoke<string[]>('fetch_models', {
         provider: config.text_model.provider,
         endpoint: config.text_model.endpoint,
         apiKey: config.text_model.api_key || null,
@@ -491,7 +593,7 @@
     } catch (e) {
       fetchedModels = [];
       modelsLoaded = 0;
-      const msg = e.toString();
+      const msg = String(e);
       modelsError = msg;
       aiStore.setError(
         msg && !shouldHideRawMessage(msg)
@@ -503,7 +605,7 @@
     }
   }
 
-  function getConfigHash() {
+  function getConfigHash(): string | null {
     if (!config?.text_model) return null;
     const { provider, endpoint, model, api_key } = config.text_model;
     return `${provider}|${endpoint}|${model}|${api_key || ''}`;
@@ -511,10 +613,10 @@
 
   onMount(async () => {
     refreshSemanticStats();
-    await new Promise(r => setTimeout(r, 200));
+    await new Promise<void>((resolve) => setTimeout(resolve, 200));
 
     const currentHash = getConfigHash();
-    let lastHash = null;
+    let lastHash: string | null = null;
     const unsub = aiStore.subscribe(s => { lastHash = s.lastTestedConfigHash; });
     unsub();
 
@@ -730,12 +832,12 @@
               id="ai-model"
               value={config.text_model.model}
               on:change={(e) => {
-                if (e.target.value === '__manual__') {
+                if (e.currentTarget.value === '__manual__') {
                   showManualInput = true;
                   config.text_model.model = '';
                   return;
                 }
-                config.text_model.model = e.target.value;
+                config.text_model.model = e.currentTarget.value;
                 handleChange();
               }}
               class="control-input"

@@ -1,14 +1,17 @@
-<script>
+<script lang="ts">
   import AvatarCanvas from './AvatarCanvas.svelte';
-  import { getAvatarPresetOption, normalizeAvatarPresetId } from './avatarPresetRegistry.js';
+  import { getAvatarPresetOption, normalizeAvatarPresetId } from './avatarPresetRegistry.ts';
+  import type { AvatarMode } from './avatarStateMeta.ts';
 
   export let presetId = 'original-standard';
   export let selected = false;
 
+  const previewMode: AvatarMode = 'working';
+
   $: normalizedPresetId = normalizeAvatarPresetId(presetId);
   $: presetOption = getAvatarPresetOption(normalizedPresetId);
   $: previewState = {
-    mode: 'working',
+    mode: previewMode,
     appName: 'Work Review',
     contextLabel: '办公中',
     hint: '',

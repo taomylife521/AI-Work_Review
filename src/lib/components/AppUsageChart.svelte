@@ -1,17 +1,32 @@
-<script>
+<script lang="ts">
   import { onDestroy } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { formatDurationLocalized, locale, t } from '$lib/i18n/index.js';
-  import { appIconStore, getIconCacheKey, preloadAppIcons } from '../stores/iconCache.js';
-  import { resolveAppIconSrc } from '../utils/appVisuals.js';
+  import { formatDurationLocalized, locale, t } from '$lib/i18n/index.ts';
+  import {
+    appIconStore,
+    getIconCacheKey,
+    preloadAppIcons,
+    type AppIconCacheState,
+    type AppIconInvoke,
+  } from '../stores/iconCache.ts';
+  import { resolveAppIconSrc } from '../utils/appVisuals.ts';
 
-  export let data = [];
-  export let mode = 'row';
+  interface AppUsageItem {
+    app_name: string;
+    executable_path?: string | null;
+    duration: number;
+    count?: number | null;
+  }
+
+  type AppUsageMode = 'row' | 'column';
+
+  export let data: AppUsageItem[] = [];
+  export let mode: AppUsageMode = 'row';
   export let embedded = false;
 
   // 订阅全局图标缓存
-  let appIcons = {};
-  const unsubIcons = appIconStore.subscribe(v => appIcons = v);
+  let appIcons: AppIconCacheState = {};
+  const unsubIcons = appIconStore.subscribe((value) => appIcons = value);
   onDestroy(() => unsubIcons());
 
   // 展开/收起状态
@@ -20,7 +35,7 @@
   $: currentLocale = $locale;
 
   // 格式化时长
-  function formatDuration(seconds) {
+  function formatDuration(seconds: number): string {
     currentLocale;
     return formatDurationLocalized(seconds, { compact: true });
   }
@@ -31,6 +46,10 @@
     '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1',
   ];
 
+  const invokeAppIcon: AppIconInvoke = (command, args) => (
+    invoke<string>(command, { ...args })
+  );
+
   // 数据变化时预加载图标
   $: if (data) {
     preloadAppIcons(
@@ -38,7 +57,7 @@
         appName: a.app_name,
         executablePath: a.executable_path,
       })),
-      invoke
+      invokeAppIcon
     );
   }
 

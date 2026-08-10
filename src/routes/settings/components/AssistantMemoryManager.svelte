@@ -1,14 +1,43 @@
-<script>
+<script lang="ts">
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
 
+  type MemoryType = 'preference' | 'workflow' | 'profile' | 'goal' | 'project' | 'constraint';
+  type RecallPolicy = 'always' | 'relevant' | 'manual';
+  type Sensitivity = 'normal' | 'caution';
+
+  interface UserMemory {
+    id: number;
+    memoryType: MemoryType;
+    memoryKey: string;
+    valueText: string;
+    recallPolicy: RecallPolicy;
+    sensitivity: Sensitivity;
+    sourceKind: string;
+    sourceConversationId: number | null;
+    sourceRequestId: string | null;
+    revision: number;
+    expiresAt: number | null;
+    createdAt: number;
+    updatedAt: number;
+  }
+
+  interface MemoryForm {
+    memoryType: MemoryType;
+    memoryKey: string;
+    valueText: string;
+    recallPolicy: RecallPolicy;
+    sensitivity: Sensitivity;
+    expiresAt: number | null;
+  }
+
   export let enabled = false;
-  export let t = (key) => key;
+  export let t: (key: string) => string = (key) => key;
 
   const MEMORY_LIMIT = 200;
-  const memoryTypes = ['preference', 'workflow', 'profile', 'goal', 'project', 'constraint'];
-  const recallPolicies = ['always', 'relevant', 'manual'];
-  const memoryTypeLabelKeys = {
+  const memoryTypes: MemoryType[] = ['preference', 'workflow', 'profile', 'goal', 'project', 'constraint'];
+  const recallPolicies: RecallPolicy[] = ['always', 'relevant', 'manual'];
+  const memoryTypeLabelKeys: Record<MemoryType, string> = {
     preference: 'settingsAI.assistantMemory.types.preference',
     workflow: 'settingsAI.assistantMemory.types.workflow',
     profile: 'settingsAI.assistantMemory.types.profile',
@@ -16,30 +45,30 @@
     project: 'settingsAI.assistantMemory.types.project',
     constraint: 'settingsAI.assistantMemory.types.constraint',
   };
-  const recallPolicyLabelKeys = {
+  const recallPolicyLabelKeys: Record<RecallPolicy, string> = {
     always: 'settingsAI.assistantMemory.policies.always',
     relevant: 'settingsAI.assistantMemory.policies.relevant',
     manual: 'settingsAI.assistantMemory.policies.manual',
   };
 
-  let memories = [];
+  let memories: UserMemory[] = [];
   let searchQuery = '';
-  let selectedMemoryType = '';
+  let selectedMemoryType: MemoryType | '' = '';
   let loading = false;
   let loadError = '';
   let actionError = '';
   let saveError = '';
   let saving = false;
-  let deletingId = null;
+  let deletingId: number | null = null;
   let clearing = false;
   let editorOpen = false;
-  let editingId = null;
-  let expectedRevision = null;
+  let editingId: number | null = null;
+  let expectedRevision: number | null = null;
   let mounted = false;
   let loadedForCurrentEnable = false;
   let loadRequestId = 0;
 
-  function emptyForm() {
+  function emptyForm(): MemoryForm {
     return {
       memoryType: selectedMemoryType || 'preference',
       memoryKey: '',
@@ -60,8 +89,8 @@
     form = emptyForm();
   };
 
-  const sourceReference = (memory) => {
-    const references = [];
+  const sourceReference = (memory: UserMemory) => {
+    const references: string[] = [];
     if (memory.sourceConversationId != null) {
       references.push(String(memory.sourceConversationId));
     }
@@ -71,7 +100,7 @@
     return references.join(' · ');
   };
 
-  function buildInput() {
+  function buildInput(): MemoryForm {
     return {
       memoryType: form.memoryType,
       memoryKey: form.memoryKey.trim(),
@@ -89,7 +118,7 @@
     loading = true;
     loadError = '';
     try {
-      const result = await invoke('list_user_memories', {
+      const result = await invoke<UserMemory[]>('list_user_memories', {
         memoryType: selectedMemoryType || null,
         limit: MEMORY_LIMIT,
       });
@@ -114,7 +143,7 @@
     editorOpen = true;
   }
 
-  function openEditForm(memory) {
+  function openEditForm(memory: UserMemory) {
     if (!enabled) return;
     editingId = memory.id;
     expectedRevision = memory.revision;
@@ -140,12 +169,12 @@
     saveError = '';
     try {
       if (editingId === null) {
-        const created = await invoke('create_user_memory', { input });
+        const created = await invoke<UserMemory>('create_user_memory', { input });
         if (!selectedMemoryType || created.memoryType === selectedMemoryType) {
           memories = [created, ...memories];
         }
       } else {
-        const updated = await invoke('update_user_memory', {
+        const updated = await invoke<UserMemory>('update_user_memory', {
           id: editingId,
           input,
           expectedRevision,
@@ -162,14 +191,14 @@
     }
   }
 
-  async function deleteMemory(memory) {
+  async function deleteMemory(memory: UserMemory) {
     if (!enabled) return;
     if (!window.confirm(t('settingsAI.assistantMemory.confirmDelete'))) return;
 
     deletingId = memory.id;
     actionError = '';
     try {
-      await invoke('delete_user_memory', {
+      await invoke<void>('delete_user_memory', {
         id: memory.id,
         expectedRevision: memory.revision,
       });
@@ -189,7 +218,7 @@
     clearing = true;
     actionError = '';
     try {
-      await invoke('clear_user_memories');
+      await invoke<number>('clear_user_memories');
       memories = [];
       closeEditor();
     } catch (error) {
@@ -199,7 +228,7 @@
     }
   }
 
-  function formatUpdatedAt(value) {
+  function formatUpdatedAt(value: number | null): string {
     if (value == null) return '—';
     const timestamp = typeof value === 'number' && value < 1_000_000_000_000
       ? value * 1000
@@ -215,12 +244,8 @@
     }).format(date);
   }
 
-  const typeLabel = (memoryType) =>
-    memoryTypeLabelKeys[memoryType] ? t(memoryTypeLabelKeys[memoryType]) : memoryType;
-  const policyLabel = (recallPolicy) =>
-    recallPolicyLabelKeys[recallPolicy]
-      ? t(recallPolicyLabelKeys[recallPolicy])
-      : recallPolicy;
+  const typeLabel = (memoryType: MemoryType) => t(memoryTypeLabelKeys[memoryType]);
+  const policyLabel = (recallPolicy: RecallPolicy) => t(recallPolicyLabelKeys[recallPolicy]);
 
   $: normalizedSearch = searchQuery.trim().toLocaleLowerCase();
   $: filteredMemories = normalizedSearch

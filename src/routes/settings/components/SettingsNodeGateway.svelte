@@ -1,7 +1,7 @@
-<script>
+<script lang="ts">
   import { createEventDispatcher, onMount, onDestroy } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { locale, t } from '$lib/i18n/index.js';
+  import { locale, t } from '$lib/i18n/index.ts';
   import CollapsibleSection from '../../../lib/components/CollapsibleSection.svelte';
 
   import McpServerPanel from './nodeGateway/McpServerPanel.svelte';
@@ -12,18 +12,82 @@
   import DeviceRegistryPanel from './nodeGateway/DeviceRegistryPanel.svelte';
   import ApiExamplesPanel from './nodeGateway/ApiExamplesPanel.svelte';
 
-  export let config;
-  export let dataDir;
+  interface NodeGatewaySettings {
+    device_name: string | null;
+    endpoint: string | null;
+  }
 
-  const dispatch = createEventDispatcher();
+  interface NodeDevice {
+    name: string;
+    url: string;
+    token: string;
+  }
+
+  interface NodeGatewayConfig {
+    node_gateway: NodeGatewaySettings;
+    node_devices?: NodeDevice[];
+    mcp_server_enabled: boolean;
+    localhost_api_enabled: boolean;
+    localhost_api_host: string | null;
+    localhost_api_port: number;
+    telegram_bot_enabled: boolean;
+    telegram_bot_token: string;
+    telegram_bot_proxy: string;
+    telegram_bot_allowed_chat_ids: number[];
+    feishu_bot_enabled: boolean;
+    feishu_app_id: string;
+    feishu_app_secret: string;
+    feishu_verification_token: string;
+    wecom_bot_enabled: boolean;
+    wecom_corp_id: string;
+    wecom_token: string;
+    wecom_encoding_aes_key: string;
+    dingtalk_bot_enabled: boolean;
+    dingtalk_app_secret: string;
+  }
+
+  interface NodeGatewayStatus {
+    deviceId: string;
+    protocolVersion: string;
+    deviceName: string;
+  }
+
+  interface LocalApiStatus {
+    enabled: boolean;
+    baseUrl: string;
+    tokenPreview: string;
+    lastError: string | null;
+  }
+
+  interface TelegramBotStatus {
+    starting: boolean;
+    running: boolean;
+    lastError: string | null;
+    bindCode?: string | null;
+    bindCodeExpired?: boolean;
+    allowedChatIds?: number[];
+  }
+
+  interface ToastDetail {
+    message: string;
+    type: 'success' | 'error';
+  }
+
+  export let config: NodeGatewayConfig;
+  export let dataDir: string;
+
+  const dispatch = createEventDispatcher<{
+    change: NodeGatewayConfig;
+    toast: ToastDetail;
+  }>();
   $: currentLocale = $locale;
 
-  let nodeStatus = { deviceId: '', protocolVersion: '', deviceName: '' };
-  let localStatus = { enabled: false, baseUrl: '', tokenPreview: '', lastError: null };
-  let tgBotStatus = null;
+  let nodeStatus: NodeGatewayStatus = { deviceId: '', protocolVersion: '', deviceName: '' };
+  let localStatus: LocalApiStatus = { enabled: false, baseUrl: '', tokenPreview: '', lastError: null };
+  let tgBotStatus: TelegramBotStatus | null = null;
   let loading = true;
   let saving = false;
-  let tgStatusPollId = null;
+  let tgStatusPollId: ReturnType<typeof setInterval> | null = null;
 
   $: mcpDbPath = dataDir ? `${dataDir}/work_review.db` : '';
   $: mcpConfigPath = dataDir ? `${dataDir}/config.json` : '';
@@ -63,7 +127,7 @@
 
   async function refreshTelegramBotStatus() {
     try {
-      tgBotStatus = await invoke('get_telegram_bot_status');
+      tgBotStatus = await invoke<TelegramBotStatus>('get_telegram_bot_status');
       if (tgBotStatus?.allowedChatIds) {
         config.telegram_bot_allowed_chat_ids = tgBotStatus.allowedChatIds;
       }
@@ -89,9 +153,9 @@
     loading = true;
     try {
       const [node, local, tg] = await Promise.all([
-        invoke('get_node_gateway_status'),
-        invoke('get_localhost_api_status'),
-        invoke('get_telegram_bot_status'),
+        invoke<NodeGatewayStatus>('get_node_gateway_status'),
+        invoke<LocalApiStatus>('get_localhost_api_status'),
+        invoke<TelegramBotStatus>('get_telegram_bot_status'),
       ]);
       nodeStatus = node;
       localStatus = local;
@@ -112,13 +176,13 @@
     saving = true;
     normalizeConfig();
     try {
-      await invoke('save_config', { config });
+      await invoke<void>('save_config', { config });
       dispatch('change', config);
       // Reload status after save
       const [node, local, tg] = await Promise.all([
-        invoke('get_node_gateway_status'),
-        invoke('get_localhost_api_status'),
-        invoke('get_telegram_bot_status'),
+        invoke<NodeGatewayStatus>('get_node_gateway_status'),
+        invoke<LocalApiStatus>('get_localhost_api_status'),
+        invoke<TelegramBotStatus>('get_telegram_bot_status'),
       ]);
       nodeStatus = node;
       localStatus = local;
@@ -129,7 +193,7 @@
     saving = false;
   }
 
-  function handleToast(e) {
+  function handleToast(e: CustomEvent<ToastDetail>) {
     dispatch('toast', e.detail);
   }
   function handleSave() {

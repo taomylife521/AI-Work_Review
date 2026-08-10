@@ -1,7 +1,7 @@
 # 日报 · 设计探索
 
 > 状态:**探索方案**(未定稿)。目标形态见 [`assets/report-mockup.html`](assets/report-mockup.html) 与下图;对齐基准见 [`README.md`](README.md) 与 [`overview.md`](overview.md)。
-> 现状源码:`src/routes/report/Report.svelte`(1219 行)、`report/reportSections.js`(148 行)、`report/reportMeta.js`(46 行)及 `src/app.css` 的 `report-*` 段。行号均指这些文件。
+> 现状源码:`src/routes/report/Report.svelte`(1219 行)、`report/reportSections.ts`(183 行)、`report/reportMeta.ts`(46 行)及 `src/app.css` 的 `report-*` 段。行号均指这些文件。
 
 ![日报改版 mockup](assets/report-mockup.png)
 
@@ -18,7 +18,7 @@
 | 昨日回退 | 今天无报告时自动加载昨日,并同时渲染**两条**提示横幅:页级警示横幅 + 文章卡内琥珀横幅,各带"生成今日"按钮 | 逻辑 L151–165;横幅一 L807–834;横幅二 L889–900 |
 | 段落目录 | ≥1280px 显示的 sticky 目录,IntersectionObserver 滚动高亮,点击平滑滚动 | L862–884、L520–545;断点 app.css L1772–1792 |
 | 文章卡 | 元信息行(绿/琥珀圆点 + 生成时间)→ 实时统计 4 卡(总时长/截图数/应用数/网站数,`get_daily_stats` 并行拉取)→ markdown 正文(marked + DOMPurify),按 `## ` 或 `<details>` 分段渲染 | L901–904;统计 L905–924、L95–98;渲染 L358–361、L925–970 |
-| 段落操作 | 悬停浮现:钉选(置顶排序)/隐藏(WR_BLOCK 命名块)/编辑(裸 markdown textarea 弹窗) | L936–966;弹窗 L1031–1070;排序/隐藏 reportSections.js L75–108;序号重排 L110–131 |
+| 段落操作 | 悬停浮现:钉选(置顶排序)/隐藏(WR_BLOCK 命名块)/编辑(裸 markdown textarea 弹窗) | L936–966;弹窗 L1031–1070;排序/隐藏 reportSections.ts L97–135;序号重排 L136–159 |
 | 隐藏块管理 | 有隐藏块时页头多出「管理段落」按钮,展开成正文上方一张恢复卡 | L651–663、L835–861 |
 | 空态/骨架 | 生成中骨架屏;无报告空态(✨ 生成按钮) | L974–999、L1000–1025 |
 | 批量导出 | 弹窗:本周/上周/本月/上月快捷区间 + 起止日期,合并为单个 md | L1149–1219、L301–311 |
@@ -28,7 +28,7 @@
 - **报告与统计双源**:统计 4 卡取实时 `get_daily_stats`(L95–98),正文取生成时刻的落库内容——白天重看昨晚的报告,数字可能已对不上,页面不做任何标注。
 - 统计卡顶部 accent 四色为 indigo/emerald/amber/sky(app.css L1918–1935),与分类六色无关;目录高亮、列表 marker 用 indigo 系(L1848–1867、L1869–1872)。
 - 正文列宽 52rem 居中(L1902–1905),`markdown-body h1` 2.35rem(L1970–1974)。
-- 段落结构靠 AI 输出的 `## ` 标题与 `WR_BLOCK_START` 注释约定(reportSections.js L2–7),块名映射 i18n `report.blockNames.*`。
+- 段落结构靠 AI 输出的 `## ` 标题与 `WR_BLOCK_START` 注释约定(reportSections.ts L2–3),块名映射 i18n `report.blockNames.*`。
 
 ## ② 问题清单
 
@@ -79,7 +79,7 @@ KPI         与报告同口径的 4 个答案:总投入(+42m)/ 深度冲刺(2 �
 ### 重点思考一:AI 报告的阅读版式
 
 - **文章卡保持"一个故事"纯度**:提示词设置整体迁出,收进「重新生成」按钮旁的设置抽屉(点击 ▾ 展开预设/附加提示词/系统覆盖)——配置只在要生成时出现(解 A4);隐藏块恢复入口并入同一抽屉;昨日回退只保留文章卡内一条横幅(解 A5)。
-- 字阶收敛:章节标题 16.5px/700(与卡题同阶),`h1` 降到页题以下(修 V2);序号沿用现有 CJK 重排(reportSections.js L110–131)但以"编号 + 标题"双色呈现;正文列宽维持 52rem。
+- 字阶收敛:章节标题 16.5px/700(与卡题同阶),`h1` 降到页题以下(修 V2);序号沿用现有 CJK 重排(reportSections.ts L136–159)但以"编号 + 标题"双色呈现;正文列宽维持 52rem。
 - 目录降断点到 ≥1024px,窄窗口折叠为文章卡顶部的横向锚点条(修 V4);目录底部固定显示生成元信息(时间/模式/快照状态),与正文元信息行互为冗余。
 - 段落悬停操作(钉选/隐藏/编辑)收进右上 ⋯,编辑弹窗升级为"标题 + 富文本域 + 预览"三段式(修 V3 第一半);`WR_BLOCK` 注释在编辑器中以只读块标签呈现,防误删(修 V3 第二半)。
 

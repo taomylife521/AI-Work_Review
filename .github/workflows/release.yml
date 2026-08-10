@@ -71,8 +71,11 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Run frontend type check
+        run: npm run check
+
       - name: Run frontend tests
-        run: node --test
+        run: npm run test:frontend
 
       - name: Build frontend assets for Rust tests
         run: npm run build

@@ -1,7 +1,21 @@
-<script>
-  import { t } from '$lib/i18n/index.js';
-  export let config;
-  export let nodeStatus = { deviceId: '', protocolVersion: '', deviceName: '' };
+<script lang="ts">
+  import { t } from '$lib/i18n/index.ts';
+
+  interface DeviceIdentityConfig {
+    node_gateway: {
+      device_name: string | null;
+      endpoint: string | null;
+    };
+  }
+
+  interface NodeGatewayStatus {
+    deviceId: string;
+    protocolVersion: string;
+    deviceName: string;
+  }
+
+  export let config: DeviceIdentityConfig;
+  export let nodeStatus: NodeGatewayStatus = { deviceId: '', protocolVersion: '', deviceName: '' };
 </script>
 
 <div class="settings-subsection">

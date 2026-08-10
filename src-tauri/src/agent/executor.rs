@@ -1,15 +1,13 @@
-//! Stage 3: Agent Loop — Agent 的"大脑"
+//! Agent 执行循环
 //!
 //! 核心循环：LLM 自主决定调什么工具、调几次、什么时候回答。
-//!
-//! 对应 Python: 03_agent_loop.py 里的 agent_run() 函数
-//! 架构位置：在 Tools (Stage 1) 和 Model (Stage 2) 之上
+//! 架构位置：在工具注册层和模型适配层之上。
 
 use super::events::{default_tool_label, StreamEvent, StreamEventSender};
 use super::model::{self, Message, StopReason};
 use super::tools::{
-    action_confirm_summary, requires_confirmation, AssistantRuntime, ConfirmDecision,
-    ToolRegistry, WebToolsConfig,
+    action_confirm_summary, requires_confirmation, AssistantRuntime, ConfirmDecision, ToolRegistry,
+    WebToolsConfig,
 };
 use crate::config::ModelConfig;
 use crate::database::Database;
@@ -108,14 +106,12 @@ fn build_date_context_suffix() -> String {
 }
 
 /// Agent 执行器
-///
-/// 对应 Python 的 agent_run() 函数
 pub struct AgentExecutor;
 
 impl AgentExecutor {
     /// 运行 Agent 循环
     ///
-    /// 这是整个 Agent 的心脏。逻辑和 Python 版完全一致：
+    /// 循环逻辑可以概括为以下伪代码：
     /// ```
     /// for i in 0..max_iterations:
     ///     response = llm.chat(messages, tools)

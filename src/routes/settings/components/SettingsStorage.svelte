@@ -1,24 +1,109 @@
-<script>
+<script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { ask, open as openDialog } from '@tauri-apps/plugin-dialog';
-  import { cache } from '../../../lib/stores/cache.js';
-  import { locale, t } from '$lib/i18n/index.js';
-  import { showToast } from '$lib/stores/toast.js';
+  import { cache } from '../../../lib/stores/cache.ts';
+  import { locale, t } from '$lib/i18n/index.ts';
+  import { showToast } from '$lib/stores/toast.ts';
   import CollapsibleSection from '../../../lib/components/CollapsibleSection.svelte';
+
+  interface ScreenshotStorageSettings {
+    screenshots_enabled: boolean;
+    screenshot_retention_days: number;
+    screenshot_display_mode: string;
+    screenshot_width_mode: string;
+    max_image_width: number;
+    storage_limit_mb: number;
+  }
+
+  interface S3StorageSettings {
+    endpoint?: string;
+    bucket?: string;
+    access_key?: string;
+    secret_key?: string;
+    region?: string;
+    path_prefix?: string;
+    public_url_base?: string;
+  }
+
+  interface WebDavStorageSettings {
+    url?: string;
+    username?: string;
+    password?: string;
+    path_prefix?: string;
+    public_url_base?: string;
+  }
+
+  interface RemoteStorageSettings {
+    provider: string;
+    s3: S3StorageSettings;
+    webdav: WebDavStorageSettings;
+  }
+
+  interface StorageConfig {
+    screenshot_interval: number;
+    storage: ScreenshotStorageSettings;
+    daily_report_export_dir: string | null;
+    daily_report_auto_export: boolean;
+    remote_storage?: RemoteStorageSettings;
+  }
+
+  interface StorageStats {
+    total_size_mb: number;
+    storage_limit_mb: number;
+    retention_days: number;
+    total_files: number;
+  }
+
+  interface ScreenshotMode {
+    value: string;
+    labelKey: string;
+    descriptionKey: string;
+  }
+
+  interface LocalizedScreenshotMode extends ScreenshotMode {
+    label: string;
+    description: string;
+  }
+
+  interface ChangeDataDirResult {
+    dataDir: string;
+    oldDataDir?: string;
+    copiedFiles: number;
+    replacedExistingData?: boolean;
+    message: string;
+  }
+
+  interface ClearOldActivitiesResult {
+    deleted_activities: number;
+    deleted_screenshots: number;
+    failed_screenshot_paths: string[];
+    kept_dates: string[];
+    message: string;
+  }
+
+  interface CleanupOldDataDirResult {
+    removedEntries: number;
+    preservedEntries: string[];
+    message: string;
+  }
   
-  export let config;
-  export let storageStats = null;
+  export let config: StorageConfig;
+  export let storageStats: StorageStats | null = null;
   export let dataDir = '';
   export let defaultDataDir = '';
   
-  const dispatch = createEventDispatcher();
+  const dispatch = createEventDispatcher<{
+    change: StorageConfig;
+    clearCache: void;
+    dataDirChanged: ChangeDataDirResult;
+  }>();
   $: currentLocale = $locale;
   let isClearing = false;
   let isMigrating = false;
   let isCleaningPreviousDir = false;
   let cleanupCandidateDir = '';
-  let localizedScreenshotModes = [];
+  let localizedScreenshotModes: LocalizedScreenshotMode[] = [];
   let screenshotIntervalLabel = '';
   let retentionDaysLabel = '';
   let storageRetentionLabel = '';
@@ -27,7 +112,7 @@
   let s3SecretKeyVisible = false;
   let s3AccessKeyVisible = false;
   let webdavPasswordVisible = false;
-  const screenshotModes = [
+  const screenshotModes: ScreenshotMode[] = [
     {
       value: 'active_window',
       labelKey: 'settingsStorage.modeActiveWindow',
@@ -66,7 +151,7 @@
     
     isClearing = true;
     try {
-      await invoke('clear_old_activities');
+      await invoke<ClearOldActivitiesResult>('clear_old_activities');
       showToast(t('settingsStorage.clearDone'), 'success');
       cache.clear();
       dispatch('clearCache');
@@ -77,7 +162,7 @@
     }
   }
 
-  async function migrateToDataDir(targetDir) {
+  async function migrateToDataDir(targetDir: string) {
     const nextDir = targetDir?.trim();
     if (!nextDir) {
       return;
@@ -102,7 +187,7 @@
 
     isMigrating = true;
     try {
-      const result = await invoke('change_data_dir', { targetDir: nextDir });
+      const result = await invoke<ChangeDataDirResult>('change_data_dir', { targetDir: nextDir });
       cleanupCandidateDir = result?.oldDataDir || dataDir;
       showToast(t('settingsStorage.migrated'), 'success');
       dispatch('dataDirChanged', result);
@@ -133,7 +218,7 @@
 
   async function openCurrentDataDir() {
     try {
-      await invoke('open_data_dir');
+      await invoke<void>('open_data_dir');
     } catch (e) {
       showToast(t('settingsStorage.openDirFailed', { error: e }), 'error');
     }
@@ -159,7 +244,7 @@
 
     isCleaningPreviousDir = true;
     try {
-      await invoke('cleanup_old_data_dir', { targetDir });
+      await invoke<CleanupOldDataDirResult>('cleanup_old_data_dir', { targetDir });
       cleanupCandidateDir = '';
       showToast(t('settingsStorage.oldDirCleaned'), 'success');
     } catch (e) {
@@ -169,7 +254,7 @@
     }
   }
 
-  function handleChange() {
+  function handleChange(_event?: Event) {
     dispatch('change', config);
   }
 
@@ -198,7 +283,7 @@
     try {
       // 传入表单当前值直接测试：设置需点「保存」才落盘，若测已保存配置，
       // 用户填完表单未保存就点测试会误报「未配置远程存储」
-      const result = await invoke('test_remote_storage', {
+      const result = await invoke<string>('test_remote_storage', {
         remoteStorage: config.remote_storage,
       });
       showToast(result, 'success');

@@ -1,7 +1,7 @@
 # 助手(Ask)页设计探索
 
 > 基准:`/home/user/out/overview-redesign-mockup.html` 五原则(①答案优先 ②一个故事一张卡 ③层级=洞察→KPI→主视觉→明细 ④模式差异化 ⑤视觉 token)。
-> 现状源码:`src/routes/ask/Ask.svelte`(1143 行);流式事件归约、历史载荷、请求闸门拆在 `streamEvent.js / historyPayload.js / requestEventGate.js`(Ask.svelte L8–10)。
+> 现状源码:`src/routes/ask/Ask.svelte`(1211 行);流式事件归约、历史载荷、请求闸门拆在 `streamEvent.ts / historyPayload.ts / requestEventGate.ts`(Ask.svelte L8–12)。
 > Mockup:`assets/assistant-mockup.html`(会话中态:流式消息 + 数据引用卡)。
 
 ## 一、现状盘点
@@ -74,7 +74,7 @@
 | 2 | 删除会话:垃圾桶图标+二段确认 | 小 | Ask.svelte L1128–1135、L495–505 |
 | 3 | 发送/停止合一;失败消息加「重试」 | 小 | Ask.svelte L1025–1072、L704–715 |
 | 4 | 引用卡默认平铺前 3 条、可点击跳时间线 | 中 | Ask.svelte L926–953;时间线路由接收 `?t=` 定位参数 |
-| 5 | 步骤条合并为单行过程摘要 | 中 | Ask.svelte L845–916 重构;streamEvent.js 增加汇总态 |
+| 5 | 步骤条合并为单行过程摘要 | 中 | Ask.svelte L845–916 重构;streamEvent.ts 增加汇总态 |
 | 6 | 历史抽屉增强(分组/时间/预览/重命名) | 中 | Ask.svelte L1081–1143;后端 `list_assistant_conversations` 补 updated_at/last_excerpt,新增 rename 命令 |
 | 7 | 上下文范围 chip | 中 | Ask.svelte 页头新增;`chat_work_assistant` 增加 scope 入参(后端) |
 | 8 | 模型选择器自绘胶囊 | 中 | 新组件;替换 L1011–1023,删除测宽 hack L134–155 |

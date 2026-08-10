@@ -1,8 +1,8 @@
-<script>
+<script lang="ts">
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { showToast } from '$lib/stores/toast.js';
-  import { locale, t } from '$lib/i18n/index.js';
+  import { showToast } from '$lib/stores/toast.ts';
+  import { locale, t } from '$lib/i18n/index.ts';
   import {
     AVATAR_OPACITY_DEFAULT,
     AVATAR_SCALE_DEFAULT,
@@ -15,14 +15,44 @@
     toggleAvatarSetting,
     updateAvatarOpacitySetting,
     updateAvatarScaleSetting,
-  } from '$lib/utils/avatarToggle.js';
-  import { AVATAR_PRESET_OPTIONS } from '$lib/components/Avatar/avatarPresetRegistry.js';
+  } from '$lib/utils/avatarToggle.ts';
+  import type { AvatarToggleUiState } from '$lib/utils/avatarToggle.ts';
+  import {
+    AVATAR_PRESET_OPTIONS,
+    type AvailableAvatarPresetId,
+  } from '$lib/components/Avatar/avatarPresetRegistry.ts';
   import AvatarPresetPreview from '$lib/components/Avatar/AvatarPresetPreview.svelte';
 
-  export let config;
-  export let mode = 'full';
+  type AppearanceMode = 'full' | 'avatar-only' | 'background-only';
+  type AvatarPersona = 'companion' | 'assistant' | 'coach';
+  type UiVisualStyle = 'a' | 'b' | 'c';
 
-  const dispatch = createEventDispatcher();
+  interface AppearanceConfig {
+    avatar_enabled: boolean;
+    avatar_scale?: number | null;
+    avatar_opacity?: number | null;
+    avatar_persona: AvatarPersona;
+    avatar_preset: AvailableAvatarPresetId;
+    avatar_click_through: boolean;
+    avatar_body_hidden: boolean;
+    avatar_proactive_ai_enabled: boolean;
+    break_reminder_enabled: boolean;
+    break_reminder_interval_minutes: number;
+    ui_visual_style: UiVisualStyle;
+    background_image: string | null;
+    background_opacity?: number | null;
+    background_blur?: number | null;
+  }
+
+  type AppearanceChangeDetail = AppearanceConfig | {
+    autosaved: true;
+    config: AppearanceConfig;
+  };
+
+  export let config: AppearanceConfig;
+  export let mode: AppearanceMode = 'full';
+
+  const dispatch = createEventDispatcher<{ change: AppearanceChangeDetail }>();
   $: currentLocale = $locale;
   $: showAvatarControls = mode === 'full' || mode === 'avatar-only';
   $: showInterfaceStyleSettings = mode === 'full' || mode === 'background-only';
@@ -34,10 +64,15 @@
   let avatarPersonaSaving = false;
   let avatarPresetSaving = false;
   let uiVisualStyleSaving = false;
-  let avatarScaleTimer = null;
-  let avatarOpacityTimer = null;
+  let avatarScaleTimer: ReturnType<typeof setTimeout> | null = null;
+  let avatarOpacityTimer: ReturnType<typeof setTimeout> | null = null;
   const breakReminderIntervals = [30, 45, 50, 60, 90, 120];
-  const UI_VISUAL_STYLE_OPTIONS = [
+  const UI_VISUAL_STYLE_OPTIONS: readonly {
+    id: UiVisualStyle;
+    titleKey: string;
+    descriptionKey: string;
+    badgeKey: string;
+  }[] = [
     {
       id: 'a',
       titleKey: 'settingsAppearance.uiStyleATitle',
@@ -57,7 +92,11 @@
       badgeKey: 'settingsAppearance.uiStyleCBadge',
     },
   ];
-  const AVATAR_PERSONA_OPTIONS = [
+  const AVATAR_PERSONA_OPTIONS: readonly {
+    id: AvatarPersona;
+    titleKey: string;
+    descriptionKey: string;
+  }[] = [
     {
       id: 'companion',
       titleKey: 'settingsAppearance.avatarPersonaCompanionTitle',
@@ -74,10 +113,10 @@
       descriptionKey: 'settingsAppearance.avatarPersonaCoachDesc',
     },
   ];
-  let blurLabels = [];
-  let avatarToggleUi;
+  let blurLabels: string[] = [];
+  let avatarToggleUi: AvatarToggleUiState = getAvatarToggleUiState(false);
   // === 背景图片 ===
-  let bgPreview = null;
+  let bgPreview: string | null = null;
   let bgUploading = false;
   let appearanceDestroyed = false;
 
@@ -100,7 +139,7 @@
   onMount(async () => {
     if (showBackgroundSettings) {
       try {
-        const b64 = await invoke('get_background_image');
+        const b64 = await invoke<string | null>('get_background_image');
         if (b64) bgPreview = `data:image/jpeg;base64,${b64}`;
       } catch (e) { /* ignore */ }
     }
@@ -108,8 +147,8 @@
 
   onDestroy(() => {
     appearanceDestroyed = true;
-    clearTimeout(avatarScaleTimer);
-    clearTimeout(avatarOpacityTimer);
+    if (avatarScaleTimer !== null) clearTimeout(avatarScaleTimer);
+    if (avatarOpacityTimer !== null) clearTimeout(avatarOpacityTimer);
   });
 
   async function toggleAvatarMode() {
@@ -122,14 +161,14 @@
     try {
       if (config.avatar_enabled) {
         try {
-          await invoke('persist_avatar_position');
+          await invoke<void>('persist_avatar_position');
         } catch (persistError) {
           console.warn('关闭桌面助手前持久化位置失败:', persistError);
         }
       }
 
       const enabled = await toggleAvatarSetting(config, async (nextConfig) => {
-        await invoke('save_config', { config: nextConfig });
+        await invoke<void>('save_config', { config: nextConfig });
       });
 
       dispatch('change', config);
@@ -142,14 +181,14 @@
     }
   }
 
-  function queueAvatarScaleSave(nextScale) {
-    clearTimeout(avatarScaleTimer);
+  function queueAvatarScaleSave(nextScale: number) {
+    if (avatarScaleTimer !== null) clearTimeout(avatarScaleTimer);
     avatarScaleTimer = setTimeout(async () => {
       avatarScaleSaving = true;
 
       try {
         const savedScale = await updateAvatarScaleSetting(config, nextScale, async (nextConfig) => {
-          await invoke('save_config', { config: nextConfig });
+          await invoke<void>('save_config', { config: nextConfig });
         });
         config.avatar_scale = savedScale;
         dispatch('change', config);
@@ -162,15 +201,17 @@
     }, 120);
   }
 
-  function handleAvatarScaleInput(event) {
-    const nextScale = clampAvatarScale(Number(event.currentTarget.value));
+  function handleAvatarScaleInput(event: Event) {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) return;
+    const nextScale = clampAvatarScale(Number(input.value));
     config.avatar_scale = nextScale;
     dispatch('change', config);
     queueAvatarScaleSave(nextScale);
   }
 
-  function queueAvatarOpacitySave(nextOpacity) {
-    clearTimeout(avatarOpacityTimer);
+  function queueAvatarOpacitySave(nextOpacity: number) {
+    if (avatarOpacityTimer !== null) clearTimeout(avatarOpacityTimer);
     avatarOpacityTimer = setTimeout(async () => {
       avatarOpacitySaving = true;
 
@@ -179,7 +220,7 @@
           config,
           nextOpacity,
           async (nextConfig) => {
-            await invoke('save_config', { config: nextConfig });
+            await invoke<void>('save_config', { config: nextConfig });
           }
         );
         config.avatar_opacity = savedOpacity;
@@ -193,14 +234,16 @@
     }, 120);
   }
 
-  function handleAvatarOpacityInput(event) {
-    const nextOpacity = clampAvatarOpacity(Number(event.currentTarget.value));
+  function handleAvatarOpacityInput(event: Event) {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) return;
+    const nextOpacity = clampAvatarOpacity(Number(input.value));
     config.avatar_opacity = nextOpacity;
     dispatch('change', config);
     queueAvatarOpacitySave(nextOpacity);
   }
 
-  async function selectAvatarPreset(presetId) {
+  async function selectAvatarPreset(presetId: AvailableAvatarPresetId) {
     if (avatarPresetSaving || config.avatar_preset === presetId) {
       return;
     }
@@ -211,7 +254,7 @@
     dispatch('change', config);
 
     try {
-      await invoke('save_config', { config });
+      await invoke<void>('save_config', { config });
     } catch (e) {
       config.avatar_preset = previousPreset;
       dispatch('change', config);
@@ -222,7 +265,7 @@
     }
   }
 
-  async function selectAvatarPersona(personaId) {
+  async function selectAvatarPersona(personaId: AvatarPersona) {
     if (avatarPersonaSaving || config.avatar_persona === personaId) {
       return;
     }
@@ -233,7 +276,7 @@
     dispatch('change', config);
 
     try {
-      await invoke('save_config', { config });
+      await invoke<void>('save_config', { config });
     } catch (e) {
       config.avatar_persona = previousPersona;
       dispatch('change', config);
@@ -244,7 +287,7 @@
     }
   }
 
-  async function selectUiVisualStyle(styleId) {
+  async function selectUiVisualStyle(styleId: UiVisualStyle) {
     if (uiVisualStyleSaving || config.ui_visual_style === styleId) {
       return;
     }
@@ -259,7 +302,7 @@
     }));
 
     try {
-      await invoke('save_config', { config });
+      await invoke<void>('save_config', { config });
     } catch (e) {
       config.ui_visual_style = previousStyle;
       dispatch('change', { autosaved: true, config });
@@ -298,8 +341,10 @@
     saveConfigQuietly();
   }
 
-  function handleBgFileSelect(event) {
-    const file = event.target.files?.[0];
+  function handleBgFileSelect(event: Event) {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) return;
+    const file = input.files?.[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) return;
     if (file.size > 10 * 1024 * 1024) {
@@ -317,11 +362,11 @@
         if (!b64Data) {
           throw new Error(t('settingsAppearance.imageReadFailed'));
         }
-        await invoke('save_background_image', { data: b64Data });
+        await invoke<void>('save_background_image', { data: b64Data });
         if (appearanceDestroyed) return;
         config.background_image = 'background.jpg';
-        await invoke('save_config', { config });
-        const freshB64 = await invoke('get_background_image');
+        await invoke<void>('save_config', { config });
+        const freshB64 = await invoke<string | null>('get_background_image');
         if (appearanceDestroyed) return;
         const imageUrl = freshB64 ? `data:image/jpeg;base64,${freshB64}` : null;
         bgPreview = imageUrl;
@@ -341,32 +386,32 @@
 
   async function clearBg() {
     try {
-      await invoke('clear_background_image');
+      await invoke<void>('clear_background_image');
       bgPreview = null;
       config.background_image = null;
       dispatchBgEvent(null);
-      await invoke('save_config', { config });
+      await invoke<void>('save_config', { config });
     } catch (e) {
       console.error('清除背景图失败:', e);
       showToast(t('settingsAppearance.clearFailed', { error: e }), 'error');
     }
   }
 
-  function updateBgOpacity(val) {
-    config.background_opacity = parseFloat(val);
+  function updateBgOpacity(val: string | number) {
+    config.background_opacity = parseFloat(String(val));
     dispatch('change', config);
     dispatchBgEvent(bgPreview);
     saveConfigQuietly();
   }
 
-  function updateBgBlur(val) {
-    config.background_blur = parseInt(val);
+  function updateBgBlur(val: string | number) {
+    config.background_blur = parseInt(String(val), 10);
     dispatch('change', config);
     dispatchBgEvent(bgPreview);
     saveConfigQuietly();
   }
 
-  function dispatchBgEvent(image) {
+  function dispatchBgEvent(image: string | null) {
     window.dispatchEvent(new CustomEvent('background-changed', {
       detail: {
         image,
@@ -378,7 +423,7 @@
 
   async function saveConfigQuietly() {
     try {
-      await invoke('save_config', { config });
+      await invoke<void>('save_config', { config });
     } catch (e) {
       console.error('自动保存配置失败:', e);
     }
@@ -768,7 +813,7 @@
           max="0.60"
           step="0.01"
           value={config.background_opacity ?? 0.25}
-          on:input={(e) => updateBgOpacity(e.target.value)}
+          on:input={(e) => updateBgOpacity(e.currentTarget.value)}
           class="range-input"
         />
         <div class="flex justify-between text-[10px] settings-subtle">

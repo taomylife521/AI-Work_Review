@@ -1,19 +1,40 @@
-<script>
+<script lang="ts">
   import { link, location } from 'svelte-spa-router';
   import { invoke } from '@tauri-apps/api/core';
   import { emitTo } from '@tauri-apps/api/event';
   import { createEventDispatcher } from 'svelte';
-  import { getLocaleLabel, locale, setLocale, t } from '$lib/i18n/index.js';
+  import {
+    getLocaleLabel,
+    locale,
+    setLocale,
+    t,
+    type InterpolationParams,
+    type Locale,
+  } from '$lib/i18n/index.ts';
+
+  type Theme = 'system' | 'light' | 'dark';
+
+  interface NavItem {
+    path: string;
+    labelKey: string;
+    icon: 'home' | 'timeline' | 'report' | 'ask' | 'settings' | 'info';
+  }
+
+  interface LocaleOption {
+    value: Locale;
+    label: string;
+    fullLabelKey: string;
+  }
 
   export let isRecording = true;
   export let isPaused = false;
-  export let theme = 'system';
+  export let theme: Theme = 'system';
   
-  const dispatch = createEventDispatcher();
+  const dispatch = createEventDispatcher<{ themeChange: Theme }>();
   let localeMenuOpen = false;
-  let localeMenuContainer;
+  let localeMenuContainer: HTMLElement | null = null;
 
-  const navItems = [
+  const navItems: NavItem[] = [
     { path: '/', labelKey: 'sidebar.nav.overview', icon: 'home' },
     { path: '/timeline', labelKey: 'sidebar.nav.timeline', icon: 'timeline' },
     { path: '/report', labelKey: 'sidebar.nav.report', icon: 'report' },
@@ -23,11 +44,11 @@
   ];
 
   $: currentLocale = $locale;
-  $: translate = (key, params = {}) => {
+  $: translate = (key: string, params: InterpolationParams = {}) => {
     currentLocale;
     return t(key, params);
   };
-  const localeOptionsBase = [
+  const localeOptionsBase: LocaleOption[] = [
     { value: 'zh-CN', label: 'ZH', fullLabelKey: 'sidebar.localeNames.zhCN' },
     { value: 'en', label: 'EN', fullLabelKey: 'sidebar.localeNames.en' },
     { value: 'zh-TW', label: 'TW', fullLabelKey: 'sidebar.localeNames.zhTW' },
@@ -39,18 +60,18 @@
   }));
   $: currentLocaleLabel = getLocaleLabel(currentLocale);
 
-  function cycleTheme() {
-    const themes = ['system', 'light', 'dark'];
+  function cycleTheme(): void {
+    const themes: Theme[] = ['system', 'light', 'dark'];
     const currentIndex = themes.indexOf(theme);
-    const nextTheme = themes[(currentIndex + 1) % themes.length];
+    const nextTheme = themes[(currentIndex + 1) % themes.length] ?? 'system';
     dispatch('themeChange', nextTheme);
   }
 
-  function toggleLocaleMenu() {
+  function toggleLocaleMenu(): void {
     localeMenuOpen = !localeMenuOpen;
   }
 
-  function selectLocale(nextLocale) {
+  function selectLocale(nextLocale: Locale): void {
     const normalizedLocale = setLocale(nextLocale);
     localeMenuOpen = false;
     emitTo('avatar', 'locale-changed', normalizedLocale).catch((error) => {
@@ -61,15 +82,18 @@
     });
   }
 
-  function handleWindowClick(event) {
-    if (!localeMenuOpen || localeMenuContainer?.contains(event.target)) {
+  function handleWindowClick(event: MouseEvent): void {
+    if (
+      !localeMenuOpen
+      || (event.target instanceof Node && localeMenuContainer?.contains(event.target))
+    ) {
       return;
     }
 
     localeMenuOpen = false;
   }
 
-  function handleWindowKeydown(event) {
+  function handleWindowKeydown(event: KeyboardEvent): void {
     if (event.key === 'Escape') {
       localeMenuOpen = false;
     }
@@ -87,7 +111,7 @@
     }
   }
 
-  $: activeStates = navItems.reduce((acc, item) => {
+  $: activeStates = navItems.reduce<Record<string, boolean>>((acc, item) => {
     const loc = $location || '/';
     if (item.path === '/') {
       acc[item.path] = loc === '/';

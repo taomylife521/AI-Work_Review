@@ -1,38 +1,109 @@
-<script>
+<script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { listen } from '@tauri-apps/api/event';
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { open } from '@tauri-apps/plugin-shell';
   import { ask, save as saveDialog } from '@tauri-apps/plugin-dialog';
-  import { cache } from '../../lib/stores/cache.js';
-  import { recordingStore, isActiveRecording } from '../../lib/stores/recording.js';
-  import { showToast } from '../../lib/stores/toast.js';
-  import { appIconStore, getIconCacheKey, preloadAppIcons } from '../../lib/stores/iconCache.js';
-  import { categoryStore, hexToRGBA } from '../../lib/stores/categories.js';
+  import { cache } from '../../lib/stores/cache.ts';
+  import { recordingStore, isActiveRecording } from '../../lib/stores/recording.ts';
+  import { showToast } from '../../lib/stores/toast.ts';
+  import {
+    appIconStore,
+    getIconCacheKey,
+    preloadAppIcons,
+    type AppIconCacheState,
+    type AppIconInvoke,
+  } from '../../lib/stores/iconCache.ts';
+  import {
+    categoryStore,
+    hexToRGBA,
+    type CategoryInfo,
+    type CategoryMeta,
+  } from '../../lib/stores/categories.ts';
   import {
     formatDurationLocalized,
     formatLocalizedTime,
     locale,
     t,
     translateCategoryLabel,
-  } from '$lib/i18n/index.js';
-  import { formatUserError } from '$lib/utils/errorDisplay.js';
-  import { trapFocus } from '$lib/utils/focusTrap.js';
-  import { isValidLocalDateString } from '$lib/utils/dateValidation.js';
+  } from '$lib/i18n/index.ts';
+  import { formatUserError } from '$lib/utils/errorDisplay.ts';
+  import { trapFocus } from '$lib/utils/focusTrap.ts';
+  import { isValidLocalDateString } from '$lib/utils/dateValidation.ts';
   import {
     getPreferredTimelineAppName,
     shouldPreferTimelineFallbackIcon,
-  } from '$lib/utils/appDisplay.js';
-  import { resolveAppIconSrc } from '../../lib/utils/appVisuals.js';
-  import { formatBrowserUrlForDisplay } from '../../lib/utils/browserUrl.js';
-  import { getViewportPopoverPlacement } from '../../lib/utils/popoverPosition.js';
-  import { prepareTimelineActivities, upsertTimelineActivity } from './timelineData.js';
+  } from '$lib/utils/appDisplay.ts';
+  import { resolveAppIconSrc } from '../../lib/utils/appVisuals.ts';
+  import { formatBrowserUrlForDisplay } from '../../lib/utils/browserUrl.ts';
+  import { getViewportPopoverPlacement } from '../../lib/utils/popoverPosition.ts';
+  import {
+    isTimelineActivity,
+    parseTimelineActivities,
+    prepareTimelineActivities,
+    upsertTimelineActivity,
+    type TimelineActivity,
+  } from './timelineData.ts';
+  import {
+    parseHourlySummaryRecords,
+    type HourlySummaryRecord,
+  } from './summaryPresentation.ts';
   import LocalizedDatePicker from '../../lib/components/LocalizedDatePicker.svelte';
   import HourlySummaryDrawer from './HourlySummaryDrawer.svelte';
-  import { confirm } from '../../lib/stores/confirm.js';
+  import { confirm } from '../../lib/stores/confirm.ts';
+
+  type PrivacyLevel = 'full' | 'anonymized' | 'ignored';
+  type CleanupMode = 'date' | 'range' | 'app';
+
+  interface TimelineActivityDetail extends TimelineActivity {
+    thumbnail?: string | null;
+    thumbnailLoading?: boolean;
+    _privacyLevel?: PrivacyLevel;
+  }
+
+  interface TimelineFocusPayload {
+    date?: unknown;
+  }
+
+  interface CategoryChoice {
+    key: string;
+    name: string;
+  }
+
+  interface PendingCategoryChange {
+    activity: TimelineActivity;
+    category: string;
+    categoryName: string;
+  }
+
+  interface PendingPrivacyRule {
+    level: PrivacyLevel;
+    levelLabel: string;
+  }
+
+  interface PrivacyRule {
+    app_name: string;
+    level: PrivacyLevel;
+  }
+
+  interface TimelineConfig {
+    privacy?: {
+      app_rules?: PrivacyRule[];
+    };
+  }
+
+  interface CleanupResult {
+    deleted?: number;
+  }
+
+  const invokeAppIcon: AppIconInvoke = (command, args) =>
+    invoke<string>(command, {
+      appName: args.appName,
+      executablePath: args.executablePath,
+    });
 
   // 获取本地日期（避免 UTC 时区问题）
-  function getLocalDateString() {
+  function getLocalDateString(): string {
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -40,56 +111,62 @@
     return `${year}-${month}-${day}`;
   }
 
-  let activities = [];
-  let hourlySummaries = [];
+  let activities: TimelineActivity[] = [];
+  let hourlySummaries: HourlySummaryRecord[] = [];
   let loading = true;
-  let error = null;
+  let error: string | null = null;
   let selectedDate = getLocalDateString();
-  let selectedActivity = null;
+  let selectedActivity: TimelineActivityDetail | null = null;
   let showSummaryDrawer = false;
   let summaryRefreshing = false;
-  let summaryRefreshError = null;
+  let summaryRefreshError: string | null = null;
   let summaryRefreshRequestId = 0;
-  let summaryTrigger;
-  let detailTrigger;
-  let detailCloseButton;
-  let categoryTrigger;
-  let categoryPopover;
+  let summaryTrigger: HTMLButtonElement | null = null;
+  let detailTrigger: HTMLButtonElement | null = null;
+  let detailCloseButton: HTMLButtonElement | null = null;
+  let categoryTrigger: HTMLButtonElement | null = null;
+  let categoryPopover: HTMLElement | null = null;
   let categoryPopoverStyle = '';
   let showCategoryPopover = false;
-  let unlisten = null;
+  let unlisten: UnlistenFn | null = null;
   let componentDestroyed = false;
   let currentTime = new Date();
-  let clockInterval;
-  let handleVisibilityChange;
-  let handleTimelineFocus;
-  let appIcons = {};
-  let failedTimelineIconKeys = new Set();
+  let clockInterval: ReturnType<typeof setInterval> | null = null;
+  let handleVisibilityChange: (() => void) | null = null;
+  let handleTimelineFocus: EventListener | null = null;
+  let appIcons: AppIconCacheState = {};
+  let failedTimelineIconKeys = new Set<string>();
 
   // LRU 缓存：防止长时间运行内存无限增长
   // 缩略图 ~80KB/条，60 条 ≈ 5MB；高清图 ~300KB/条，20 条 ≈ 6MB
   const THUMBNAIL_CACHE_LIMIT = 60;
   const FULLIMAGE_CACHE_LIMIT = 20;
-  let thumbnailCache = {};
-  let thumbnailKeys = [];   // 插入顺序追踪，用于淘汰最旧条目
-  let fullImageCache = {};
-  let fullImageKeys = [];
+  let thumbnailCache: Record<string, string> = {};
+  let thumbnailKeys: string[] = [];   // 插入顺序追踪，用于淘汰最旧条目
+  let fullImageCache: Record<string, string> = {};
+  let fullImageKeys: string[] = [];
   $: currentLocale = $locale;
 
   // 向 LRU 缓存中写入，超出上限时淘汰最旧条目释放内存
-  function lruSet(cache, keys, limit, key, value) {
-    if (!(key in cache)) {
+  function lruSet(
+    targetCache: Record<string, string>,
+    keys: string[],
+    limit: number,
+    key: string,
+    value: string,
+  ): void {
+    if (!(key in targetCache)) {
       keys.push(key);
     }
-    cache[key] = value;
+    targetCache[key] = value;
     while (keys.length > limit) {
       const evicted = keys.shift();
-      delete cache[evicted];
+      if (evicted !== undefined) delete targetCache[evicted];
     }
   }
 
   // 清空图片缓存（日期切换时调用，释放旧数据占用的内存）
-  function clearImageCaches() {
+  function clearImageCaches(): void {
     thumbnailCache = {};
     thumbnailKeys = [];
     fullImageCache = {};
@@ -98,7 +175,7 @@
 
   const unsubIcons = appIconStore.subscribe(v => appIcons = v);
 
-  function readTimelineQuery() {
+  function readTimelineQuery(): URLSearchParams {
     if (typeof window === 'undefined') {
       return new URLSearchParams();
     }
@@ -110,17 +187,17 @@
     return new URLSearchParams(search);
   }
 
-  function readRequestedTimelineDate() {
+  function readRequestedTimelineDate(): string | null {
     const nextDate = readTimelineQuery().get('date');
     return nextDate && isValidLocalDateString(nextDate) ? nextDate : null;
   }
 
-  function readRequestedSummaryOpen() {
+  function readRequestedSummaryOpen(): boolean {
     return readTimelineQuery().get('summary') === '1';
   }
 
   // summary=1 只作为一次性的旧路由兼容指令，消费后立即从地址中移除。
-  function consumeRequestedSummaryOpen() {
+  function consumeRequestedSummaryOpen(): void {
     if (typeof window === 'undefined') return;
 
     const params = readTimelineQuery();
@@ -139,7 +216,7 @@
     );
   }
 
-  function applyTimelineFocus(payload) {
+  function applyTimelineFocus(payload: TimelineFocusPayload): void {
     const nextDate =
       typeof payload?.date === 'string' && isValidLocalDateString(payload.date)
         ? payload.date
@@ -172,7 +249,7 @@
   let renameCategoryColor = '#6366f1';
   let renameCategoryIcon = '🏷️';
 
-  function startRenameCategory(cat) {
+  function startRenameCategory(cat: CategoryInfo): void {
     renameCategoryKey = cat.key;
     renameCategoryName = cat.name;
     renameCategoryColor = cat.color;
@@ -195,15 +272,15 @@
       showRenameCategory = false;
       showToast(t('timeline.categoryRenamed'), 'success');
     } catch (e) {
-      showToast(e.toString(), 'error');
+      showToast(String(e), 'error');
     } finally {
       categorySaving = false;
     }
   }
 
   // 创建分类后的应用确认（内联渲染，确保在详情弹窗之上）
-  let pendingApplyCategory = null; // { key, name }
-  function cancelApplyCategory() { pendingApplyCategory = null; }
+  let pendingApplyCategory: CategoryChoice | null = null;
+  function cancelApplyCategory(): void { pendingApplyCategory = null; }
   async function confirmApplyCategory() {
     if (!pendingApplyCategory || !selectedActivity) return;
     const { key } = pendingApplyCategory;
@@ -212,8 +289,8 @@
   }
 
   // 修改分类确认（内联渲染，替代全局 confirm）
-  let pendingChangeCategory = null; // { activity, category, categoryName }
-  function cancelChangeCategory() { pendingChangeCategory = null; }
+  let pendingChangeCategory: PendingCategoryChange | null = null;
+  function cancelChangeCategory(): void { pendingChangeCategory = null; }
   async function confirmChangeCategory() {
     if (!pendingChangeCategory) return;
     const { activity, category } = pendingChangeCategory;
@@ -222,7 +299,10 @@
   }
 
   // 弹出确认 → 用户点击分类按钮时触发
-  async function changeAppCategory(activity, nextCategory) {
+  async function changeAppCategory(
+    activity: TimelineActivity | null,
+    nextCategory: string,
+  ): Promise<void> {
     if (!activity || !nextCategory || categorySaving) return;
     if ((activity.category || 'other') === nextCategory) return;
     const targetInfo = getCategoryMeta(nextCategory);
@@ -233,21 +313,21 @@
     };
   }
 
-  function selectActivityCategory(nextCategory) {
+  function selectActivityCategory(nextCategory: string): void {
     prepareCategoryConfirmation();
     changeAppCategory(selectedActivity, nextCategory);
   }
 
   // 从分类 Popover 进入二次确认前，先把焦点交还给稳定存在的分类入口。
   // 确认层的 trapFocus 会记录该入口，并在关闭时自动恢复焦点。
-  function prepareCategoryConfirmation() {
+  function prepareCategoryConfirmation(): void {
     showCategoryPopover = false;
     categoryPopoverStyle = '';
     categoryTrigger?.focus();
   }
 
   // 保存期间分类入口会暂时禁用；恢复可用后，仅在焦点无人接管时重新聚焦。
-  async function restoreCategoryTriggerAfterSaving() {
+  async function restoreCategoryTriggerAfterSaving(): Promise<void> {
     await tick();
     if (!selectedActivity || !categoryTrigger || typeof document === 'undefined') return;
 
@@ -262,7 +342,10 @@
   }
 
   // 确认后实际执行分类修改
-  async function doChangeAppCategory(activity, nextCategory) {
+  async function doChangeAppCategory(
+    activity: TimelineActivity,
+    nextCategory: string,
+  ): Promise<void> {
     categorySaving = true;
     try {
       const targetInfo = getCategoryMeta(nextCategory);
@@ -270,7 +353,7 @@
         appName: activity.app_name,
         category: nextCategory,
         syncHistory: true,
-      });
+      }) as number;
 
       const appMatchKey = normalizeAppMatchKey(activity.app_name);
       activities = activities.map((item) =>
@@ -310,13 +393,13 @@
 
   // 隐私规则快捷设置
   let privacySaving = false;
-  let pendingPrivacyRule = null; // { level, levelLabel }
+  let pendingPrivacyRule: PendingPrivacyRule | null = null;
 
-  function getCurrentPrivacyLevel(appName) {
+  function getCurrentPrivacyLevel(): PrivacyLevel {
     return selectedActivity?._privacyLevel || 'full';
   }
 
-  function requestPrivacyRule(level) {
+  function requestPrivacyRule(level: PrivacyLevel): void {
     if (!selectedActivity || privacySaving) return;
     if (getCurrentPrivacyLevel() === level) return;
     const levelLabels = {
@@ -327,36 +410,43 @@
     pendingPrivacyRule = { level, levelLabel: levelLabels[level] };
   }
 
-  function cancelPrivacyRule() { pendingPrivacyRule = null; }
+  function requestPrivacyRuleByValue(level: string): void {
+    if (level === 'full' || level === 'anonymized' || level === 'ignored') {
+      requestPrivacyRule(level);
+    }
+  }
+
+  function cancelPrivacyRule(): void { pendingPrivacyRule = null; }
 
   async function confirmPrivacyRule() {
     if (!pendingPrivacyRule || !selectedActivity) return;
     const { level } = pendingPrivacyRule;
+    const targetActivity = selectedActivity;
     pendingPrivacyRule = null;
     privacySaving = true;
     try {
-      const config = await invoke('get_config');
+      const config = await invoke<TimelineConfig>('get_config');
       if (!config.privacy) config.privacy = {};
       if (!config.privacy.app_rules) config.privacy.app_rules = [];
 
       if (level === 'full') {
         config.privacy.app_rules = config.privacy.app_rules.filter(
-          r => r.app_name !== selectedActivity.app_name
+          r => r.app_name !== targetActivity.app_name
         );
       } else {
         const idx = config.privacy.app_rules.findIndex(
-          r => r.app_name === selectedActivity.app_name
+          r => r.app_name === targetActivity.app_name
         );
         if (idx >= 0) {
           config.privacy.app_rules[idx].level = level;
         } else {
-          config.privacy.app_rules.push({ app_name: selectedActivity.app_name, level });
+          config.privacy.app_rules.push({ app_name: targetActivity.app_name, level });
         }
       }
 
       await invoke('save_config', { config });
 
-      selectedActivity = { ...selectedActivity, _privacyLevel: level };
+      selectedActivity = { ...targetActivity, _privacyLevel: level };
       cache.invalidate('overview');
 
       const levelLabels = {
@@ -366,7 +456,7 @@
       };
       showToast(
         t('timeline.detail.privacySetSuccess', {
-          appName: selectedActivity.app_name,
+          appName: targetActivity.app_name,
           level: levelLabels[level],
         }),
         'success'
@@ -388,9 +478,9 @@
   }
 
   // 打开详情时加载当前隐私级别
-  async function loadPrivacyLevel(activity) {
+  async function loadPrivacyLevel(activity: TimelineActivity): Promise<PrivacyLevel> {
     try {
-      const config = await invoke('get_config');
+      const config = await invoke<TimelineConfig>('get_config');
       const rules = config.privacy?.app_rules || [];
       const rule = rules.find(r => r.app_name === activity.app_name);
       return rule ? rule.level : 'full';
@@ -406,17 +496,17 @@
     '💼', '🧑‍💻', '🧑‍🎨', '📱', '🚀', '⭐', '🔒',
   ];
 
-  function getCategoryMeta(category) {
+  function getCategoryMeta(category: string | null | undefined): CategoryMeta {
     return categoryStore.getCategoryMeta(category || 'other');
   }
 
-  function getCategoryDisplayName(cat) {
+  function getCategoryDisplayName(cat: CategoryInfo): string {
     const translatedCategoryName = translateCategoryLabel(cat.key);
     const isKnownSystemCategory = cat.is_system || translatedCategoryName !== cat.key;
     return isKnownSystemCategory ? translatedCategoryName : (cat.name || translatedCategoryName);
   }
 
-  function iconStyle(info) {
+  function iconStyle(info: Pick<CategoryMeta, 'color'>): string {
     // 通过 CSS 变量让明暗两套主题分别取不同透明度，避免暗色下出现近实心浅色块
     return `--icon-bg-light: ${hexToRGBA(info.color, 0.95)}; --icon-bg-dark: ${hexToRGBA(info.color, 0.3)}`;
   }
@@ -454,12 +544,12 @@
         pendingApplyCategory = { key, name };
       }
     } catch (e) {
-      showToast(e.toString(), 'error');
+      showToast(String(e), 'error');
     }
   }
 
   // 格式化时间
-  function formatTime(timestamp) {
+  function formatTime(timestamp: number): string {
     return formatLocalizedTime(new Date(timestamp * 1000), {
       hour: '2-digit',
       minute: '2-digit',
@@ -468,77 +558,84 @@
   }
 
   // 格式化时长
-  function formatDuration(seconds) {
+  function formatDuration(seconds: number): string {
     return formatDurationLocalized(seconds);
   }
 
-  function formatTimelineAnchor(timestamp) {
+  function formatTimelineAnchor(timestamp: number): string {
     return formatLocalizedTime(new Date(timestamp * 1000), {
       hour: '2-digit',
       minute: '2-digit',
     });
   }
 
-  function hasUsableTimelineNativeIcon(base64) {
+  function hasUsableTimelineNativeIcon(base64: string | null | undefined): base64 is string {
     return typeof base64 === 'string' && base64.length > 100;
   }
 
-  function getTimelineIconSrc(activity) {
-    const preferredAppName = getPreferredTimelineAppName(activity);
-    const iconKey = getIconCacheKey({
-      appName: activity.app_name,
-      executablePath: activity.executable_path,
-    });
-    const base64 = appIcons[iconKey];
+  const getTimelineIconSrc: (activity: TimelineActivity) => string | null =
+    function getTimelineIconSrc(activity) {
+      const preferredAppName = getPreferredTimelineAppName(activity);
+      const iconKey = getIconCacheKey({
+        appName: activity.app_name,
+        executablePath: activity.executable_path,
+      });
+      const base64 = appIcons[iconKey];
 
-    if (failedTimelineIconKeys.has(iconKey)) {
-      return null;
-    }
+      if (failedTimelineIconKeys.has(iconKey)) {
+        return null;
+      }
 
-    if (hasUsableTimelineNativeIcon(base64)) {
-      return resolveAppIconSrc(preferredAppName, base64);
-    }
+      if (hasUsableTimelineNativeIcon(base64)) {
+        return resolveAppIconSrc(preferredAppName, base64);
+      }
 
-    if (shouldPreferTimelineFallbackIcon(activity)) {
-      return resolveAppIconSrc(preferredAppName, null);
-    }
+      if (shouldPreferTimelineFallbackIcon(activity)) {
+        return resolveAppIconSrc(preferredAppName, null);
+      }
 
-    return resolveAppIconSrc(
-      preferredAppName,
-      base64
-    );
-  }
+      return resolveAppIconSrc(
+        preferredAppName,
+        base64
+      );
+    };
 
-  function handleTimelineIconError(activity) {
-    const iconKey = getIconCacheKey({
-      appName: activity.app_name,
-      executablePath: activity.executable_path,
-    });
-    if (failedTimelineIconKeys.has(iconKey)) return;
-    failedTimelineIconKeys = new Set([...failedTimelineIconKeys, iconKey]);
-  }
+  const handleTimelineIconError: (activity: TimelineActivity | null) => void =
+    function handleTimelineIconError(activity) {
+      if (!activity) return;
+      const iconKey = getIconCacheKey({
+        appName: activity.app_name,
+        executablePath: activity.executable_path,
+      });
+      if (failedTimelineIconKeys.has(iconKey)) return;
+      failedTimelineIconKeys = new Set([...failedTimelineIconKeys, iconKey]);
+    };
 
-  function getTimelineTitle(activity) {
+  function getTimelineTitle(activity: TimelineActivity): string {
     return formatWindowTitle(activity.window_title, activity.app_name, activity.browser_url);
   }
 
-  function getTimelineAppName(activity) {
+  function getTimelineAppName(activity: TimelineActivity): string {
     return getPreferredTimelineAppName(activity);
   }
 
-  function getTimelineThumbnail(activity) {
+  function getTimelineThumbnail(activity: TimelineActivity): string | null {
     if (!activity?.screenshot_path) {
       return null;
     }
     return thumbnailCache[activity.screenshot_path] || null;
   }
 
-  function normalizeAppMatchKey(appName) {
+  function normalizeAppMatchKey(appName: string | null | undefined): string {
     return (appName || '').trim().toLowerCase();
   }
 
   // 优化窗口标题显示
-  function formatWindowTitle(title, appName, browserUrl = null) {
+  function formatWindowTitle(
+    title: string | null | undefined,
+    appName: string,
+    browserUrl: string | null = null,
+  ): string {
     // 如果有有效标题
     if (title && title.trim() !== '') {
       // 移除常见的应用名称后缀
@@ -577,7 +674,7 @@
   }
 
   // 加载缩略图（列表用，400px），使用 LRU 缓存控制内存
-  async function loadThumbnail(screenshotPath) {
+  async function loadThumbnail(screenshotPath: string | null | undefined): Promise<string | null> {
     if (!screenshotPath) {
       return null;
     }
@@ -585,7 +682,7 @@
       return thumbnailCache[screenshotPath];
     }
     try {
-      const base64 = await invoke('get_screenshot_thumbnail', { path: screenshotPath });
+      const base64 = await invoke<string>('get_screenshot_thumbnail', { path: screenshotPath });
       const dataUrl = `data:image/jpeg;base64,${base64}`;
       lruSet(thumbnailCache, thumbnailKeys, THUMBNAIL_CACHE_LIMIT, screenshotPath, dataUrl);
       thumbnailCache = { ...thumbnailCache };
@@ -597,7 +694,7 @@
   }
 
   // 加载高分辨率图片（详情用，1200px），使用 LRU 缓存控制内存
-  async function loadFullImage(screenshotPath) {
+  async function loadFullImage(screenshotPath: string | null | undefined): Promise<string | null> {
     if (!screenshotPath) {
       return null;
     }
@@ -605,7 +702,7 @@
       return fullImageCache[screenshotPath];
     }
     try {
-      const base64 = await invoke('get_screenshot_full', { path: screenshotPath });
+      const base64 = await invoke<string>('get_screenshot_full', { path: screenshotPath });
       const dataUrl = `data:image/jpeg;base64,${base64}`;
       lruSet(fullImageCache, fullImageKeys, FULLIMAGE_CACHE_LIMIT, screenshotPath, dataUrl);
       return dataUrl;
@@ -615,7 +712,9 @@
     }
   }
 
-  async function preloadTimelineLeadThumbnails(items) {
+  async function preloadTimelineLeadThumbnails(
+    items: readonly TimelineActivity[],
+  ): Promise<void> {
     const leadItems = items
       .filter((activity) => activity?.screenshot_path)
       .slice(0, 6);
@@ -634,8 +733,8 @@
   let hasMore = true;
   let loadingMore = false;
 
-  function selectFeaturedActivityIds(items) {
-    const featuredIds = [];
+  function selectFeaturedActivityIds(items: readonly TimelineActivity[]): number[] {
+    const featuredIds: number[] = [];
     const maxFeaturedCount = Math.min(FEATURED_MAX_ITEMS, Math.max(1, Math.ceil(items.length / 4)));
     let lastFeaturedIndex = -99;
 
@@ -680,7 +779,7 @@
 
     if (featuredIds.length === 0) {
       const fallback = items.find((activity) => activity?.id && activity.screenshot_path);
-      if (fallback) {
+      if (fallback?.id) {
         featuredIds.push(fallback.id);
       }
     }
@@ -710,10 +809,16 @@
     clearImageCaches();
 
     try {
-      const [activitiesData, summariesData] = await Promise.all([
-        invoke('get_timeline', { date: requestDate, limit: PAGE_SIZE, offset: 0 }),
-        invoke('get_hourly_summaries', { date: requestDate }),
+      const [activitiesPayload, summariesPayload] = await Promise.all([
+        invoke<unknown>('get_timeline', {
+          date: requestDate,
+          limit: PAGE_SIZE,
+          offset: 0,
+        }),
+        invoke<unknown>('get_hourly_summaries', { date: requestDate }),
       ]);
+      const activitiesData = parseTimelineActivities(activitiesPayload);
+      const summariesData = parseHourlySummaryRecords(summariesPayload);
 
       if (requestId !== loadTimelineRequestId || requestDate !== selectedDate) return;
 
@@ -745,7 +850,7 @@
           ])
         ).values()
       );
-      preloadAppIcons(uniqueIconEntries, invoke);
+      preloadAppIcons(uniqueIconEntries, invokeAppIcon);
     } catch (e) {
       if (requestId !== loadTimelineRequestId || requestDate !== selectedDate) return;
       error = formatUserError(e, t('common.loadFailedRetry'));
@@ -766,11 +871,12 @@
     loadingMore = true;
 
     try {
-      const moreActivities = await invoke('get_timeline', { 
+      const morePayload = await invoke<unknown>('get_timeline', {
         date: requestDate,
         limit: PAGE_SIZE, 
         offset: requestOffset,
       });
+      const moreActivities = parseTimelineActivities(morePayload);
 
       if (requestId !== loadMoreRequestId || requestDate !== selectedDate) return;
 
@@ -792,7 +898,7 @@
             ])
           ).values()
         );
-        preloadAppIcons(iconEntries, invoke);
+        preloadAppIcons(iconEntries, invokeAppIcon);
       }
       
       if (moreActivities.length < PAGE_SIZE) {
@@ -816,7 +922,10 @@
     summaryRefreshError = null;
 
     try {
-      const summariesData = await invoke('get_hourly_summaries', { date: requestDate });
+      const summariesPayload = await invoke<unknown>('get_hourly_summaries', {
+        date: requestDate,
+      });
+      const summariesData = parseHourlySummaryRecords(summariesPayload);
       if (requestId !== summaryRefreshRequestId || requestDate !== selectedDate) return;
       hourlySummaries = summariesData;
     } catch (e) {
@@ -830,14 +939,14 @@
     }
   }
 
-  async function openSummaryDrawer() {
+  async function openSummaryDrawer(): Promise<void> {
     await closeDetail(false);
     showSummaryDrawer = true;
     summaryRefreshError = null;
     void refreshHourlySummaries();
   }
 
-  async function closeSummaryDrawer(restoreFocus = true) {
+  async function closeSummaryDrawer(restoreFocus = true): Promise<void> {
     showSummaryDrawer = false;
     summaryRefreshRequestId += 1;
     summaryRefreshing = false;
@@ -848,7 +957,13 @@
     }
   }
 
-  function updateCategoryPopoverPosition() {
+  function selectCleanupMode(mode: string): void {
+    if (mode === 'date' || mode === 'range' || mode === 'app') {
+      cleanupMode = mode;
+    }
+  }
+
+  function updateCategoryPopoverPosition(): void {
     if (!showCategoryPopover || !categoryTrigger || typeof window === 'undefined') {
       categoryPopoverStyle = '';
       return;
@@ -865,14 +980,14 @@
     categoryPopoverStyle = `left: ${position.left}px; width: ${position.width}px; max-height: ${position.maxHeight}px; ${verticalStyle}`;
   }
 
-  async function closeCategoryPopover() {
+  async function closeCategoryPopover(): Promise<void> {
     showCategoryPopover = false;
     categoryPopoverStyle = '';
     await tick();
     categoryTrigger?.focus();
   }
 
-  async function toggleCategoryPopover() {
+  async function toggleCategoryPopover(): Promise<void> {
     if (showCategoryPopover) {
       await closeCategoryPopover();
       return;
@@ -885,14 +1000,15 @@
     categoryPopover?.focus();
   }
 
-  function handleCategoryPopoverKeydown(event) {
-    if (!showCategoryPopover || event.key !== 'Escape') return;
-    event.preventDefault();
-    event.stopPropagation();
-    void closeCategoryPopover();
-  }
+  const handleCategoryPopoverKeydown: (event: KeyboardEvent) => void =
+    function handleCategoryPopoverKeydown(event) {
+      if (!showCategoryPopover || event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      void closeCategoryPopover();
+    };
 
-  function cancelPendingAction() {
+  function cancelPendingAction(): void {
     if (pendingDeleteCategory) {
       cancelDeleteCategory();
     } else if (pendingApplyCategory) {
@@ -904,21 +1020,22 @@
     }
   }
 
-  function handleTimelineWindowKeydown(event) {
-    if (
-      event.key === 'Escape'
-      && (pendingDeleteCategory || pendingApplyCategory || pendingPrivacyRule || pendingChangeCategory)
-    ) {
-      event.preventDefault();
-      event.stopPropagation();
-      cancelPendingAction();
-      return;
-    }
+  const handleTimelineWindowKeydown: (event: KeyboardEvent) => void =
+    function handleTimelineWindowKeydown(event) {
+      if (
+        event.key === 'Escape'
+        && (pendingDeleteCategory || pendingApplyCategory || pendingPrivacyRule || pendingChangeCategory)
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        cancelPendingAction();
+        return;
+      }
 
-    handleCategoryPopoverKeydown(event);
-  }
+      handleCategoryPopoverKeydown(event);
+    };
 
-  function handleDetailDismiss() {
+  function handleDetailDismiss(): void {
     if (showCategoryPopover) {
       void closeCategoryPopover();
       return;
@@ -926,19 +1043,22 @@
     void closeDetail();
   }
 
-  function handleDetailOverlayKeydown(event) {
+  function handleDetailOverlayKeydown(event: KeyboardEvent): void {
     if (event.key !== 'Escape') return;
     event.preventDefault();
     handleDetailDismiss();
   }
 
-  function handleDetailScroll() {
+  function handleDetailScroll(): void {
     if (showCategoryPopover) updateCategoryPopoverPosition();
   }
 
   // 查看活动详情
   let viewActivityRequestId = 0;
-  async function viewActivity(activity, trigger = null) {
+  async function viewActivity(
+    activity: TimelineActivity,
+    trigger: HTMLButtonElement | null = null,
+  ): Promise<void> {
     await closeSummaryDrawer(false);
     detailTrigger = trigger;
     showCategoryPopover = false;
@@ -953,7 +1073,7 @@
     detailCloseButton?.focus();
 
     const freshActivityPromise = activity.id
-      ? invoke('get_activity', { id: activity.id }).catch((e) => {
+      ? invoke<TimelineActivity | null>('get_activity', { id: activity.id }).catch((e) => {
           console.warn('获取最新活动数据失败:', e);
           return null;
         })
@@ -976,7 +1096,7 @@
   }
 
   // 打开外部链接
-  async function openUrl(url) {
+  async function openUrl(url: string | null | undefined): Promise<void> {
     if (url) {
       try {
         await open(url);
@@ -1016,7 +1136,7 @@
         date: selectedDate,
         targetPath,
         includeOcr,
-      });
+      }) as string;
       showToast(t('timeline.exportSuccess', { path: savedPath }), 'success');
     } catch (e) {
       showToast(t('timeline.exportFailed', { error: e }), 'error');
@@ -1026,15 +1146,15 @@
   }
 
   // 删除自定义分类
-  let pendingDeleteCategory = null; // { key, name }
-  function cancelDeleteCategory() { pendingDeleteCategory = null; }
+  let pendingDeleteCategory: CategoryChoice | null = null;
+  function cancelDeleteCategory(): void { pendingDeleteCategory = null; }
   async function confirmDeleteCategory() {
     if (!pendingDeleteCategory) return;
     const { key, name } = pendingDeleteCategory;
     pendingDeleteCategory = null;
     categorySaving = true;
     try {
-      const affected = await invoke('delete_custom_category', { key });
+      const affected = await invoke<number>('delete_custom_category', { key });
       await categoryStore.refresh();
       cache.invalidate('overview');
 
@@ -1052,7 +1172,7 @@
         'success'
       );
     } catch (e) {
-      showToast(e.toString(), 'error');
+      showToast(String(e), 'error');
     } finally {
       categorySaving = false;
       await restoreCategoryTriggerAfterSaving();
@@ -1060,7 +1180,7 @@
   }
 
   // 关闭详情并把焦点交还给打开详情的时间线记录。
-  async function closeDetail(restoreFocus = true) {
+  async function closeDetail(restoreFocus = true): Promise<void> {
     viewActivityRequestId += 1;
     selectedActivity = null;
     categorySaving = false;
@@ -1079,7 +1199,7 @@
   }
 
   // 删除单条活动记录（连带截图）
-  async function deleteActivity(activity) {
+  async function deleteActivity(activity: TimelineActivity | null): Promise<void> {
     if (!activity?.id) return;
     const ok = await confirm({
       tone: 'warning',
@@ -1099,13 +1219,13 @@
       await loadTimeline();
       showToast(t('timeline.activityDeleted'), 'success');
     } catch (e) {
-      showToast(e.toString(), 'error');
+      showToast(String(e), 'error');
     }
   }
 
   // ===== 批量清理记录（日期 / 时间段 / 应用）=====
   let showCleanupPanel = false;
-  let cleanupMode = 'date'; // 'date' | 'range' | 'app'
+  let cleanupMode: CleanupMode = 'date';
   let cleanupRangeStart = '';
   let cleanupRangeEnd = '';
   let cleanupRangeStartTime = '';
@@ -1121,7 +1241,7 @@
     .sort();
 
   // 本地时区的“日期 + 可选时刻”→ Unix 秒
-  function localDateToTs(dateStr, timeStr) {
+  function localDateToTs(dateStr: string, timeStr: string): number {
     if (!dateStr) return 0;
     const [y, m, d] = dateStr.split('-').map(Number);
     const hh = timeStr ? Number(timeStr.split(':')[0]) : 0;
@@ -1141,7 +1261,9 @@
     if (!ok) return;
     cleanupBusy = true;
     try {
-      const res = await invoke('delete_activities_by_date', { date: selectedDate });
+      const res = await invoke<CleanupResult>('delete_activities_by_date', {
+        date: selectedDate,
+      });
       cache.invalidate('overview');
       await loadTimeline();
       showToast(
@@ -1149,7 +1271,7 @@
         'success',
       );
     } catch (e) {
-      showToast(e.toString(), 'error');
+      showToast(String(e), 'error');
     } finally {
       cleanupBusy = false;
     }
@@ -1181,12 +1303,12 @@
     if (!ok) return;
     cleanupBusy = true;
     try {
-      const res = await invoke('delete_activities_by_range', { startTs, endTs });
+      const res = await invoke<CleanupResult>('delete_activities_by_range', { startTs, endTs });
       cache.invalidate('overview');
       await loadTimeline();
       showToast(t('timeline.deletedByRange', { count: res?.deleted ?? 0 }), 'success');
     } catch (e) {
-      showToast(e.toString(), 'error');
+      showToast(String(e), 'error');
     } finally {
       cleanupBusy = false;
     }
@@ -1204,7 +1326,9 @@
     if (!ok) return;
     cleanupBusy = true;
     try {
-      const res = await invoke('delete_activities_by_app', { appName: cleanupApp });
+      const res = await invoke<CleanupResult>('delete_activities_by_app', {
+        appName: cleanupApp,
+      });
       cache.invalidate('overview');
       await loadTimeline();
       showToast(
@@ -1212,15 +1336,15 @@
         'success',
       );
     } catch (e) {
-      showToast(e.toString(), 'error');
+      showToast(String(e), 'error');
     } finally {
       cleanupBusy = false;
     }
   }
 
   // 记录上次加载的日期
-  let lastLoadedDate = null;
-  let featuredActivityIds = new Set();
+  let lastLoadedDate: string | null = null;
+  let featuredActivityIds = new Set<number>();
 
   // 日期变化时重新加载，同时让旧日期的静默摘要请求立即失效。
   $: if (selectedDate && selectedDate !== lastLoadedDate) {
@@ -1249,7 +1373,9 @@
       consumeRequestedSummaryOpen();
     }
 
-    handleTimelineFocus = (event) => applyTimelineFocus(event.detail);
+    handleTimelineFocus = (event) => {
+      if (event instanceof CustomEvent) applyTimelineFocus(event.detail);
+    };
     window.addEventListener('timeline-focus-date', handleTimelineFocus);
     categoryStore.refresh();
 
@@ -1261,7 +1387,7 @@
 
     handleVisibilityChange = () => {
       if (document.hidden) {
-        clearInterval(clockInterval);
+        if (clockInterval) clearInterval(clockInterval);
         clockInterval = null;
       } else {
         currentTime = new Date();
@@ -1279,13 +1405,16 @@
     
     // 初始加载通过响应式触发
     
-    // 监听新截屏事件，智能更新（合并或新增）
-    // 核心逻辑：后端已完成聚合，前端只按 id 替换，否则视作新活动插入
+    // 监听新截屏事件：同 ID 替换，同一后端聚合分组刷新，否则插入。
     try {
-      const un = await listen('screenshot-taken', (event) => {
+      const un = await listen<unknown>('screenshot-taken', (event) => {
         if (isToday && !document.hidden) {
+          if (!isTimelineActivity(event.payload)) {
+            console.warn('时间线截图事件载荷格式无效，已忽略');
+            return;
+          }
           const newActivity = event.payload;
-          if (newActivity?.screenshot_path) {
+          if (newActivity.screenshot_path) {
             loadThumbnail(newActivity.screenshot_path);
           }
           activities = upsertTimelineActivity(activities, newActivity);
@@ -1432,7 +1561,7 @@
         <div class="timeline-rail" aria-hidden="true"></div>
         {#each activities as activity, i}
           {@const info = getCategoryMeta(activity.category)}
-          {@const featured = featuredActivityIds.has(activity.id)}
+          {@const featured = activity.id !== null && featuredActivityIds.has(activity.id)}
           {@const timelineTitle = getTimelineTitle(activity)}
           <button
             class={`timeline-entry ${featured ? 'timeline-entry-featured' : 'timeline-entry-compact'}`}
@@ -1671,7 +1800,7 @@
             <div class="timeline-detail-meta-row">
               <span>{t('timeline.detail.visitedUrl')}</span>
               <button
-                on:click={() => openUrl(selectedActivity.browser_url)}
+                on:click={() => openUrl(selectedActivity?.browser_url)}
                 class="timeline-detail-url"
               >
                 {formatBrowserUrlForDisplay(selectedActivity.browser_url)}
@@ -1862,7 +1991,7 @@
               { value: 'ignored', label: t('timeline.detail.privacyIgnored'), activeClass: 'settings-segment-danger' },
             ] as opt}
               <button
-                on:click={() => requestPrivacyRule(opt.value)}
+                on:click={() => requestPrivacyRuleByValue(opt.value)}
                 class="segment-btn flex-1 text-center border border-slate-200 dark:border-[#484f58] rounded-lg {(selectedActivity._privacyLevel || 'full') === opt.value ? opt.activeClass : 'settings-segment-idle'}"
                 disabled={privacySaving}
               >
@@ -1913,7 +2042,7 @@
           {#each [{ key: 'date', label: t('timeline.deleteByDate') }, { key: 'range', label: t('timeline.deleteByRange') }, { key: 'app', label: t('timeline.deleteByApp') }] as tab}
             <button
               class="flex-1 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors {cleanupMode === tab.key ? 'border-rose-400 bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-300 dark:border-rose-700' : 'border-slate-200 dark:border-[#30363d] text-slate-600 dark:text-[#adbac7] hover:bg-slate-50 dark:hover:bg-[#21262d]'}"
-              on:click={() => (cleanupMode = tab.key)}
+              on:click={() => selectCleanupMode(tab.key)}
             >
               {tab.label}
             </button>
@@ -2013,7 +2142,7 @@
           {t('timeline.deleteCategoryTitle')}
         </h3>
         <p class="mt-2 text-sm text-slate-700 dark:text-[#7d8590] leading-relaxed">
-          {t('timeline.deleteCategoryMessage', { category: pendingDeleteCategory.name })}
+          {t('timeline.deleteCategoryMessage', { category: pendingDeleteCategory?.name ?? '' })}
         </p>
         <div class="mt-5 flex justify-end gap-2">
           <button
@@ -2036,7 +2165,7 @@
         <p class="mt-2 text-sm text-slate-700 dark:text-[#7d8590] leading-relaxed">
           {t('timeline.detail.privacyConfirmMessage', {
             appName: selectedActivity.app_name,
-            level: pendingPrivacyRule.levelLabel,
+            level: pendingPrivacyRule?.levelLabel ?? '',
           })}
         </p>
         <div class="mt-5 flex justify-end gap-2">
@@ -2054,7 +2183,9 @@
           </button>
         </div>
       {:else}
-        {@const categoryName = isApply ? pendingApplyCategory.name : pendingChangeCategory.categoryName}
+        {@const categoryName = isApply
+          ? pendingApplyCategory?.name ?? ''
+          : pendingChangeCategory?.categoryName ?? ''}
         {@const appName = selectedActivity.app_name}
         <h3 id="timeline-action-confirm-title" class="text-base font-semibold text-slate-900 dark:text-[#e6edf3]">
           {t('timeline.changeCategoryTitle')}
@@ -2468,6 +2599,7 @@
   .timeline-entry-title-featured {
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
     font-size: 1.02rem;

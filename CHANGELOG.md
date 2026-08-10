@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### 优化
+- **TypeScript 工具链**：前端源码、测试与 Node 工具脚本统一迁移为 TypeScript，并将本地开发、CI 与发布环境统一为 Node.js 22+。
+- **仓库清理**：移除过期实现计划、设计草稿、Python 学习原型与可再生成的 Tauri schema，并收紧相关忽略规则。
+
 ## [1.1.0] - 2026-07-31
 
 ### 新增

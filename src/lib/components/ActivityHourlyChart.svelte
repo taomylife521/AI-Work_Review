@@ -1,7 +1,28 @@
-<script>
-  import { locale, formatDurationLocalized, t } from '$lib/i18n/index.js';
+<script lang="ts">
+  import { locale, formatDurationLocalized, t } from '$lib/i18n/index.ts';
 
-  export let data = [];
+  interface HourlyBucket {
+    hour: number;
+    duration: number;
+  }
+
+  interface CategorySegment {
+    category: string;
+    duration: number;
+  }
+
+  interface HourlyAppUsage {
+    app_name: string;
+    duration: number;
+    category: string;
+  }
+
+  interface HourlyAppBucket {
+    hour: number;
+    apps: HourlyAppUsage[];
+  }
+
+  export let data: HourlyBucket[] = [];
   export let distributionTitle = '';
   export let distributionSubtitleKey = 'hourlyChart.distributionSubtitle';
   export let peakHourLabel = '';
@@ -10,49 +31,49 @@
   // 按分类着色（堆叠柱）：categoryMode 开启时，每根柱按应用分类分段着色
   export let categoryMode = true;
   // 概览构成条选中的分类；为空时展示完整堆叠。
-  export let selectedCategory = null;
+  export let selectedCategory: string | null = null;
   // { [hour]: [{ category, duration }, ...] }，由 Overview 从 hourly_app_breakdown 聚合
-  export let categoryBreakdown = null;
+  export let categoryBreakdown: Partial<Record<number, CategorySegment[]>> | null = null;
   // { [category]: '#RRGGBB' }，来自 custom_categories
-  export let categoryColors = null;
+  export let categoryColors: Record<string, string> | null = null;
   // { [category]: '分类名' }，用于图例
-  export let categoryNames = null;
+  export let categoryNames: Record<string, string> | null = null;
   // 每小时×应用明细（HourlyAppBucket[]），点击柱子时展示该小时 top 应用
-  export let appBreakdown = null;
+  export let appBreakdown: HourlyAppBucket[] | null = null;
   // 今日工作时长（秒），用于目标进度卡片
   export let workDuration = 0;
   // 每日工作目标（分钟），null = 不设目标
-  export let workGoalMinutes = null;
+  export let workGoalMinutes: number | null = null;
 
   const keyHours = [0, 6, 12, 18, 23];
-  let selectedHour = null;
+  let selectedHour: number | null = null;
   $: currentLocale = $locale;
 
-  function formatHourLabel(hour) {
+  function formatHourLabel(hour: number): string {
     return `${String(hour).padStart(2, '0')}:00`;
   }
 
-  function formatHourRangeLabel(hour) {
+  function formatHourRangeLabel(hour: number): string {
     return `${formatHourLabel(hour)} - ${formatHourLabel((hour + 1) % 24)}`;
   }
 
-  function showHourLabel(hour) {
+  function showHourLabel(hour: number): boolean {
     return keyHours.includes(hour);
   }
 
-  function formatAxisTickLabel(seconds) {
+  function formatAxisTickLabel(seconds: number): string {
     if (!seconds || seconds <= 0) {
       return '0';
     }
     return formatDurationLocalized(seconds, { compact: true });
   }
 
-  function selectHour(hour) {
+  function selectHour(hour: number): void {
     selectedHour = hour;
   }
 
   // 统一紧凑时长格式，并跟随当前语言。
-  function formatCompact(seconds) {
+  function formatCompact(seconds: number): string {
     return formatDurationLocalized(seconds, { compact: true });
   }
 
@@ -68,7 +89,7 @@
   // 图例：从 categoryBreakdown 聚合出当前用到的分类（按时长降序）
   $: usedCategories = (() => {
     if (!categoryBreakdown) return [];
-    const totals = {};
+    const totals: Record<string, number> = {};
     for (const hour in categoryBreakdown) {
       for (const seg of categoryBreakdown[hour] || []) {
         totals[seg.category] = (totals[seg.category] || 0) + seg.duration;
@@ -85,7 +106,7 @@
   $: topBuckets = [...activeBuckets]
     .sort((left, right) => right.duration - left.duration || left.hour - right.hour)
     .slice(0, 3);
-  $: selectedBucket = buckets[selectedHour] || null;
+  $: selectedBucket = selectedHour === null ? null : (buckets[selectedHour] ?? null);
   $: axisMax = (() => {
     const raw = Math.max(maxDuration, 60);
     const minute = 60;

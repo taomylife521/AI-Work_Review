@@ -1,7 +1,7 @@
-<script>
+<script lang="ts">
   import { createEventDispatcher, tick } from 'svelte';
-  import { formatDurationLocalized, t } from '$lib/i18n/index.js';
-  import { trapFocus } from '$lib/utils/focusTrap.js';
+  import { formatDurationLocalized, t } from '$lib/i18n/index.ts';
+  import { trapFocus } from '$lib/utils/focusTrap.ts';
   import {
     formatHourRange,
     getFullSummary,
@@ -11,18 +11,19 @@
     getSummaryDisplayParts,
     getSummaryRhythmTone,
     orderHourlySummariesForDisplay,
-  } from './summaryPresentation.js';
+    type HourlySummaryRecord,
+  } from './summaryPresentation.ts';
 
   export let open = false;
   export let date = '';
-  export let summaries = [];
+  export let summaries: HourlySummaryRecord[] = [];
   export let loading = false;
   export let refreshing = false;
-  export let error = null;
+  export let error = null as string | null;
 
-  const dispatch = createEventDispatcher();
-  let closeButton;
-  let expandedHours = new Set();
+  const dispatch = createEventDispatcher<{ close: void }>();
+  let closeButton: HTMLButtonElement | null = null;
+  let expandedHours = new Set<number>();
   let previousOpen = false;
   let previousDate = date;
   let previousSummarySignature = '';
@@ -70,14 +71,14 @@
     dispatch('close');
   }
 
-  function handleOverlayKeydown(event) {
+  function handleOverlayKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape') {
       event.preventDefault();
       requestClose();
     }
   }
 
-  function toggleExpand(hour) {
+  function toggleExpand(hour: number) {
     const next = new Set(expandedHours);
     if (next.has(hour)) {
       next.delete(hour);
@@ -87,7 +88,7 @@
     expandedHours = next;
   }
 
-  function needsExpand(summary) {
+  function needsExpand(summary: HourlySummaryRecord) {
     const full = getFullSummary(summary.summary);
     const primary = getPrimarySummary(summary.summary);
     const secondary = getSecondarySummary(summary.summary);
@@ -95,7 +96,7 @@
     return full.length > displayed.length + 2;
   }
 
-  function isPeakSummary(summary) {
+  function isPeakSummary(summary: HourlySummaryRecord) {
     return summaries.length > 1
       && peakDuration > 0
       && summary.total_duration === peakDuration;

@@ -1,14 +1,43 @@
-<script>
+<script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import { locale, t } from '$lib/i18n/index.js';
+  import { locale, t } from '$lib/i18n/index.ts';
+
+  interface AppPrivacyRule {
+    app_name: string;
+    level: string;
+  }
+
+  interface PrivacySettings {
+    app_rules: AppPrivacyRule[];
+    excluded_keywords: string[];
+    excluded_domains?: string[];
+  }
+
+  interface PrivacyConfig {
+    privacy: PrivacySettings;
+  }
+
+  interface PrivacyLevelConfig {
+    value: string;
+    labelKey: string;
+    descKey: string;
+  }
+
+  interface LocalizedPrivacyLevel extends PrivacyLevelConfig {
+    label: string;
+    desc: string;
+  }
   
-  export let config;
-  export let runningApps = [];
-  export let recentApps = [];
+  export let config: PrivacyConfig;
+  export let runningApps: string[] = [];
+  export let recentApps: string[] = [];
   
-  const dispatch = createEventDispatcher();
+  const dispatch = createEventDispatcher<{
+    change: PrivacyConfig;
+    'refresh-apps': void;
+  }>();
   $: currentLocale = $locale;
-  let privacyLevels = [];
+  let privacyLevels: LocalizedPrivacyLevel[] = [];
   let keywordCount = 0;
   let domainCount = 0;
   
@@ -18,7 +47,7 @@
   // 「内容过滤」（敏感词 + 域名黑名单）默认折叠，属于进阶配置
   let showContentFilter = false;
   let selectedLevel = 'ignored';
-  let batchSelectedApps = new Set();
+  let batchSelectedApps = new Set<string>();
   let appSearchQuery = '';
   let showAllRecentApps = false;
   let showAllRunningApps = false;
@@ -28,7 +57,7 @@
   let newDomain = '';
 
   // 三种策略只表达记录方式，不使用大面积语义色。
-  const privacyLevelConfigs = [
+  const privacyLevelConfigs: PrivacyLevelConfig[] = [
     { value: 'full', labelKey: 'settingsPrivacy.full', descKey: 'settingsPrivacy.fullDesc' },
     { value: 'anonymized', labelKey: 'settingsPrivacy.anonymized', descKey: 'settingsPrivacy.anonymizedDesc' },
     { value: 'ignored', labelKey: 'settingsPrivacy.ignored', descKey: 'settingsPrivacy.ignoredDesc' },
@@ -44,7 +73,7 @@
   $: keywordCount = config?.privacy?.excluded_keywords?.length || 0;
   $: domainCount = config?.privacy?.excluded_domains?.length || 0;
 
-  function getPrivacyLevel(levelValue) {
+  function getPrivacyLevel(levelValue: string): LocalizedPrivacyLevel | undefined {
     return privacyLevels.find((level) => level.value === levelValue) || privacyLevels[0];
   }
 
@@ -84,7 +113,7 @@
     dispatch('change', config);
   }
 
-  function removeAppRule(index) {
+  function removeAppRule(index: number) {
     const rules = [...config.privacy.app_rules];
     rules.splice(index, 1);
     config.privacy.app_rules = rules;
@@ -107,7 +136,7 @@
     dispatch('change', config);
   }
 
-  function removeKeyword(index) {
+  function removeKeyword(index: number) {
     const keywords = [...config.privacy.excluded_keywords];
     keywords.splice(index, 1);
     config.privacy.excluded_keywords = keywords;
@@ -129,7 +158,7 @@
     dispatch('change', config);
   }
 
-  function removeDomain(index) {
+  function removeDomain(index: number) {
     const domains = [...(config.privacy.excluded_domains || [])];
     domains.splice(index, 1);
     config.privacy.excluded_domains = domains;
@@ -137,13 +166,21 @@
   }
 
   // 快捷选择应用（多选切换）
-  function toggleBatchApp(appName) {
+  function toggleBatchApp(appName: string) {
     if (batchSelectedApps.has(appName)) {
       batchSelectedApps.delete(appName);
     } else {
       batchSelectedApps.add(appName);
     }
     batchSelectedApps = batchSelectedApps; // 触发响应式更新
+  }
+
+  function handleKeywordKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter') addKeyword();
+  }
+
+  function handleDomainKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter') addDomain();
   }
 </script>
 
@@ -404,7 +441,7 @@
                   class="control-input flex-1"
                   placeholder={t('settingsPrivacy.keywordPlaceholder')}
                   aria-label={t('settingsPrivacy.keywordPlaceholder')}
-                  on:keydown={(e) => e.key === 'Enter' && addKeyword()}
+                  on:keydown={handleKeywordKeydown}
                 />
                 <button type="button" on:click={addKeyword} class="settings-action-primary">
                   {t('common.add')}
@@ -454,7 +491,7 @@
                   class="control-input flex-1"
                   placeholder={t('settingsPrivacy.domainPlaceholder')}
                   aria-label={t('settingsPrivacy.domainPlaceholder')}
-                  on:keydown={(e) => e.key === 'Enter' && addDomain()}
+                  on:keydown={handleDomainKeydown}
                 />
                 <button type="button" on:click={addDomain} class="settings-action-primary">
                   {t('common.add')}

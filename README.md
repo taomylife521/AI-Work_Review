@@ -372,7 +372,7 @@ npm run tauri:dev    # Development
 npm run tauri:build  # Build
 ```
 
-Requires: Node.js 18+ / Rust stable / Tauri 2 CLI · Tech stack: Tauri 2 + Rust + Svelte 4 + SQLite
+Requires: Node.js 22+ / Rust stable / Tauri 2 CLI · Tech stack: Tauri 2 + Rust + Svelte 4 + SQLite
 
 ---
 

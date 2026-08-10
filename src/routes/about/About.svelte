@@ -1,10 +1,16 @@
-<script>
+<script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { open } from '@tauri-apps/plugin-shell';
   import { getVersion } from '@tauri-apps/api/app';
-  import { locale, t } from '$lib/i18n/index.js';
-  import { runUpdateFlow } from '$lib/utils/updater.js';
+  import { locale, t } from '$lib/i18n/index.ts';
+  import { runUpdateFlow } from '$lib/utils/updater.ts';
+
+  interface UpdateSettings {
+    autoCheck: boolean;
+    lastCheckTime: number;
+    checkIntervalHours: number;
+  }
 
   const wechatSponsorshipQr = new URL('../../../docs/sponsorship/vx.png', import.meta.url).href;
   const alipaySponsorshipQr = new URL('../../../docs/sponsorship/zfb.png', import.meta.url).href;
@@ -14,9 +20,9 @@
   let isCheckingUpdate = false;
   let autoCheckUpdate = true;
   let isSponsorshipOpen = false;
-  let zoomedQr = null;
+  let zoomedQr: string | null = null;
   let updateStatus = '';
-  let updateStatusTimer = null;
+  let updateStatusTimer: ReturnType<typeof setTimeout> | null = null;
   $: currentLocale = $locale;
 
   onMount(async () => {
@@ -29,7 +35,7 @@
     }
 
     try {
-      const settings = await invoke('get_update_settings');
+      const settings = await invoke<UpdateSettings>('get_update_settings');
       autoCheckUpdate = settings?.autoCheck ?? true;
     } catch (e) {
       console.error('读取更新设置失败:', e);
@@ -39,7 +45,7 @@
   async function toggleAutoCheck() {
     autoCheckUpdate = !autoCheckUpdate;
     try {
-      const settings = await invoke('get_update_settings');
+      const settings = await invoke<UpdateSettings>('get_update_settings');
       settings.autoCheck = autoCheckUpdate;
       await invoke('save_update_settings', { settings });
     } catch (e) {
@@ -82,7 +88,7 @@
 
     isCheckingUpdate = false;
     if (updateStatus) {
-      clearTimeout(updateStatusTimer);
+      if (updateStatusTimer !== null) clearTimeout(updateStatusTimer);
       updateStatusTimer = setTimeout(() => {
         updateStatus = '';
         updateStatusTimer = null;
@@ -91,10 +97,10 @@
   }
 
   onDestroy(() => {
-    clearTimeout(updateStatusTimer);
+    if (updateStatusTimer !== null) clearTimeout(updateStatusTimer);
   });
 
-  function handleWindowKeydown(event) {
+  function handleWindowKeydown(event: KeyboardEvent): void {
     if (event.key === 'Escape' && isSponsorshipOpen) {
       closeSponsorshipModal();
     }
