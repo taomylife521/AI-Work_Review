@@ -71,6 +71,9 @@ src-tauri/icons.backup/
 .superpowers/
 # Cargo 工作区根目录的 target/（子 crate 的 target 已分别在上面显式列出）
 /target/
+# 临时 rustc 直编测试可能落到仓库根目录的中间产物
+/*.o
+/*.rmeta
 
 # 会话工作文件（plan-*.md 匹配不到根目录 plan.md，显式列出）
 /plan.md

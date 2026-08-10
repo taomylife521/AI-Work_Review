@@ -416,6 +416,13 @@
     }
   }
 
+  // 仅延续用户已有的底部跟随状态，避免展开旧消息时打断阅读位置。
+  function handleExpandScroll(event: Event): void {
+    const details = event.currentTarget as HTMLDetailsElement;
+    if (!details.open || !stickToBottom) return;
+    void scrollToBottom('auto', 3);
+  }
+
   // 流式更新时自动滚动：仅在用户位于底部附近时才滚（主流 chat 体验）
   function autoScrollOnStream() {
     if (destroyed || !stickToBottom) return;
@@ -1008,6 +1015,7 @@
                       class="ask-tool-summary group/tool"
                       data-state={toolSummaryState(message)}
                       open={shouldExpandToolSummary(message) || undefined}
+                      on:toggle={handleExpandScroll}
                     >
                       <summary>
                         <span class="ask-tool-status-dot" aria-hidden="true"></span>
@@ -1094,7 +1102,7 @@
                   </div>
 
                   {#if message.references?.length}
-                    <details class="ask-reference-trail">
+                    <details class="ask-reference-trail" on:toggle={handleExpandScroll}>
                       <summary aria-label={t('ask.referenceTrail', { count: message.references.length })}>
                         <span>{t('ask.referenceTrail', { count: message.references.length })}</span>
                         <span class="ask-reference-line" aria-hidden="true"></span>
@@ -1165,16 +1173,14 @@
           <div class="ask-composer-controls">
             <details class="ask-context-menu">
               <summary aria-label={t('ask.recordContext')} title={t('ask.recordContext')}>
-                <span class="ask-context-live" aria-hidden="true"></span>
-                <span>{t('ask.recordContext')}</span>
-                <svg class="h-3 w-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m6 9 6 6 6-6" />
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" stroke-width="1.8" />
+                  <path d="M12 10.8v5.2M12 7.5h.01" stroke-width="2" stroke-linecap="round" />
                 </svg>
               </summary>
-              <div class="ask-context-popover">
-                <div>
-                  <span>{t('ask.contextScope')}</span>
-                </div>
+              <div class="ask-context-popover" role="note">
+                <strong>{t('ask.recordContext')}</strong>
+                <span>{t('ask.contextScope')}</span>
                 <p>{t('ask.contextSources')}</p>
               </div>
             </details>

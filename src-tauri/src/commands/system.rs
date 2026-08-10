@@ -7,12 +7,13 @@ use super::avatar::{
 };
 use crate::error::AppError;
 #[cfg(target_os = "linux")]
-use crate::linux_session::{
-    current_linux_desktop_environment, current_linux_desktop_session, LinuxDesktopSession,
-};
+use crate::linux_session::{current_linux_desktop_environment, current_linux_desktop_session};
 use crate::AppState;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use std::path::Path;
+#[cfg(target_os = "macos")]
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::State;
 
@@ -95,7 +96,7 @@ fn normalize_app_icon_rgba(image: image::RgbaImage) -> Option<Vec<u8>> {
     Some(cursor.into_inner())
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
+#[cfg(any(target_os = "macos", test))]
 fn normalize_app_icon_png(png_data: &[u8]) -> Option<Vec<u8>> {
     let image = image::load_from_memory_with_format(png_data, image::ImageFormat::Png)
         .ok()?
@@ -156,7 +157,7 @@ pub async fn get_linux_session_support() -> Result<LinuxSessionSupportInfo, AppE
             "limited"
         };
 
-        return Ok(LinuxSessionSupportInfo {
+        Ok(LinuxSessionSupportInfo {
             platform: "linux".to_string(),
             session_type: session.as_str().to_string(),
             desktop_environment: desktop_environment.as_str().to_string(),
@@ -171,7 +172,7 @@ pub async fn get_linux_session_support() -> Result<LinuxSessionSupportInfo, AppE
             gnome_avatar_extension_installed,
             gnome_avatar_extension_enabled,
             gnome_avatar_extension_needs_relogin,
-        });
+        })
     }
 
     #[cfg(not(target_os = "linux"))]

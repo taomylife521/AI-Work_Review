@@ -8,11 +8,13 @@ use crate::linux_session::{
 };
 use once_cell::sync::Lazy;
 use regex::Regex;
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 use serde_json::Value;
 #[cfg(any(target_os = "windows", test))]
 use std::collections::{HashMap, HashSet};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 use std::path::{Path, PathBuf};
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use std::process::{Command, Output, Stdio};
@@ -776,11 +778,6 @@ pub fn infer_browser_page_hint(window_title: &str) -> Option<String> {
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-pub fn infer_browser_page_hint_from_text(text: &str) -> Option<String> {
-    extract_url_from_text(text)
-}
-
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub fn browser_page_domain_label(page_hint: &str) -> String {
     if let Some(url) = normalize_possible_url(page_hint) {
         let without_scheme = url
@@ -860,6 +857,7 @@ pub fn semantic_category_to_base_category(
     normalize_category_keeping_custom(fallback_category)
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 fn firefox_family_profile_dir_from_ini(base_dir: &Path, ini_content: &str) -> Option<PathBuf> {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum SectionKind {
@@ -968,6 +966,7 @@ fn firefox_family_profile_dir_from_ini(base_dir: &Path, ini_content: &str) -> Op
         .map(PathBuf::from)
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 fn decode_mozlz4_bytes(data: &[u8]) -> std::result::Result<Vec<u8>, String> {
     const HEADER: &[u8; 8] = b"mozLz40\0";
 
@@ -1058,6 +1057,7 @@ fn decode_mozlz4_bytes(data: &[u8]) -> std::result::Result<Vec<u8>, String> {
     Ok(out)
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 fn normalize_session_store_title(value: &str) -> String {
     value
         .split(" - Mozilla Firefox")
@@ -1076,6 +1076,7 @@ fn normalize_session_store_title(value: &str) -> String {
         .to_string()
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 fn extract_active_tab_url_from_session_store_value(
     value: &Value,
     window_title: &str,
@@ -1454,9 +1455,9 @@ fn get_process_image_path(pid: u32) -> Option<String> {
         }
 
         normalize_executable_path(
-            &OsString::from_wide(&buf[..size as usize])
+            OsString::from_wide(&buf[..size as usize])
                 .to_string_lossy()
-                .to_string(),
+                .as_ref(),
         )
     }
 }
@@ -1468,7 +1469,7 @@ fn get_process_name_by_image(pid: u32) -> Option<String> {
     get_process_image_path(pid).and_then(|full_path| {
         full_path
             .split('\\')
-            .last()
+            .next_back()
             .map(|s| s.to_string())
             .filter(|s| !s.is_empty())
     })
@@ -1771,7 +1772,8 @@ struct WindowsBrowserUrlWorker {
 #[cfg(target_os = "windows")]
 impl WindowsBrowserUrlWorker {
     fn new() -> Self {
-        let queue = Arc::new((Mutex::new(LatestOnlySlot::default()), Condvar::new()));
+        let queue: Arc<(Mutex<LatestOnlySlot<BrowserUrlQueryJob>>, Condvar)> =
+            Arc::new((Mutex::new(LatestOnlySlot::default()), Condvar::new()));
         let worker_queue = Arc::clone(&queue);
         let available = thread::Builder::new()
             .name("work-review-browser-uia".to_string())
@@ -2307,6 +2309,7 @@ fn extract_url_from_title(window_title: &str) -> Option<String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     #[cfg(target_os = "linux")]
     use super::firefox_family_session_store_base_dir;
@@ -3524,6 +3527,7 @@ fn find_frontmost_window_bounds(owner_name: &str, window_title: &str) -> Option<
 /// 规范化 Electron 应用名称
 /// 对于一些基于 Electron 的应用，进程名可能是 Electron 或 xxxx Helper
 /// 需要根据窗口标题或其他特征识别真实应用名
+#[cfg(any(target_os = "macos", test))]
 fn normalize_electron_app_name(process_name: &str, window_title: &str) -> String {
     let process_lower = process_name.to_lowercase();
     let title_lower = window_title.to_lowercase();
@@ -3649,6 +3653,7 @@ fn normalize_electron_app_name(process_name: &str, window_title: &str) -> String
     process_name.to_string()
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn is_generic_frontmost_process_name(process_name: &str) -> bool {
     let normalized = process_name.trim().to_lowercase();
     normalized.contains("electron")
@@ -3657,6 +3662,7 @@ fn is_generic_frontmost_process_name(process_name: &str) -> bool {
         || normalized.contains(" helper (")
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn trim_macos_helper_suffix(name: &str) -> String {
     let trimmed = name.trim();
     let lower = trimmed.to_lowercase();
@@ -3674,6 +3680,7 @@ fn trim_macos_helper_suffix(name: &str) -> String {
     trimmed.to_string()
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn is_generic_app_display_name(name: &str) -> bool {
     let normalized = trim_macos_helper_suffix(name).trim().to_lowercase();
     normalized.is_empty()
@@ -3682,6 +3689,7 @@ fn is_generic_app_display_name(name: &str) -> bool {
         || normalized == "application"
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn display_name_from_macos_app_path(app_path: &str) -> Option<String> {
     let path = Path::new(app_path);
     let bundle_name = path
@@ -3703,6 +3711,7 @@ fn display_name_from_macos_app_path(app_path: &str) -> Option<String> {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn humanize_bundle_identifier_token(token: &str) -> Option<String> {
     let trimmed = token.trim_matches(|c: char| !c.is_ascii_alphanumeric());
     if trimmed.is_empty() {
@@ -3724,6 +3733,7 @@ fn humanize_bundle_identifier_token(token: &str) -> Option<String> {
     Some(rendered)
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn display_name_from_bundle_identifier(bundle_identifier: &str) -> Option<String> {
     let generic_segments = ["com", "cn", "net", "org", "io", "app", "desktop", "helper"];
 
@@ -3772,6 +3782,7 @@ fn display_name_from_bundle_identifier(bundle_identifier: &str) -> Option<String
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn normalize_macos_frontmost_app_name(
     process_name: &str,
     window_title: &str,
@@ -4371,7 +4382,9 @@ pub fn current_linux_active_window_provider(
     session: LinuxDesktopSession,
     desktop_environment: LinuxDesktopEnvironment,
 ) -> Option<&'static str> {
-    let providers: &[(&str, fn() -> bool)] = match session {
+    type ProviderAvailabilityProbe = (&'static str, fn() -> bool);
+
+    let providers: &[ProviderAvailabilityProbe] = match session {
         LinuxDesktopSession::X11 => &[("xdotool", is_x11_active_window_provider_available)],
         LinuxDesktopSession::Wayland => match desktop_environment {
             LinuxDesktopEnvironment::Gnome => &[

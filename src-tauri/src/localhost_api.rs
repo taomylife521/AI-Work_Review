@@ -1,6 +1,7 @@
 use crate::commands;
 use crate::config::DEFAULT_LOCALHOST_API_PORT;
 use crate::error::{AppError, Result};
+use crate::screenshot::ScreenshotResult;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -8,6 +9,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::net::TcpListener as StdTcpListener;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use subtle::ConstantTimeEq;
@@ -29,6 +31,23 @@ pub fn effective_api_host(config_host: Option<&str>) -> String {
 const LOCALHOST_API_TOKEN_FILE: &str = "localhost_api_token.txt";
 const MAX_REQUEST_BYTES: usize = 256 * 1024;
 const MAX_BODY_BYTES: usize = 128 * 1024;
+static API_CAPTURE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+
+#[derive(Debug)]
+struct ApiCapturePermit;
+
+fn acquire_api_capture_permit() -> Result<ApiCapturePermit> {
+    API_CAPTURE_IN_PROGRESS
+        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+        .map(|_| ApiCapturePermit)
+        .map_err(|_| AppError::Config("即时截图正在进行，请稍后重试".to_string()))
+}
+
+impl Drop for ApiCapturePermit {
+    fn drop(&mut self) {
+        API_CAPTURE_IN_PROGRESS.store(false, Ordering::Release);
+    }
+}
 
 #[derive(Default)]
 pub struct LocalhostApiRuntime {
@@ -77,6 +96,17 @@ struct GenerateReportRequest {
     force: Option<bool>,
     #[serde(default)]
     locale: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ScreenshotCapturePayload {
+    captured_at: i64,
+    width: u32,
+    height: u32,
+    mime_type: &'static str,
+    image_base64: String,
+    relative_path: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -672,6 +702,79 @@ fn handle_current_context(state: &Arc<Mutex<AppState>>) -> Result<HttpResponse> 
     ))
 }
 
+fn ensure_api_capture_enabled(screenshots_enabled: bool) -> Result<()> {
+    if screenshots_enabled {
+        Ok(())
+    } else {
+        Err(AppError::Config(
+            "截图与 OCR 已关闭，请先在存储设置中启用后再调用即时截图 API".to_string(),
+        ))
+    }
+}
+
+fn build_capture_payload(
+    data_dir: &Path,
+    result: ScreenshotResult,
+    image_base64: String,
+) -> ScreenshotCapturePayload {
+    let relative_path = result
+        .path
+        .strip_prefix(data_dir)
+        .ok()
+        .filter(|path| !path.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .or_else(|| result.path.file_name().map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from("capture.jpg"))
+        .to_string_lossy()
+        .replace('\\', "/");
+
+    ScreenshotCapturePayload {
+        captured_at: result.timestamp,
+        width: result.width,
+        height: result.height,
+        mime_type: "image/jpeg",
+        image_base64,
+        relative_path,
+    }
+}
+
+/// 立即截取当前活动界面。强制仅表示绕过定时采集，不绕过用户的截图隐私开关。
+async fn handle_capture_screenshot(state: &Arc<Mutex<AppState>>) -> Result<HttpResponse> {
+    let permit = acquire_api_capture_permit()?;
+    let active_window = crate::monitor::get_active_window_fast().ok();
+    let (data_dir, screenshot_service) = {
+        let guard = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+        ensure_api_capture_enabled(guard.config.storage.screenshots_enabled)?;
+        (guard.data_dir.clone(), guard.screenshot_service.clone())
+    };
+
+    let payload = tokio::task::spawn_blocking(move || -> Result<ScreenshotCapturePayload> {
+        let _permit = permit;
+        let result = screenshot_service.capture_for_window(active_window.as_ref())?;
+        let encoded_result = screenshot_service.generate_full_image_base64(&result.path);
+
+        if let Some(temp_path) = result
+            .ocr_source_path
+            .as_ref()
+            .filter(|path| *path != &result.path)
+        {
+            if let Err(error) = std::fs::remove_file(temp_path) {
+                log::warn!(
+                    "清理即时截图 OCR 临时文件失败 {}: {error}",
+                    temp_path.display()
+                );
+            }
+        }
+
+        let image_base64 = encoded_result?;
+        Ok(build_capture_payload(&data_dir, result, image_base64))
+    })
+    .await
+    .map_err(|e| AppError::Unknown(format!("即时截图任务异常: {e}")))??;
+
+    Ok(HttpResponse::json(200, &payload))
+}
+
 fn parse_generate_report_params(
     request: &ParsedRequest,
 ) -> Result<(String, Option<bool>, Option<String>)> {
@@ -844,6 +947,7 @@ async fn route_request(
         }
         ("GET", "/v1/device") => handle_device_info(state),
         ("GET", "/v1/context") => handle_current_context(state),
+        ("POST", "/v1/screenshots/capture") => handle_capture_screenshot(state).await,
         ("GET", "/v1/weekly-review") => {
             let date_from = request.query.get("date_from").cloned();
             let date_to = request.query.get("date_to").cloned();
@@ -1098,10 +1202,13 @@ fn authorize_request(request: &ParsedRequest, state: &Arc<Mutex<AppState>>) -> R
 #[cfg(test)]
 mod tests {
     use super::{
-        effective_api_host, extract_bearer_token, mask_localhost_api_token,
+        acquire_api_capture_permit, build_capture_payload, effective_api_host,
+        ensure_api_capture_enabled, extract_bearer_token, mask_localhost_api_token,
         parse_generate_report_params, request_auth_mode, ParsedRequest, RequestAuthMode,
     };
+    use crate::screenshot::ScreenshotResult;
     use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
 
     fn parsed_request(
         method: &str,
@@ -1118,6 +1225,69 @@ mod tests {
             headers: HashMap::new(),
             body: serde_json::to_vec(&body).expect("请求体应可序列化"),
         }
+    }
+
+    #[test]
+    fn 即时截图响应应返回相对路径和可直接使用的图像数据() {
+        let payload = build_capture_payload(
+            Path::new("/tmp/work-review-data"),
+            ScreenshotResult {
+                path: PathBuf::from("/tmp/work-review-data/screenshots/2026-08-10/shot.jpg"),
+                ocr_source_path: None,
+                timestamp: 1_786_334_400,
+                width: 1440,
+                height: 900,
+            },
+            "encoded-jpeg".to_string(),
+        );
+        let json = serde_json::to_value(payload).expect("截图响应应可序列化");
+
+        assert_eq!(json["capturedAt"], 1_786_334_400);
+        assert_eq!(json["width"], 1440);
+        assert_eq!(json["height"], 900);
+        assert_eq!(json["mimeType"], "image/jpeg");
+        assert_eq!(json["imageBase64"], "encoded-jpeg");
+        assert_eq!(json["relativePath"], "screenshots/2026-08-10/shot.jpg");
+        assert!(json.get("path").is_none(), "不得暴露绝对文件路径");
+    }
+
+    #[test]
+    fn 即时截图路径异常时也不得暴露绝对路径() {
+        let payload = build_capture_payload(
+            Path::new("/tmp/work-review-data"),
+            ScreenshotResult {
+                path: PathBuf::from("/private/tmp/unexpected-shot.jpg"),
+                ocr_source_path: None,
+                timestamp: 1_786_334_400,
+                width: 1440,
+                height: 900,
+            },
+            "encoded-jpeg".to_string(),
+        );
+        let json = serde_json::to_value(payload).expect("截图响应应可序列化");
+
+        assert_eq!(json["relativePath"], "unexpected-shot.jpg");
+        assert!(!json["relativePath"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with('/'));
+    }
+
+    #[test]
+    fn 关闭截图功能时即时截图api不应绕过隐私开关() {
+        let error = ensure_api_capture_enabled(false).expect_err("关闭截图时必须拒绝请求");
+        assert!(error.to_string().contains("截图与 OCR"));
+        assert!(ensure_api_capture_enabled(true).is_ok());
+    }
+
+    #[test]
+    fn 即时截图应限制为单个并发任务并在结束后释放许可() {
+        let permit = acquire_api_capture_permit().expect("首个截图任务应取得许可");
+        let error = acquire_api_capture_permit().expect_err("并发截图任务必须被拒绝");
+        assert!(error.to_string().contains("正在进行"));
+
+        drop(permit);
+        assert!(acquire_api_capture_permit().is_ok(), "任务结束后应释放许可");
     }
 
     #[test]

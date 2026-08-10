@@ -1550,13 +1550,15 @@ pub fn filter_sensitive_text(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_retry_region_plans, execute_ocr_pipeline_with, merge_ocr_results, paddle_worker_slot,
-        preprocess_image_for_retry, request_paddle_via_worker, should_retry_after_initial_ocr,
-        OcrResult, PaddleModelConfig,
+        build_retry_region_plans, execute_ocr_pipeline_with, merge_ocr_results,
+        preprocess_image_for_retry, should_retry_after_initial_ocr, OcrResult,
     };
+    #[cfg(unix)]
+    use super::{paddle_worker_slot, request_paddle_via_worker, PaddleModelConfig};
     use image::{DynamicImage, Rgba, RgbaImage};
     use std::collections::VecDeque;
     use std::path::{Path, PathBuf};
+    #[cfg(unix)]
     use std::sync::{Mutex, OnceLock};
     use uuid::Uuid;
 

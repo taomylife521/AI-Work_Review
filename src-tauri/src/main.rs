@@ -486,6 +486,7 @@ fn should_hide_main_window_on_setup(_config: &AppConfig, launch_args: &[String])
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn should_request_screen_capture_permission(
     has_screen_capture_permission: bool,
     already_prompted: bool,
@@ -493,6 +494,7 @@ fn should_request_screen_capture_permission(
     !has_screen_capture_permission && !already_prompted
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn should_initialize_startup_permissions(status: ConfigLoadStatus) -> bool {
     !status.requires_fail_safe()
 }

@@ -13,7 +13,9 @@ test('Release workflow 应在构建前执行类型检查、前端测试并使用
   assert.match(source, /name:\s*Build frontend assets for Rust tests/);
   assert.match(source, /run:\s*npm run build/);
   assert.match(source, /name:\s*Run Rust tests/);
-  assert.match(source, /run:\s*cargo test --manifest-path src-tauri\/Cargo\.toml/);
+  assert.match(source, /run:\s*cargo check --workspace --all-targets/);
+  assert.match(source, /run:\s*cargo clippy --workspace --all-targets -- -D warnings/);
+  assert.match(source, /run:\s*cargo test --workspace --all-targets/);
 
   const typeCheckIndex = source.indexOf('name: Run frontend type check');
   const frontendIndex = source.indexOf('name: Run frontend tests');
@@ -30,6 +32,85 @@ test('Release workflow 应在构建前执行类型检查、前端测试并使用
   assert.ok(frontendIndex < buildIndex, '前端测试必须先于构建执行');
   assert.ok(frontendBuildIndex < rustIndex, 'Rust 测试前必须先生成 frontendDist');
   assert.ok(rustIndex < buildIndex, 'Rust 测试必须先于构建执行');
+});
+
+test('Release workflow 应校验严格 SemVer、五处版本一致并只允许当前 main 发布', () => {
+  const source = readFileSync(new URL('./.github/workflows/release.yml', import.meta.url), 'utf8');
+  const bashPattern = source.match(
+    /if \[\[ ! "\$GITHUB_REF_NAME" =~ (\^\S+\$) \]\]; then/,
+  )?.[1];
+
+  assert.match(source, /tags:\s*\n\s*-\s*'v\[0-9\]\+\.\[0-9\]\+\.\[0-9\]\+'/);
+  assert.match(source, /name:\s*Validate release tag and version/);
+  assert.ok(bashPattern, '应能读取发布工作流中的 SemVer 校验表达式');
+  const strictSemver = new RegExp(bashPattern);
+  for (const valid of ['v0.0.0', 'v1.1.1', 'v12.34.56']) {
+    assert.match(valid, strictSemver);
+  }
+  for (const invalid of ['v01.2.3', 'v1.02.3', 'v1.2.03', 'v1.2', '1.2.3']) {
+    assert.doesNotMatch(invalid, strictSemver);
+  }
+  assert.match(source, /npm run test:frontend/);
+  assert.match(source, /git fetch origin main/);
+  assert.match(source, /git rev-parse origin\/main/);
+  assert.match(source, /GITHUB_REF_NAME/);
+});
+
+test('官方 Actions 应使用 Node 24 运行时版本', () => {
+  const workflowFiles = [
+    './.github/workflows/ci.yml',
+    './.github/workflows/release.yml',
+    './.github/workflows/security-audit.yml',
+  ];
+  const combined = workflowFiles
+    .map((path) => readFileSync(new URL(path, import.meta.url), 'utf8'))
+    .join('\n');
+
+  assert.doesNotMatch(combined, /actions\/(?:checkout|setup-node|upload-artifact|download-artifact)@v4/);
+  assert.match(combined, /actions\/checkout@v7/);
+  assert.match(combined, /actions\/setup-node@v7/);
+  assert.match(combined, /actions\/upload-artifact@v7/);
+  assert.match(combined, /actions\/download-artifact@v8/);
+});
+
+test('Security Audit 应允许 rustsec Action 更新检查与告警 Issue', () => {
+  const source = readFileSync(
+    new URL('./.github/workflows/security-audit.yml', import.meta.url),
+    'utf8',
+  );
+  const cargoAuditJob = source.match(
+    /\n  cargo-audit:\n([\s\S]*?)(?=\n  \S|$)/,
+  )?.[1] ?? '';
+  const npmAuditJob = source.match(
+    /\n  npm-audit:\n([\s\S]*?)(?=\n  \S|$)/,
+  )?.[1] ?? '';
+  const workflowPermissions = source.match(
+    /\npermissions:\n([\s\S]*?)(?=\n\S)/,
+  )?.[1] ?? '';
+  const permissions = cargoAuditJob.match(
+    /\n    permissions:\n([\s\S]*?)(?=\n    \S)/,
+  )?.[1] ?? '';
+
+  assert.ok(cargoAuditJob, '应能读取 cargo-audit job');
+  assert.ok(npmAuditJob, '应能读取 npm-audit job');
+  assert.match(permissions, /^\s+contents: read$/m);
+  assert.match(permissions, /^\s+checks: write$/m);
+  assert.match(permissions, /^\s+issues: write$/m);
+  assert.doesNotMatch(workflowPermissions, /^\s+(?:checks|issues): write$/m);
+  assert.doesNotMatch(npmAuditJob, /^\s+(?:checks|issues): write$/m);
+});
+
+test('Release workflow 缺少便携包、构建产物或附件时必须失败', () => {
+  const source = readFileSync(new URL('./.github/workflows/release.yml', import.meta.url), 'utf8');
+  const portableStep = source.match(
+    /- name: Package Windows portable[\s\S]*?(?=\n\s+- name:)/,
+  )?.[0] ?? '';
+
+  assert.ok(portableStep, '应存在 Windows 便携包步骤');
+  assert.doesNotMatch(portableStep, /跳过便携版|exit 0/);
+  assert.match(source, /require_file "\*\/release\/Work_Review_portable_x64\.zip"/);
+  assert.match(source, /if-no-files-found:\s*error/);
+  assert.match(source, /artifactErrorsFailBuild:\s*true/);
 });
 
 test('macOS release 应保持 ad-hoc 签名且不导入自签证书', () => {

@@ -3,10 +3,56 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - 'v[0-9]+.[0-9]+.[0-9]+'
 
 jobs:
+  preflight:
+    name: 发布前版本校验
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Validate release tag and version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Tag 必须是严格 SemVer：vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+
+          VERSION="$(node -p "require('./package.json').version")"
+          if [[ "$GITHUB_REF_NAME" != "v${VERSION}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} 与应用版本 v${VERSION} 不一致" >&2
+            exit 1
+          fi
+
+          npm run test:frontend
+
+          git fetch origin main
+          TAG_SHA="$(git rev-parse "$GITHUB_SHA^{commit}")"
+          MAIN_SHA="$(git rev-parse origin/main)"
+          if [[ "$TAG_SHA" != "$MAIN_SHA" ]]; then
+            echo "Tag 必须指向 origin/main 当前提交：tag=${TAG_SHA}, main=${MAIN_SHA}" >&2
+            exit 1
+          fi
+
   build-tauri:
+    needs: preflight
     permissions:
       contents: read
     strategy:
@@ -32,15 +78,16 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Rust 1.97.1
         uses: dtolnay/rust-toolchain@1.97.1
         with:
+          components: rustfmt, clippy
           targets: ${{ matrix.target }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: "npm"
@@ -80,8 +127,19 @@ jobs:
       - name: Build frontend assets for Rust tests
         run: npm run build
 
+      - name: Run Rust format check
+        run: cargo fmt --all -- --check
+
+      - name: Run Rust check
+        run: cargo check --workspace --all-targets
+        env:
+          RUSTFLAGS: -D warnings
+
+      - name: Run Rust clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
       - name: Run Rust tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo test --workspace --all-targets
 
       - name: Build application
         env:
@@ -189,8 +247,8 @@ jobs:
           # 便携版 = Rust 主程序 exe（前端已嵌入，需 WebView2 运行时，Win10/11 自带）
           EXE="$(find target -name "Work_Review.exe" -path "*/release/*" -not -path "*/build/*" -not -path "*/deps/*" 2>/dev/null | head -n 1 || true)"
           if [[ -z "$EXE" || ! -f "$EXE" ]]; then
-            echo "Work_Review.exe 未找到，跳过便携版"
-            exit 0
+            echo "Work_Review.exe 未找到，无法生成便携版" >&2
+            exit 1
           fi
           DIR="$(dirname "$EXE")"
           printf 'Work Review 便携版\n\n- 双击 Work_Review.exe 直接运行，无需安装\n- 需要 WebView2 运行时（Windows 10/11 已自带；旧系统请自行安装）\n- 数据保存在 %%APPDATA%%\\work-review\n' > "$DIR/PORTABLE_README.txt"
@@ -288,11 +346,12 @@ jobs:
             x86_64-pc-windows-msvc)
               require_file "*/release/bundle/nsis/*.exe" "Windows 安装包"
               require_file "*/release/bundle/nsis/*.sig" "Windows 安装包签名"
+              require_file "*/release/Work_Review_portable_x64.zip" "Windows 便携包"
               ;;
           esac
 
       - name: Upload release assets
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-assets-${{ matrix.platform }}-${{ strategy.job-index }}
           path: |
@@ -306,7 +365,7 @@ jobs:
             target/**/release/bundle/appimage/*.AppImage
             target/**/release/bundle/deb/*.deb
             target/**/release/bundle/rpm/*.rpm
-          if-no-files-found: warn
+          if-no-files-found: error
 
   publish-release:
     needs: build-tauri
@@ -315,10 +374,10 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: all-artifacts
           pattern: "release-assets-*"
@@ -478,7 +537,10 @@ jobs:
           name: "Work_Review ${{ github.ref_name }}"
           bodyFile: release_notes.md
           token: ${{ secrets.GITHUB_TOKEN }}
-          artifacts: "all-artifacts/**/*,updater.json,updater-ghproxy.json,updater-ghp.json"
-          artifactErrorsFailBuild: false
+          # 按扩展名精确匹配文件，避免 all-artifacts/**/* 把合并后的
+          # target-triple 目录（如 x86_64-unknown-linux-gnu/）也当作产物上传，
+          # 触发 "Artifact is a directory" 错误。
+          artifacts: "all-artifacts/**/*.AppImage,all-artifacts/**/*.deb,all-artifacts/**/*.rpm,all-artifacts/**/*.exe,all-artifacts/**/*.exe.sig,all-artifacts/**/*.dmg,all-artifacts/**/*.app.tar.gz,all-artifacts/**/*.app.tar.gz.sig,all-artifacts/*_portable_*.zip,updater.json,updater-ghproxy.json,updater-ghp.json"
+          artifactErrorsFailBuild: true
           replacesArtifacts: true
           makeLatest: legacy

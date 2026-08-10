@@ -92,15 +92,43 @@ test('工具过程与高风险操作确认能力应继续保留', () => {
   assert.match(source, /respondConfirm\(message\.id, step, false\)/);
 });
 
-test('输入框内部应说明参考记录的范围和来源', () => {
-  const composer = source.match(/<div class="ask-composer-shell[\s\S]*?<\/div>\s*<\/div>/)?.[0] ?? '';
+test('展开详情仅在原本跟随底部时继续追底，且两个入口均已绑定', () => {
+  const handler = source.match(
+    /function handleExpandScroll\(event(?:\s*:[^)]+)?\)[^{]*\{[\s\S]*?\n  \}/,
+  )?.[0] ?? '';
 
-  assert.ok(composer, '应渲染输入框容器');
-  assert.match(composer, /ask-context-menu/);
-  assert.match(composer, /<summary aria-label=\{t\('ask\.recordContext'\)\}/);
-  assert.match(composer, /t\('ask\.recordContext'\)/);
-  assert.match(composer, /t\('ask\.contextScope'\)/);
-  assert.match(composer, /t\('ask\.contextSources'\)/);
+  assert.ok(handler, '应存在详情展开滚动处理器');
+  assert.match(handler, /if\s*\(\s*!details\.open\s*\|\|\s*!stickToBottom\s*\)\s*return;/);
+  assert.doesNotMatch(handler, /stickToBottom\s*=\s*true/);
+  assert.match(handler, /void scrollToBottom\('auto',\s*3\)/);
+  assert.equal(countMatches(source, /on:toggle=\{handleExpandScroll\}/g), 2);
+  assert.match(
+    source,
+    /class="ask-tool-summary[^"]*"[\s\S]{0,180}on:toggle=\{handleExpandScroll\}/,
+  );
+  assert.match(
+    source,
+    /class="ask-reference-trail"[^>]*on:toggle=\{handleExpandScroll\}/,
+  );
+});
+
+test('输入器中的上下文说明入口应具备原生键盘语义和本地化名称', () => {
+  const start = source.indexOf('<div class="ask-composer-shell');
+  const end = source.indexOf('<p class="ask-composer-hint"', start);
+  const composer = start >= 0 && end > start ? source.slice(start, end) : '';
+  const context = composer.match(
+    /<details class="ask-context-menu"[^>]*>\s*<summary\b[\s\S]*?<\/details>/,
+  )?.[0] ?? '';
+
+  assert.ok(context, '输入器内应保留轻量上下文说明入口');
+  assert.match(
+    context,
+    /^<details[^>]*>\s*<summary[^>]*aria-label=\{t\('ask\.recordContext'\)\}/,
+  );
+  assert.match(context, /title=\{t\('ask\.recordContext'\)\}/);
+  assert.match(context, /t\('ask\.contextScope'\)/);
+  assert.match(context, /t\('ask\.contextSources'\)/);
+  assert.match(context, /aria-hidden="true"/);
   assert.doesNotMatch(composer, /currentContextDate|ask\.workContext/);
   assert.doesNotMatch(composer, /\{currentModelLabel\}/);
 });

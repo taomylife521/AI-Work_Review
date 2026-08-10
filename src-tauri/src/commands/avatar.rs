@@ -3,9 +3,7 @@
 use crate::config::AvatarFollowupItem;
 use crate::error::AppError;
 #[cfg(target_os = "linux")]
-use crate::linux_session::{
-    current_linux_desktop_environment, current_linux_desktop_session, LinuxDesktopSession,
-};
+use crate::linux_session::{current_linux_desktop_environment, current_linux_desktop_session};
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 #[cfg(target_os = "linux")]
@@ -302,13 +300,13 @@ pub async fn install_gnome_avatar_extension() -> Result<GnomeAvatarExtensionInst
             "GNOME 桌宠扩展文件已写入，请确认系统已安装 gnome-extensions 并手动启用扩展".to_string()
         };
 
-        return Ok(GnomeAvatarExtensionInstallResult {
+        Ok(GnomeAvatarExtensionInstallResult {
             installed: true,
             enabled,
             requires_relogin,
             extension_dir: install_dir.to_string_lossy().to_string(),
             message,
-        });
+        })
     }
 
     #[cfg(not(target_os = "linux"))]
