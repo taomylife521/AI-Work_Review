@@ -247,6 +247,21 @@ test('前端工具配置应迁移到 TypeScript，并保留 Svelte 工具链兼�
   assert.match(viteConfig, /plugins:\s*\[tailwindcss\(\),\s*autoprefixer\(\)\]/);
 });
 
+test('Svelte 脚本不应包含会破坏 Vite 开发依赖扫描的原始 HTML 注释起始符', async () => {
+  const svelteFiles = await collectSvelteFiles('src');
+  const offenders: string[] = [];
+
+  await Promise.all(svelteFiles.map(async (path) => {
+    const source = await readFile(projectFile(path), 'utf8');
+    const scripts = source.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g);
+    if ([...scripts].some((match) => match[1].includes('<!--'))) {
+      offenders.push(path);
+    }
+  }));
+
+  assert.deepEqual(offenders.sort(), []);
+});
+
 test('TypeScript 配置应启用严格检查并覆盖全部第一方脚本', async () => {
   const tsconfig = JSON.parse(await readFile(projectFile('tsconfig.json'), 'utf8'));
   const viteTypes = await readFile(projectFile('src/vite-env.d.ts'), 'utf8');

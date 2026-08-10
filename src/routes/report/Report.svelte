@@ -702,6 +702,8 @@
   // 生成端输出专用 summary 字段属后端增强,留待后端批次;派生失败时整段隐藏,不占版面。
   const INSIGHT_SCAN_LINES = 40;
   const INSIGHT_MAX_LENGTH = 160;
+  const HTML_COMMENT_START = '<' + '!--';
+  const HTML_COMMENT_RE = new RegExp(`${HTML_COMMENT_START}[\\s\\S]*?-->`, 'g');
 
   function stripInlineMarkdown(text: string): string {
     return (text || '')
@@ -719,7 +721,7 @@
       const line = rawLine.trim();
       if (!line) continue;
       if (
-        line.startsWith('<!--') ||
+        line.startsWith(HTML_COMMENT_START) ||
         line.startsWith('<details') ||
         line.startsWith('#') ||
         line.startsWith('|') ||
@@ -746,7 +748,7 @@
   function countReportChars(content: string | null | undefined): number {
     if (!content) return 0;
     return content
-      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(HTML_COMMENT_RE, '')
       .replace(/[#>*`_\-|[\]()!]/g, '')
       .replace(/\s+/g, '')
       .length;
