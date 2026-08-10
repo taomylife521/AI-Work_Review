@@ -140,12 +140,17 @@ test('全局根字号应为 16px、正文不得低于 10px，标题不得使用�
 
 test('深色 A 风格应通过共享 token 控制卡片边界', async () => {
   const css = await readFile(cssUrl, 'utf8');
+  const styleACards = readCssBlock(css, '.app-shell.ui-style-a .page-card,');
   const darkStyleA = readCssBlock(css, '.dark .app-shell.ui-style-a');
   const darkStyleACards = readCssBlock(css, '.dark .app-shell.ui-style-a .page-card,');
+  const sharedDarkSurfaces = readCssBlock(css, '.dark .overview-lead-card,');
 
+  assert.doesNotMatch(styleACards, /border-color:/);
   assert.match(darkStyleA, /--surface-border-subtle:/);
   assert.match(darkStyleA, /--surface-border-default:/);
   assert.doesNotMatch(darkStyleACards, /border-color:/);
+  assert.match(sharedDarkSurfaces, /border-color:\s*var\(--surface-border-default\)/);
+  assert.doesNotMatch(sharedDarkSurfaces, /border-color:\s*rgba\(/);
 });
 
 test('助手与关于页应将操作区接入操作轴，并让主体继续使用阅读轴', async () => {

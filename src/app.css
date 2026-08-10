@@ -4317,7 +4317,7 @@
 .dark .overview-panel-subtle,
 .dark .report-article-card,
 .dark .report-sheet-controls {
-  border-color: rgba(71, 85, 105, 0.5);
+  border-color: var(--surface-border-default);
 }
 
 /* 深色模式：顶部白色渐变高光（::before）在深色下变刺眼白线，直接隐藏 */
@@ -4500,7 +4500,6 @@
 .app-shell.ui-style-a .page-card,
 .app-shell.ui-style-a .page-card-soft {
   background: #ffffff;
-  border-color: rgba(203, 213, 225, 0.82);
   box-shadow: none;
   backdrop-filter: none;
 }
