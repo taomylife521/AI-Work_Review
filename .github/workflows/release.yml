@@ -540,7 +540,7 @@ jobs:
           # 按扩展名精确匹配文件，避免 all-artifacts/**/* 把合并后的
           # target-triple 目录（如 x86_64-unknown-linux-gnu/）也当作产物上传，
           # 触发 "Artifact is a directory" 错误。
-          artifacts: "all-artifacts/**/*.AppImage,all-artifacts/**/*.deb,all-artifacts/**/*.rpm,all-artifacts/**/*.exe,all-artifacts/**/*.exe.sig,all-artifacts/**/*.dmg,all-artifacts/**/*.app.tar.gz,all-artifacts/**/*.app.tar.gz.sig,all-artifacts/*_portable_*.zip,updater.json,updater-ghproxy.json,updater-ghp.json"
+          artifacts: "all-artifacts/**/*.AppImage,all-artifacts/**/*.deb,all-artifacts/**/*.rpm,all-artifacts/**/*.exe,all-artifacts/**/*.exe.sig,all-artifacts/**/*.dmg,all-artifacts/**/*.app.tar.gz,all-artifacts/**/*.app.tar.gz.sig,all-artifacts/**/Work_Review_portable_*.zip,updater.json,updater-ghproxy.json,updater-ghp.json"
           artifactErrorsFailBuild: true
           replacesArtifacts: true
           makeLatest: legacy

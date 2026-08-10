@@ -109,6 +109,8 @@ test('Release workflow 缺少便携包、构建产物或附件时必须失败', 
   assert.ok(portableStep, '应存在 Windows 便携包步骤');
   assert.doesNotMatch(portableStep, /跳过便携版|exit 0/);
   assert.match(source, /require_file "\*\/release\/Work_Review_portable_x64\.zip"/);
+  assert.match(source, /all-artifacts\/\*\*\/Work_Review_portable_\*\.zip/);
+  assert.doesNotMatch(source, /all-artifacts\/\*_portable_\*\.zip/);
   assert.match(source, /if-no-files-found:\s*error/);
   assert.match(source, /artifactErrorsFailBuild:\s*true/);
 });
