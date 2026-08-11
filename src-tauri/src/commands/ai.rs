@@ -1,9 +1,9 @@
 //! Auto-extracted from the historical `commands.rs`. Behavior unchanged.
 
-use crate::config::{AiProvider, AiProviderConfig, ModelConfig};
-use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use work_review_core::config::{AiProvider, AiProviderConfig, ModelConfig};
+use work_review_core::error::AppError;
 
 /// 模型测试结果
 #[derive(Serialize, Deserialize, Debug)]
@@ -689,7 +689,7 @@ pub async fn fetch_models(
         return Err(AppError::Config("API 地址不能为空".to_string()));
     }
 
-    let provider: crate::config::AiProvider =
+    let provider: work_review_core::config::AiProvider =
         serde_json::from_value(serde_json::Value::String(provider))
             .map_err(|_| AppError::Config("未知的 AI 提供商类型".to_string()))?;
 
@@ -698,7 +698,7 @@ pub async fn fetch_models(
         .build()?;
 
     match provider {
-        crate::config::AiProvider::Ollama => {
+        work_review_core::config::AiProvider::Ollama => {
             let response = client
                 .get(format!("{endpoint}/api/tags"))
                 .send()
@@ -713,13 +713,13 @@ pub async fn fetch_models(
             let data: serde_json::Value = response.json().await?;
             resolve_ollama_text_model_names(&client, &endpoint, &data).await
         }
-        crate::config::AiProvider::Gemini => {
+        work_review_core::config::AiProvider::Gemini => {
             let api_key = api_key
                 .filter(|k| !k.is_empty())
                 .ok_or(AppError::Config("Gemini 需要 API Key".to_string()))?;
             fetch_gemini_models(&client, &endpoint, &api_key).await
         }
-        crate::config::AiProvider::Claude => {
+        work_review_core::config::AiProvider::Claude => {
             let api_key = api_key
                 .filter(|k| !k.is_empty())
                 .ok_or(AppError::Config("Claude 需要 API Key".to_string()))?;

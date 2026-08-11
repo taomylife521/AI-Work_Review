@@ -3,11 +3,11 @@
 //! Agent 写入由 `ask.rs` 的 ActionBridge 承担；这里仅提供用户在设置页主动管理
 //! 本机长期记忆所需的 CRUD 接口。
 
-use crate::database::{AssistantUserMemory, Database};
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use tauri::State;
+use work_review_core::database::{AssistantUserMemory, Database};
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

@@ -3,12 +3,12 @@
 //! 职责：把统一的消息格式翻译成各家 API 的请求格式，
 //!       把各家 API 的响应翻译回统一格式。
 
-use crate::config::{AiProvider, ModelConfig};
-use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
+use work_review_core::config::{AiProvider, ModelConfig};
+use work_review_core::error::AppError;
 
 /// 非流式共享 HTTP 客户端（整体 60s / 连接 10s 超时）。
 /// 进程内复用连接池，避免每次模型调用都重建客户端与 TLS 连接。

@@ -8,7 +8,7 @@ use tauri::Manager;
 #[cfg(not(windows))]
 use tauri_plugin_autostart::ManagerExt;
 
-use crate::error::{AppError, Result};
+use work_review_core::error::{AppError, Result};
 
 #[cfg(windows)]
 const AUTOSTART_LAUNCH_ARG: &str = "--autostart";

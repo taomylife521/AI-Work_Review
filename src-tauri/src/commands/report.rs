@@ -1,19 +1,19 @@
 //! Auto-extracted from the historical `commands.rs`. Behavior unchanged.
 
-use crate::analysis::AppLocale;
-use crate::config::AppConfig;
-use crate::database::DailyReport;
-use crate::error::AppError;
 use crate::AppState;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, State};
+use work_review_core::analysis::AppLocale;
+use work_review_core::config::AppConfig;
+use work_review_core::database::DailyReport;
+use work_review_core::error::AppError;
 
 use super::shared::{collect_privacy_filters, filter_activities_by_privacy, persist_app_config};
 
 fn resolve_saved_report_metadata(
-    configured_mode: &crate::config::AiMode,
+    configured_mode: &work_review_core::config::AiMode,
     configured_model_name: &str,
     used_ai: bool,
 ) -> (String, Option<String>) {
@@ -181,7 +181,7 @@ pub(crate) async fn generate_report_inner(
     }
 
     // 创建分析器（使用 text_model 配置）
-    let analyzer = crate::analysis::create_analyzer(
+    let analyzer = work_review_core::analysis::create_analyzer(
         config.ai_mode,
         config.text_model.provider,
         &config.text_model.endpoint,
@@ -416,7 +416,7 @@ pub(crate) fn get_saved_report_inner(
             .iter()
             .map(|c| (c.key.clone(), c.name.clone()))
             .collect();
-        report.content = crate::analysis::report_blocks::render_report_with_live_stats(
+        report.content = work_review_core::analysis::report_blocks::render_report_with_live_stats(
             &report.content,
             &live_stats,
             report_locale,
@@ -729,8 +729,8 @@ pub struct ExportReportsRangeResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::AiMode;
     use std::path::{Path, PathBuf};
+    use work_review_core::config::AiMode;
 
     #[test]
     fn summary回退到基础模板时不应保留_ai_模型标签() {
@@ -743,7 +743,7 @@ mod tests {
 
     #[test]
     fn 新_ai_段落顺序应缓存到配置且空结果不覆盖已有缓存() {
-        let mut config = crate::config::AppConfig::default();
+        let mut config = work_review_core::config::AppConfig::default();
         let first_order = vec!["APP_USAGE_TABLE".to_string(), "CATEGORY_TABLE".to_string()];
 
         assert!(update_daily_report_ai_order_cache(

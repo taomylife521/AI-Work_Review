@@ -1,10 +1,10 @@
 use crate::bot_common::{build_device_list, handle_cmd, NON_TEXT_REPLY, UNKNOWN_CMD_REPLY};
-use crate::config::AppConfig;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use reqwest::Client;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use subtle::ConstantTimeEq;
+use work_review_core::config::AppConfig;
 
 /// 企业微信回调允许的 timestamp 窗口：±5 分钟（WeCom timestamp 单位为秒）。
 const WECOM_SIGN_WINDOW_SECS: i64 = 5 * 60;

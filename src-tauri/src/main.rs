@@ -6,9 +6,7 @@
 #[macro_use]
 extern crate objc;
 
-mod activity_classifier;
 mod agent;
-mod analysis;
 mod autostart;
 mod avatar_engine;
 mod avatar_followup;
@@ -17,10 +15,7 @@ mod avatar_input;
 mod avatar_proactive;
 mod bot_common;
 mod commands;
-mod config;
-mod database;
 mod dingtalk_bot;
-mod error;
 mod feishu_bot;
 mod idle_detector;
 mod linux_session;
@@ -28,19 +23,14 @@ mod localhost_api;
 mod monitor;
 mod node_gateway;
 mod ocr;
-mod privacy;
 mod remote_upload;
 mod screen_lock;
 mod screenshot;
 mod storage;
 mod telegram_bot;
 mod wecom_bot;
-mod work_intelligence;
 
-use config::{config_backup_path, AppConfig, AvatarFollowupItem, ConfigLoadStatus};
-use database::Database;
 use once_cell::sync::OnceCell;
-use privacy::PrivacyFilter;
 use screenshot::ScreenshotService;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -51,6 +41,11 @@ use storage::StorageManager;
 use tauri::menu::{CheckMenuItem, CheckMenuItemBuilder, MenuBuilder, MenuItem, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Position};
+use work_review_core::config::{
+    config_backup_path, AppConfig, AvatarFollowupItem, ConfigLoadStatus,
+};
+use work_review_core::database::Database;
+use work_review_core::privacy::PrivacyFilter;
 
 // 全局 AppHandle，用于在 macOS Dock 点击时恢复窗口
 static APP_HANDLE: OnceCell<AppHandle> = OnceCell::new();
@@ -208,7 +203,9 @@ fn align_window_to_reference_monitor(
     )));
 }
 
-pub(crate) fn ensure_main_window(app: &AppHandle) -> Result<tauri::WebviewWindow, error::AppError> {
+pub(crate) fn ensure_main_window(
+    app: &AppHandle,
+) -> Result<tauri::WebviewWindow, work_review_core::error::AppError> {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         return Ok(window);
     }
@@ -220,12 +217,16 @@ pub(crate) fn ensure_main_window(app: &AppHandle) -> Result<tauri::WebviewWindow
         .iter()
         .find(|config| config.label == MAIN_WINDOW_LABEL)
         .or_else(|| app.config().app.windows.first())
-        .ok_or_else(|| error::AppError::Unknown("未找到主窗口配置".to_string()))?;
+        .ok_or_else(|| {
+            work_review_core::error::AppError::Unknown("未找到主窗口配置".to_string())
+        })?;
 
     let window = tauri::WebviewWindowBuilder::from_config(app, window_config)
-        .map_err(|e| error::AppError::Unknown(format!("创建主窗口构建器失败: {e}")))?
+        .map_err(|e| {
+            work_review_core::error::AppError::Unknown(format!("创建主窗口构建器失败: {e}"))
+        })?
         .build()
-        .map_err(|e| error::AppError::Unknown(format!("重建主窗口失败: {e}")))?;
+        .map_err(|e| work_review_core::error::AppError::Unknown(format!("重建主窗口失败: {e}")))?;
 
     configure_main_window(&window);
     Ok(window)
@@ -234,7 +235,7 @@ pub(crate) fn ensure_main_window(app: &AppHandle) -> Result<tauri::WebviewWindow
 pub(crate) fn reveal_main_window(
     app: &AppHandle,
     source_window_label: Option<&str>,
-) -> Result<(), error::AppError> {
+) -> Result<(), work_review_core::error::AppError> {
     let window = ensure_main_window(app)?;
     let reference_window = source_window_label.and_then(|label| app.get_webview_window(label));
     align_window_to_reference_monitor(&window, reference_window.as_ref());
@@ -343,7 +344,7 @@ async fn set_app_locale(
     locale: String,
     app: AppHandle,
     state: tauri::State<'_, Arc<Mutex<AppState>>>,
-) -> Result<(), crate::error::AppError> {
+) -> Result<(), work_review_core::error::AppError> {
     let normalized = match locale.as_str() {
         v if v.starts_with("en") => "en",
         "zh-TW" | "zh-HK" => "zh-TW",
@@ -352,7 +353,7 @@ async fn set_app_locale(
     let config = {
         let mut s = state
             .lock()
-            .map_err(|e| crate::error::AppError::Unknown(e.to_string()))?;
+            .map_err(|e| work_review_core::error::AppError::Unknown(e.to_string()))?;
         s.config.locale = normalized.to_string();
         s.config.clone()
     };
@@ -510,7 +511,7 @@ fn should_initialize_avatar_input(status: ConfigLoadStatus) -> bool {
 /// 清理历史遗留的钥匙串占位符。
 /// 早期未发布版本曾把敏感字段真实值迁入系统钥匙串,磁盘配置写成 "__keychain__" 占位符;
 /// 该机制已整体移除。这里把残留占位符清空,避免被当作真实密钥使用（需在设置中重新填写）。
-fn clear_legacy_keychain_placeholders(config: &mut crate::config::AppConfig) {
+fn clear_legacy_keychain_placeholders(config: &mut work_review_core::config::AppConfig) {
     const PLACEHOLDER: &str = "__keychain__";
     let mut cleared = 0u32;
     {
@@ -1019,7 +1020,7 @@ fn recover_recent_browser_url(
     now_ts: i64,
     max_age_secs: i64,
 ) -> Option<String> {
-    if !monitor::is_browser_app(app_name) || window_title.is_empty() {
+    if !work_review_core::categorize::is_browser_app(app_name) || window_title.is_empty() {
         return None;
     }
 
@@ -1042,8 +1043,8 @@ pub(crate) fn resolve_activity_classification(
     app_name: &str,
     window_title: &str,
     browser_url: Option<&str>,
-) -> activity_classifier::ActivityClassification {
-    let mut base_category = monitor::categorize_app_with_rules(
+) -> work_review_core::activity_classifier::ActivityClassification {
+    let mut base_category = work_review_core::categorize::categorize_collected_app_with_rules(
         &config.app_category_rules,
         app_name,
         window_title,
@@ -1100,12 +1101,13 @@ pub(crate) fn resolve_activity_classification(
         }
     }
 
-    let mut classification = activity_classifier::classify_activity_with_base_category(
-        app_name,
-        window_title,
-        browser_url,
-        &base_category,
-    );
+    let mut classification =
+        work_review_core::activity_classifier::classify_activity_with_base_category(
+            app_name,
+            window_title,
+            browser_url,
+            &base_category,
+        );
 
     // 语义分类被删除时回退到 "未知活动"
     if classification.semantic_category != "未知活动"
@@ -1133,13 +1135,15 @@ pub(crate) fn resolve_activity_classification(
         }
     }
 
-    if let Some(semantic_category) =
-        monitor::find_website_semantic_override(&config.website_semantic_rules, browser_url)
-    {
-        classification.base_category = monitor::semantic_category_to_base_category(
-            &semantic_category,
-            &classification.base_category,
-        );
+    if let Some(semantic_category) = work_review_core::categorize::find_website_semantic_override(
+        &config.website_semantic_rules,
+        browser_url,
+    ) {
+        classification.base_category =
+            work_review_core::categorize::semantic_category_to_base_category(
+                &semantic_category,
+                &classification.base_category,
+            );
         classification.semantic_category = semantic_category.clone();
         classification.confidence = classification.confidence.max(100);
         classification
@@ -1218,7 +1222,7 @@ fn resolve_previous_activity_to_backfill(
     previous_app_name: Option<&str>,
     previous_browser_url: Option<&str>,
     previous_window_title: Option<&str>,
-) -> Option<database::Activity> {
+) -> Option<work_review_core::database::Activity> {
     let previous_app_name = previous_app_name?;
 
     let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
@@ -1229,7 +1233,7 @@ fn resolve_previous_activity_to_backfill(
             .get_latest_activity_by_url(previous_url)
             .ok()
             .flatten()
-    } else if monitor::is_browser_app(previous_app_name) {
+    } else if work_review_core::categorize::is_browser_app(previous_app_name) {
         previous_window_title
             .filter(|title| !title.is_empty())
             .and_then(|title| {
@@ -1260,7 +1264,7 @@ fn persist_previous_activity_backfill(
     database: &Database,
     config: &AppConfig,
     privacy_filter: &PrivacyFilter,
-    previous_activity: Option<&database::Activity>,
+    previous_activity: Option<&work_review_core::database::Activity>,
     previous_app_name: Option<&str>,
     previous_window_title: Option<&str>,
     previous_browser_url: Option<&str>,
@@ -1304,7 +1308,7 @@ fn persist_previous_activity_backfill(
         previous_window_title,
         previous_browser_url,
     );
-    if privacy_action == privacy::PrivacyAction::Skip {
+    if privacy_action == work_review_core::privacy::PrivacyAction::Skip {
         log::debug!("上一应用回补跳过(隐私): {previous_app_name}");
         return None;
     }
@@ -1315,16 +1319,17 @@ fn persist_previous_activity_backfill(
         previous_window_title,
         previous_browser_url,
     );
-    let (window_title, browser_url) = if privacy_action == privacy::PrivacyAction::Anonymize {
-        ("[内容已脱敏]".to_string(), None)
-    } else {
-        (
-            previous_window_title.to_string(),
-            previous_browser_url.map(ToString::to_string),
-        )
-    };
+    let (window_title, browser_url) =
+        if privacy_action == work_review_core::privacy::PrivacyAction::Anonymize {
+            ("[内容已脱敏]".to_string(), None)
+        } else {
+            (
+                previous_window_title.to_string(),
+                previous_browser_url.map(ToString::to_string),
+            )
+        };
 
-    let activity = database::Activity {
+    let activity = work_review_core::database::Activity {
         id: None,
         timestamp: current_timestamp,
         app_name: previous_app_name.to_string(),
@@ -1357,7 +1362,7 @@ fn persist_previous_activity_backfill(
 #[allow(clippy::too_many_arguments)]
 fn backfill_previous_activity_if_needed(
     state: &Arc<Mutex<AppState>>,
-    previous_activity: Option<&database::Activity>,
+    previous_activity: Option<&work_review_core::database::Activity>,
     previous_app_name: Option<&str>,
     previous_window_title: Option<&str>,
     previous_browser_url: Option<&str>,
@@ -1437,7 +1442,7 @@ fn should_probe_browser_url_before_change_detection(
     last_window_title: Option<&str>,
     current_browser_url: Option<&str>,
 ) -> bool {
-    if !monitor::is_browser_app(app_name) || window_title.is_empty() {
+    if !work_review_core::categorize::is_browser_app(app_name) || window_title.is_empty() {
         return false;
     }
     // 首次遇到浏览器窗口时（last 为 None），也需要探测 URL
@@ -1481,7 +1486,7 @@ fn browser_change_capture_min_interval_ms(
     title_changed: bool,
     url_changed: bool,
 ) -> u128 {
-    if monitor::is_browser_app(app_name) && (title_changed || url_changed) {
+    if work_review_core::categorize::is_browser_app(app_name) && (title_changed || url_changed) {
         MIN_BROWSER_CHANGE_CAPTURE_INTERVAL_MS
     } else {
         MIN_CAPTURE_INTERVAL_MS
@@ -1489,7 +1494,7 @@ fn browser_change_capture_min_interval_ms(
 }
 
 fn should_refresh_browser_url_before_record(app_name: &str, window_title: &str) -> bool {
-    monitor::is_browser_app(app_name) && !window_title.is_empty()
+    work_review_core::categorize::is_browser_app(app_name) && !window_title.is_empty()
 }
 
 fn avatar_monitor_poll_interval_ms_for_platform(is_macos: bool, active: bool) -> u64 {
@@ -1659,7 +1664,7 @@ fn should_skip_transient_window(active_window: &monitor::ActiveWindow) -> bool {
 }
 
 fn should_skip_system_window(active_window: &monitor::ActiveWindow) -> bool {
-    let is_sys = monitor::is_system_process(&active_window.app_name);
+    let is_sys = work_review_core::categorize::is_system_process(&active_window.app_name);
     let is_minimized_window = active_window.is_minimized;
     let is_explorer_shell = {
         let name_lower = active_window.app_name.to_lowercase();
@@ -2216,7 +2221,9 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
         let (mut active_window, used_full_window_lookup) =
             if let Some(window) = cached_active_window {
                 // 头像循环缓存不含浏览器 URL；浏览器窗口需要走完整采集路径。
-                if monitor::is_browser_app(&window.app_name) && window.browser_url.is_none() {
+                if work_review_core::categorize::is_browser_app(&window.app_name)
+                    && window.browser_url.is_none()
+                {
                     match monitor::get_active_window() {
                         Ok(window) => (window, true),
                         Err(_) => (window, false),
@@ -2238,7 +2245,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
             };
         let mut browser_url_probe_attempted = browser_url_probe_attempted_after_full_lookup(
             used_full_window_lookup,
-            monitor::is_browser_app(&active_window.app_name),
+            work_review_core::categorize::is_browser_app(&active_window.app_name),
         );
 
         // 再次检查状态
@@ -2314,7 +2321,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
         // 浏览器 URL 存在瞬时采集失败时，尽量复用同窗口最近一次成功值，减少统计断裂。
         const BROWSER_URL_STICKY_GAP_SECS: i64 = 120;
         if active_window.browser_url.is_none()
-            && monitor::is_browser_app(&active_window.app_name)
+            && work_review_core::categorize::is_browser_app(&active_window.app_name)
             && !active_window.window_title.is_empty()
         {
             let now_ts = chrono::Local::now().timestamp();
@@ -2528,8 +2535,8 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
             duration_to_record
         };
 
-        use privacy::PrivacyAction;
-        let result: Option<database::Activity> = match privacy_action {
+        use work_review_core::privacy::PrivacyAction;
+        let result: Option<work_review_core::database::Activity> = match privacy_action {
             PrivacyAction::Skip => {
                 log::debug!(
                     "完全跳过: {} - {}",
@@ -2601,7 +2608,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                 if effective_duration <= 0 && !app_changed {
                     None
                 } else {
-                    let activity = database::Activity {
+                    let activity = work_review_core::database::Activity {
                         id: None,
                         timestamp: current_timestamp,
                         app_name: active_window.app_name,
@@ -2656,7 +2663,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                             .get_latest_activity_by_url(url)
                             .ok()
                             .flatten()
-                    } else if monitor::is_browser_app(&active_window.app_name)
+                    } else if work_review_core::categorize::is_browser_app(&active_window.app_name)
                         && !active_window.window_title.is_empty()
                     {
                         state_guard
@@ -2690,7 +2697,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                     // 我们必须更严格地判断合并条件，否则不同标签页的切换会被错误合并。
                     if merge
                         && active_window.browser_url.is_none()
-                        && monitor::is_browser_app(&active_window.app_name)
+                        && work_review_core::categorize::is_browser_app(&active_window.app_name)
                         && (latest.window_title != active_window.window_title
                             || latest.browser_url.is_some())
                     {
@@ -2923,7 +2930,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                         });
                     }
 
-                    Some(database::Activity {
+                    Some(work_review_core::database::Activity {
                         id: Some(latest_id),
                         timestamp: current_timestamp,
                         app_name: active_window.app_name.clone(),
@@ -3018,7 +3025,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                                     )
                                 };
 
-                                let activity = database::Activity {
+                                let activity = work_review_core::database::Activity {
                                     id: None,
                                     timestamp: screenshot_result.timestamp,
                                     app_name: active_window.app_name.clone(),
@@ -3141,7 +3148,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                                             }
                                         }
 
-                                        Some(database::Activity {
+                                        Some(work_review_core::database::Activity {
                                             id: Some(activity_id),
                                             ..activity
                                         })
@@ -3191,7 +3198,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                             adjusted_duration
                         };
 
-                        let activity = database::Activity {
+                        let activity = work_review_core::database::Activity {
                             id: None,
                             timestamp: current_timestamp,
                             app_name: active_window.app_name.clone(),
@@ -3219,7 +3226,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                                     active_window.app_name,
                                     activity_id
                                 );
-                                Some(database::Activity {
+                                Some(work_review_core::database::Activity {
                                     id: Some(activity_id),
                                     ..activity
                                 })
@@ -3254,7 +3261,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                     .check_privacy(&ow.app_name, &ow.window_title)
             };
 
-            if ow_privacy == privacy::PrivacyAction::Skip {
+            if ow_privacy == work_review_core::privacy::PrivacyAction::Skip {
                 log::debug!("浮动窗口跳过(隐私): {}", ow.app_name);
                 continue;
             }
@@ -3322,13 +3329,14 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                 }
             } else {
                 // 新建活动记录（无截图）
-                let ow_title = if ow_privacy == privacy::PrivacyAction::Anonymize {
+                let ow_title = if ow_privacy == work_review_core::privacy::PrivacyAction::Anonymize
+                {
                     "[内容已脱敏]".to_string()
                 } else {
                     ow.window_title.clone()
                 };
 
-                let activity = database::Activity {
+                let activity = work_review_core::database::Activity {
                     id: None,
                     timestamp: current_ts,
                     app_name: ow.app_name.clone(),
@@ -3369,8 +3377,8 @@ pub(crate) fn build_hourly_summary(
     state: &Arc<Mutex<AppState>>,
     date: &str,
     hour: i32,
-) -> Option<database::HourlySummary> {
-    use analysis::hourly::{generate_fallback_summary, HourlyStats};
+) -> Option<work_review_core::database::HourlySummary> {
+    use work_review_core::analysis::hourly::{generate_fallback_summary, HourlyStats};
 
     let activities = {
         let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
@@ -3382,7 +3390,7 @@ pub(crate) fn build_hourly_summary(
             let stats = HourlyStats::from_activities(date, hour, acts);
             let summary = generate_fallback_summary(&stats);
 
-            Some(database::HourlySummary {
+            Some(work_review_core::database::HourlySummary {
                 id: None,
                 date: date.to_string(),
                 hour,
@@ -4707,15 +4715,15 @@ mod tests {
     use crate::avatar_engine::{
         apply_avatar_visual_settings, default_avatar_state, derive_avatar_state,
     };
-    use crate::config::{
+    use crate::monitor::ActiveWindow;
+    use std::path::PathBuf;
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+    use work_review_core::config::{
         AiProvider, AppConfig, AvatarFollowupItem, ConfigLoadStatus, ModelConfig,
         WebsiteSemanticRule,
     };
-    use crate::database::Database;
-    use crate::monitor::ActiveWindow;
-    use crate::privacy::PrivacyFilter;
-    use std::path::PathBuf;
-    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+    use work_review_core::database::Database;
+    use work_review_core::privacy::PrivacyFilter;
 
     fn temp_db_path(name: &str) -> PathBuf {
         let unique = SystemTime::now()

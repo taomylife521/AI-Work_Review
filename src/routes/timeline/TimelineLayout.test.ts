@@ -218,8 +218,8 @@ test('打开小时摘要时应静默刷新，并用请求序号与日期快照�
   assert.match(source, /async function refreshHourlySummaries/);
   assert.match(source, /const requestId = \+\+summaryRefreshRequestId/);
   assert.match(source, /const requestDate = selectedDate/);
-  assert.match(source, /invoke<unknown>\('get_hourly_summaries', \{\s*date: requestDate,?\s*\}\)/);
-  assert.match(source, /parseHourlySummaryRecords\(summariesPayload\)/);
+  assert.match(source, /timelineGateway\.getHourlySummaries\(requestDate\)/);
+  assert.doesNotMatch(source, /invoke<unknown>\('get_hourly_summaries'/);
   assert.match(source, /requestId !== summaryRefreshRequestId \|\| requestDate !== selectedDate/);
   assert.match(source, /async function openSummaryDrawer[\s\S]*refreshHourlySummaries\(\)/);
   assert.match(source, /timelineSummary\.refreshFailed/);
@@ -263,10 +263,10 @@ test('时间线主请求的错误与加载状态只能由当前日期请求提�
   const source = await readFile(new URL('./Timeline.svelte', import.meta.url), 'utf8');
 
   assert.match(source, /const requestId = \+\+loadTimelineRequestId;\s*const requestDate = selectedDate;/);
-  assert.match(source, /invoke<unknown>\('get_timeline', \{[\s\S]*date: requestDate,[\s\S]*limit: PAGE_SIZE,[\s\S]*offset: 0/);
-  assert.match(source, /invoke<unknown>\('get_hourly_summaries', \{ date: requestDate \}\)/);
-  assert.match(source, /parseTimelineActivities\(activitiesPayload\)/);
-  assert.match(source, /parseHourlySummaryRecords\(summariesPayload\)/);
+  assert.match(source, /timelineGateway\.getPage\(\{[\s\S]*date: requestDate,[\s\S]*limit: PAGE_SIZE,[\s\S]*offset: 0/);
+  assert.match(source, /timelineGateway\.getHourlySummaries\(requestDate\)/);
+  assert.doesNotMatch(source, /invoke<unknown>\('get_timeline'/);
+  assert.doesNotMatch(source, /invoke<unknown>\('get_hourly_summaries'/);
   assert.match(
     source,
     /catch \(e\) \{\s*if \(requestId !== loadTimelineRequestId \|\| requestDate !== selectedDate\) return;\s*error =/

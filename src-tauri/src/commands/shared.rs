@@ -1,12 +1,12 @@
 //! Auto-extracted from the historical `commands.rs`. Behavior unchanged.
 
-use crate::config::{AppConfig, AvatarFollowupItem, PrivacyConfig};
-use crate::database::Activity;
-use crate::error::AppError;
-use crate::work_intelligence::TodoExtractionResult;
 use crate::AppState;
 use std::sync::{Arc, Mutex};
 use tauri::AppHandle;
+use work_review_core::config::{AppConfig, AvatarFollowupItem, PrivacyConfig};
+use work_review_core::database::Activity;
+use work_review_core::error::AppError;
+use work_review_core::work_intelligence::TodoExtractionResult;
 
 /// 从问题中提取时间范围关键词，返回 (date_from, date_to)
 ///
@@ -147,7 +147,7 @@ pub(crate) fn validate_relative_path(path: &str) -> Result<(), AppError> {
 }
 
 pub(crate) fn collect_privacy_filters(state: &AppState) -> (Vec<String>, Vec<String>) {
-    crate::privacy::collect_privacy_filters(&state.config)
+    work_review_core::privacy::collect_privacy_filters(&state.config)
 }
 
 pub(crate) fn filter_activities_by_privacy(
@@ -250,14 +250,16 @@ pub(crate) fn merge_manual_followups_into_todos(
             continue;
         }
 
-        extracted.items.push(crate::work_intelligence::TodoItem {
-            title: item.title.clone(),
-            date: item.date.clone(),
-            source_title: item.source_title.clone(),
-            source_app: item.source_app.clone(),
-            confidence: 96,
-            reason: "桌宠手动加入待跟进".to_string(),
-        });
+        extracted
+            .items
+            .push(work_review_core::work_intelligence::TodoItem {
+                title: item.title.clone(),
+                date: item.date.clone(),
+                source_title: item.source_title.clone(),
+                source_app: item.source_app.clone(),
+                confidence: 96,
+                reason: "桌宠手动加入待跟进".to_string(),
+            });
     }
 
     extracted.items.sort_by(|a, b| {
@@ -446,8 +448,8 @@ fn refresh_avatar_state_for_current_window(app: &AppHandle, state: &Arc<Mutex<Ap
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::database::{BrowserUsage, DailyStats, DomainUsage, UrlDetail, UrlUsage};
-    use crate::privacy::apply_excluded_domains_to_stats;
+    use work_review_core::database::{BrowserUsage, DailyStats, DomainUsage, UrlDetail, UrlUsage};
+    use work_review_core::privacy::apply_excluded_domains_to_stats;
 
     #[test]
     fn 概览统计应过滤排除域名并重算浏览器时长() {

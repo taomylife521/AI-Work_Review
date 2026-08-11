@@ -5,13 +5,13 @@
 //! 2. execute 函数    → Execute（真正干活的代码）
 //! 3. ToolRegistry    → Registry（工具注册中心）
 
-use crate::database::Database;
-use crate::work_intelligence;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use work_review_core::categorize::{categorize_app, get_category_name, normalize_display_app_name};
+use work_review_core::database::Database;
 use work_review_core::database::MemorySearchItem;
+use work_review_core::work_intelligence;
 
 // ══════════════════════════════════════════════════════════
 // 共享 Helper 函数
@@ -643,8 +643,8 @@ impl<'a> ToolContext<'a> {
     /// 的窗口标题，否则会违背"本地优先、不经第三方"的隐私承诺。
     pub fn filter_activities(
         &self,
-        activities: Vec<crate::database::Activity>,
-    ) -> Vec<crate::database::Activity> {
+        activities: Vec<work_review_core::database::Activity>,
+    ) -> Vec<work_review_core::database::Activity> {
         crate::commands::filter_activities_by_privacy(
             activities,
             &self.ignored_apps,
@@ -1260,7 +1260,7 @@ fn trend_comparison_execute(ctx: &ToolContext, args: Value) -> Result<String, St
     let activities_b = ctx.filter_activities(activities_b);
 
     // 按分类聚合
-    let compute_cats = |acts: &[crate::database::Activity]| -> HashMap<String, i64> {
+    let compute_cats = |acts: &[work_review_core::database::Activity]| -> HashMap<String, i64> {
         let mut map: HashMap<String, i64> = HashMap::new();
         for a in acts {
             let cat = categorize_app(&a.app_name, &a.window_title);
@@ -3328,7 +3328,7 @@ mod tests {
             provider: "tavily".to_string(),
             api_key: Some("tvly-test".to_string()),
         });
-        let db = crate::database::Database::new(std::path::Path::new(
+        let db = work_review_core::database::Database::new(std::path::Path::new(
             &std::env::temp_dir().join("wr-web-tools-test.db"),
         ))
         .expect("临时库创建失败");

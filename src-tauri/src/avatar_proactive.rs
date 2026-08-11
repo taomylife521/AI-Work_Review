@@ -6,8 +6,8 @@
 
 use crate::agent::model::{chat_with_tools, Message};
 use crate::avatar_engine::{emit_avatar_bubble, AvatarBubblePayload};
-use crate::config::ModelConfig;
 use tauri::AppHandle;
+use work_review_core::config::ModelConfig;
 
 /// 喂给 LLM 的当前工作状态快照。
 pub struct ProactiveContext {

@@ -179,8 +179,8 @@ pub fn derive_avatar_state(
 }
 
 pub fn derive_avatar_state_with_rules(
-    rules: &[crate::config::AppCategoryRule],
-    custom_categories: &[crate::config::CustomCategory],
+    rules: &[work_review_core::config::AppCategoryRule],
+    custom_categories: &[work_review_core::config::CustomCategory],
     app_name: &str,
     window_title: &str,
     browser_url: Option<&str>,
@@ -190,20 +190,24 @@ pub fn derive_avatar_state_with_rules(
     let app_name = normalize_app_name(app_name);
     let title_lower = window_title.trim().to_lowercase();
     let url_lower = browser_url.unwrap_or_default().trim().to_lowercase();
-    let manual_base_category =
-        crate::monitor::find_category_override(rules, app_name.as_str(), custom_categories);
-    let base_category = crate::monitor::categorize_app_with_rules(
+    let manual_base_category = work_review_core::categorize::find_collected_category_override(
+        rules,
+        app_name.as_str(),
+        custom_categories,
+    );
+    let base_category = work_review_core::categorize::categorize_collected_app_with_rules(
         rules,
         app_name.as_str(),
         window_title,
         custom_categories,
     );
-    let classification = crate::activity_classifier::classify_activity_with_base_category(
-        app_name.as_str(),
-        window_title,
-        browser_url,
-        &base_category,
-    );
+    let classification =
+        work_review_core::activity_classifier::classify_activity_with_base_category(
+            app_name.as_str(),
+            window_title,
+            browser_url,
+            &base_category,
+        );
 
     if is_generating_report {
         return AvatarStatePayload {
@@ -944,7 +948,7 @@ mod tests {
         resolve_avatar_position, AvatarInteractiveRegion, Rect, AVATAR_WINDOW_HEIGHT,
         AVATAR_WINDOW_WIDTH,
     };
-    use crate::config::AppCategoryRule;
+    use work_review_core::config::AppCategoryRule;
 
     #[test]
     fn point_in_rect_边界判定() {

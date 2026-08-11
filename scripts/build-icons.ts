@@ -40,7 +40,6 @@ const persistentTargets = [
   { size: 256, output: path.join(tauriIconsDir, '128x128@2x.png') },
   { size: 256, output: path.join(tauriIconsDir, '256x256.png') },
   { size: 512, output: path.join(tauriIconsDir, '512x512.png') },
-  { size: 64, output: path.join(tauriIconsDir, 'tray-icon.png') },
   { size: 128, output: path.join(publicIconsDir, '128x128.png') },
   { size: 256, output: path.join(publicIconsDir, '256x256.png') },
 ];

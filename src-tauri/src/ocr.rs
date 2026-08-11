@@ -2,7 +2,6 @@
 // Windows: 使用 PaddleOCR (轻量化版本)
 // macOS: 使用 Vision 框架
 
-use crate::error::{AppError, Result};
 use image::{imageops::FilterType, DynamicImage, ImageFormat};
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
@@ -12,6 +11,7 @@ use std::sync::{mpsc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
+use work_review_core::error::{AppError, Result};
 
 const OCR_COMMAND_TIMEOUT: Duration = Duration::from_secs(20);
 const PADDLE_WORKER_READY_TIMEOUT: Duration = Duration::from_secs(45);

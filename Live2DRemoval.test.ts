@@ -17,7 +17,7 @@ test('前端依赖与入口不应再保留 Live2D 运行时', () => {
 
 test('Rust 侧不应再保留 Live2D 配置和输入监听入口', () => {
   const cargoSource = readFileSync(new URL('./src-tauri/Cargo.toml', import.meta.url), 'utf8');
-  const configSource = readFileSync(new URL('./src-tauri/src/config.rs', import.meta.url), 'utf8');
+  const configSource = readFileSync(new URL('./crates/core/src/config.rs', import.meta.url), 'utf8');
   const mainSource = readFileSync(new URL('./src-tauri/src/main.rs', import.meta.url), 'utf8');
   const tauriConfigSource = readFileSync(new URL('./src-tauri/tauri.conf.json', import.meta.url), 'utf8');
 

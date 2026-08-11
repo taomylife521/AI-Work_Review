@@ -1,9 +1,9 @@
-use crate::config::{AppConfig, DEFAULT_LOCALHOST_API_PORT};
 use crate::localhost_api::LOCALHOST_API_HOST;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::Duration;
+use work_review_core::config::{AppConfig, DEFAULT_LOCALHOST_API_PORT};
 
 pub const HELP: &str = "\
 📊 Work Review Bot（多设备）

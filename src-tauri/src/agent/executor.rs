@@ -9,13 +9,13 @@ use super::tools::{
     action_confirm_summary, requires_confirmation, AssistantRuntime, ConfirmDecision, ToolRegistry,
     WebToolsConfig,
 };
-use crate::config::ModelConfig;
-use crate::database::Database;
-use crate::error::AppError;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use work_review_core::config::ModelConfig;
+use work_review_core::database::Database;
 use work_review_core::database::MemorySearchItem;
+use work_review_core::error::AppError;
 
 // ══════════════════════════════════════════════════════════
 // Agent 执行结果

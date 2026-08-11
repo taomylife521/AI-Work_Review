@@ -1,15 +1,15 @@
 //! Auto-extracted from the historical `commands.rs`. Behavior unchanged.
 
-use crate::config::AppConfig;
-use crate::database::Database;
-use crate::error::AppError;
-use crate::privacy::PrivacyFilter;
 use crate::screenshot::ScreenshotService;
 use crate::storage::StorageManager;
 use crate::AppState;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, State};
+use work_review_core::config::AppConfig;
+use work_review_core::database::Database;
+use work_review_core::error::AppError;
+use work_review_core::privacy::PrivacyFilter;
 
 use super::shared::persist_app_config;
 

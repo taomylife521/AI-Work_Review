@@ -39,15 +39,12 @@
   import { getViewportPopoverPlacement } from '../../lib/utils/popoverPosition.ts';
   import {
     isTimelineActivity,
-    parseTimelineActivities,
     prepareTimelineActivities,
     upsertTimelineActivity,
     type TimelineActivity,
   } from './timelineData.ts';
-  import {
-    parseHourlySummaryRecords,
-    type HourlySummaryRecord,
-  } from './summaryPresentation.ts';
+  import { type HourlySummaryRecord } from './summaryPresentation.ts';
+  import { timelineGateway } from './timelineGateway.ts';
   import LocalizedDatePicker from '../../lib/components/LocalizedDatePicker.svelte';
   import HourlySummaryDrawer from './HourlySummaryDrawer.svelte';
   import { confirm } from '../../lib/stores/confirm.ts';
@@ -809,16 +806,14 @@
     clearImageCaches();
 
     try {
-      const [activitiesPayload, summariesPayload] = await Promise.all([
-        invoke<unknown>('get_timeline', {
+      const [activitiesData, summariesData] = await Promise.all([
+        timelineGateway.getPage({
           date: requestDate,
           limit: PAGE_SIZE,
           offset: 0,
         }),
-        invoke<unknown>('get_hourly_summaries', { date: requestDate }),
+        timelineGateway.getHourlySummaries(requestDate),
       ]);
-      const activitiesData = parseTimelineActivities(activitiesPayload);
-      const summariesData = parseHourlySummaryRecords(summariesPayload);
 
       if (requestId !== loadTimelineRequestId || requestDate !== selectedDate) return;
 
@@ -871,12 +866,11 @@
     loadingMore = true;
 
     try {
-      const morePayload = await invoke<unknown>('get_timeline', {
+      const moreActivities = await timelineGateway.getPage({
         date: requestDate,
         limit: PAGE_SIZE, 
         offset: requestOffset,
       });
-      const moreActivities = parseTimelineActivities(morePayload);
 
       if (requestId !== loadMoreRequestId || requestDate !== selectedDate) return;
 
@@ -922,10 +916,7 @@
     summaryRefreshError = null;
 
     try {
-      const summariesPayload = await invoke<unknown>('get_hourly_summaries', {
-        date: requestDate,
-      });
-      const summariesData = parseHourlySummaryRecords(summariesPayload);
+      const summariesData = await timelineGateway.getHourlySummaries(requestDate);
       if (requestId !== summaryRefreshRequestId || requestDate !== selectedDate) return;
       hourlySummaries = summariesData;
     } catch (e) {

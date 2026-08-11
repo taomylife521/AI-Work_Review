@@ -6,10 +6,10 @@
 use super::events::{StreamEvent, StreamEventSender};
 use super::executor::{AgentExecutor, AgentRunError};
 use super::model::Message;
-use crate::config::ModelConfig;
-use crate::database::Database;
-use crate::error::AppError;
+use work_review_core::config::ModelConfig;
+use work_review_core::database::Database;
 use work_review_core::database::MemorySearchItem;
+use work_review_core::error::AppError;
 
 // ══════════════════════════════════════════════════════════
 // 路径类型
@@ -660,8 +660,8 @@ fn fallback_answer(question: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::AiProvider;
     use std::time::{SystemTime, UNIX_EPOCH};
+    use work_review_core::config::AiProvider;
 
     fn test_database(name: &str) -> Database {
         let unique = SystemTime::now()

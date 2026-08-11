@@ -1,16 +1,16 @@
 //! Auto-extracted from the historical `commands.rs`. Behavior unchanged.
 
-use crate::database::{
-    apply_flex_overtime_correction, local_hour_end_timestamp, AppUsage, BrowserUsage,
-    CategoryUsage, DailyStats, DomainUsage, HourlyActivityBucket, HourlyAppBucket, UrlDetail,
-    UrlUsage,
-};
-use crate::error::AppError;
-use crate::privacy::{apply_excluded_domains_to_stats, apply_ignored_apps_to_stats};
 use crate::AppState;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tauri::State;
+use work_review_core::database::{
+    apply_flex_overtime_correction, local_hour_end_timestamp, AppUsage, BrowserUsage,
+    CategoryUsage, DailyStats, DomainUsage, HourlyActivityBucket, HourlyAppBucket, UrlDetail,
+    UrlUsage,
+};
+use work_review_core::error::AppError;
+use work_review_core::privacy::{apply_excluded_domains_to_stats, apply_ignored_apps_to_stats};
 
 use super::shared::collect_privacy_filters;
 
@@ -828,7 +828,7 @@ fn get_running_apps_impl() -> Result<Vec<String>, AppError> {
         let apps_str = String::from_utf8_lossy(&output.stdout);
         let mut apps: Vec<String> = apps_str
             .split(", ")
-            .map(crate::monitor::normalize_display_app_name)
+            .map(work_review_core::categorize::normalize_display_app_name)
             .filter(|s| !s.is_empty())
             .collect();
         apps.sort();
@@ -906,7 +906,8 @@ fn get_running_apps_impl() -> Result<Vec<String>, AppError> {
 
                 if !excluded.contains(&name_lower.as_str()) {
                     // 移除 .exe 后缀
-                    let display_name = crate::monitor::normalize_display_app_name(&name);
+                    let display_name =
+                        work_review_core::categorize::normalize_display_app_name(&name);
                     apps.insert(display_name);
                 }
 
@@ -1311,9 +1312,9 @@ pub async fn delete_activities_by_app(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::database::HourlyActivityBucket;
     use chrono::NaiveDate;
     use std::cell::Cell;
+    use work_review_core::database::HourlyActivityBucket;
 
     fn clear_old_activities_test_dir(label: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(

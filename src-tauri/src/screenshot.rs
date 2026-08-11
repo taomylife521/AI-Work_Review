@@ -1,5 +1,3 @@
-use crate::config::{ScreenshotDisplayMode, ScreenshotWidthMode, StorageConfig};
-use crate::error::{AppError, Result};
 #[cfg(target_os = "linux")]
 use crate::linux_session::{current_linux_desktop_environment, current_linux_desktop_session};
 #[cfg(any(target_os = "linux", test))]
@@ -22,6 +20,8 @@ use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
 };
+use work_review_core::config::{ScreenshotDisplayMode, ScreenshotWidthMode, StorageConfig};
+use work_review_core::error::{AppError, Result};
 
 #[cfg(target_os = "linux")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1780,7 +1780,6 @@ mod tests {
         capture_target_point, linux_screenshot_support_for_session, normalize_linux_crop_rect,
         parse_xrandr_active_monitor_rects, should_capture_all_displays, ScreenshotService,
     };
-    use crate::config::{ScreenshotDisplayMode, ScreenshotWidthMode, StorageConfig};
     use crate::linux_session::{LinuxDesktopEnvironment, LinuxDesktopSession};
     use crate::monitor::{ActiveWindow, WindowBounds};
     use base64::Engine as _;
@@ -1788,6 +1787,7 @@ mod tests {
     use std::fs;
     use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
+    use work_review_core::config::{ScreenshotDisplayMode, ScreenshotWidthMode, StorageConfig};
 
     #[test]
     fn 应按窗口中心点选择目标屏幕() {

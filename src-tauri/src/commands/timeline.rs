@@ -1,11 +1,11 @@
 //! Auto-extracted from the historical `commands.rs`. Behavior unchanged.
 
-use crate::database::Activity;
-use crate::error::AppError;
 use crate::AppState;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::State;
+use work_review_core::database::Activity;
+use work_review_core::error::AppError;
 
 use super::shared::{collect_privacy_filters, filter_activities_by_privacy};
 

@@ -212,7 +212,7 @@ test('全部第一方前端测试应迁移到 TypeScript', async () => {
   const typeScriptTests = testFiles.filter((path) => path.endsWith('.test.ts'));
 
   assert.deepEqual(legacyTests, []);
-  assert.equal(typeScriptTests.length, 114);
+  assert.equal(typeScriptTests.length, 115);
 });
 
 test('全部第一方 Node 工具脚本应迁移到 TypeScript', async () => {

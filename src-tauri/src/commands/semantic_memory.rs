@@ -4,13 +4,6 @@
 //! 语义检索。索引与召回均执行当前完整隐私规则；任何状态或指纹不一致都会关闭
 //! 向量召回并降级为关键词检索，避免使用过期或不符合当前隐私配置的向量。
 
-use crate::config::{AppConfig, PrivacyConfig};
-use crate::database::{
-    encode_embedding, normalize_embedding, Activity, Database, MemorySearchItem, SemanticMemoryHit,
-    SemanticMemoryIndexState, SemanticMemoryStats, SEMANTIC_MEMORY_CURSOR_CHUNK_KEY,
-};
-use crate::error::AppError;
-use crate::privacy::PrivacyAction;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -18,6 +11,13 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::State;
+use work_review_core::config::{AppConfig, PrivacyConfig};
+use work_review_core::database::{
+    encode_embedding, normalize_embedding, Activity, Database, MemorySearchItem, SemanticMemoryHit,
+    SemanticMemoryIndexState, SemanticMemoryStats, SEMANTIC_MEMORY_CURSOR_CHUNK_KEY,
+};
+use work_review_core::error::AppError;
+use work_review_core::privacy::PrivacyAction;
 
 /// 单轮索引最多消费的活动行数（前端循环调用直至完成）。
 const INDEX_ACTIVITY_BATCH: usize = 1500;
@@ -975,7 +975,7 @@ pub(crate) async fn search_semantic_memory_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AppPrivacyRule, PrivacyLevel};
+    use work_review_core::config::{AppPrivacyRule, PrivacyLevel};
 
     fn activity(
         id: i64,
@@ -1147,7 +1147,7 @@ mod tests {
     #[test]
     fn fts降级只允许可按当前隐私规则复核的活动来源() {
         let items = vec![
-            crate::database::MemorySearchItem {
+            work_review_core::database::MemorySearchItem {
                 source_type: "activity".to_string(),
                 source_id: Some(1),
                 date: "2026-08-05".to_string(),
@@ -1159,7 +1159,7 @@ mod tests {
                 duration: Some(60),
                 score: 200,
             },
-            crate::database::MemorySearchItem {
+            work_review_core::database::MemorySearchItem {
                 source_type: "hourly_summary".to_string(),
                 source_id: Some(2),
                 date: "2026-08-05".to_string(),
@@ -1171,7 +1171,7 @@ mod tests {
                 duration: Some(60),
                 score: 180,
             },
-            crate::database::MemorySearchItem {
+            work_review_core::database::MemorySearchItem {
                 source_type: "daily_report".to_string(),
                 source_id: None,
                 date: "2026-08-05".to_string(),

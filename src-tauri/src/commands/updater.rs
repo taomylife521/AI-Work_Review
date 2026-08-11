@@ -1,6 +1,5 @@
 //! Auto-extracted from the historical `commands.rs`. Behavior unchanged.
 
-use crate::error::AppError;
 use crate::AppState;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
@@ -10,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_updater::UpdaterExt;
+use work_review_core::error::AppError;
 
 const GITHUB_LATEST_RELEASE_API: &str =
     "https://api.github.com/repos/wm94i/Work-Review/releases/latest";

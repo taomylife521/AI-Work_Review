@@ -5,7 +5,6 @@ use super::avatar::{
     gnome_avatar_extension_needs_relogin, is_gnome_avatar_extension_enabled,
     is_gnome_avatar_extension_installed,
 };
-use crate::error::AppError;
 #[cfg(target_os = "linux")]
 use crate::linux_session::{current_linux_desktop_environment, current_linux_desktop_session};
 use crate::AppState;
@@ -16,6 +15,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::State;
+use work_review_core::error::AppError;
 
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 const APP_ICON_CANVAS_SIZE: u32 = 256;
@@ -1189,7 +1189,7 @@ async fn get_app_icon_impl(
     let cache_dir = std::env::temp_dir().join("work_review_icons");
     let _ = std::fs::create_dir_all(&cache_dir);
     let cache_key = build_windows_icon_cache_key(
-        &crate::monitor::normalize_display_app_name(app_name),
+        &work_review_core::categorize::normalize_display_app_name(app_name),
         executable_path,
     );
     let cache_file = cache_dir.join(format!("{cache_key}_{WINDOWS_ICON_CACHE_VERSION}.b64"));

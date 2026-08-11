@@ -1,7 +1,5 @@
 //! Auto-extracted from the historical `commands.rs`. Behavior unchanged.
 
-use crate::config::AvatarFollowupItem;
-use crate::error::AppError;
 #[cfg(target_os = "linux")]
 use crate::linux_session::{current_linux_desktop_environment, current_linux_desktop_session};
 use crate::AppState;
@@ -10,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager, State};
+use work_review_core::config::AvatarFollowupItem;
+use work_review_core::error::AppError;
 
 use super::shared::persist_app_config;
 

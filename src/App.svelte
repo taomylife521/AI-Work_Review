@@ -13,11 +13,8 @@
   import { applyLocaleToDocument, initializeLocale, locale, t } from '$lib/i18n/index.ts';
   import { preloadAppIcons, type AppIconInvoke } from './lib/stores/iconCache.ts';
   import { runUpdateFlow } from './lib/utils/updater.ts';
-  import {
-    isTimelineActivity,
-    parseTimelineActivities,
-  } from './routes/timeline/timelineData.ts';
-  import { parseHourlySummaryRecords } from './routes/timeline/summaryPresentation.ts';
+  import { isTimelineActivity } from './routes/timeline/timelineData.ts';
+  import { timelineGateway } from './routes/timeline/timelineGateway.ts';
 
   type Theme = 'system' | 'light' | 'dark';
   type UiVisualStyle = 'a' | 'b' | 'c';
@@ -319,12 +316,12 @@
       }),
       // 2. 时间线 (今天) - 仅预加载前 20 条
       Promise.all([
-        invoke<unknown>('get_timeline', { date: today, limit: 20, offset: 0 }),
-        invoke<unknown>('get_hourly_summaries', { date: today })
+        timelineGateway.getPage({ date: today, limit: 20, offset: 0 }),
+        timelineGateway.getHourlySummaries(today),
       ]).then(([activities, summaries]) => cache.setTimeline(
         today,
-        parseTimelineActivities(activities),
-        parseHourlySummaryRecords(summaries),
+        activities,
+        summaries,
       )),
       // 3. 日报 (今天) - 检查是否已存在（必须带上当前语言，否则会把中文日报缓存到其他语言的 key 下）
       invoke<unknown>('get_saved_report', { date: today, locale: $locale }).then(report => {

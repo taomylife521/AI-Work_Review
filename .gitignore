@@ -66,6 +66,9 @@ plan-*.md
 TEST_REPORT_*.md
 /docs/superpowers/plans/
 /docs/superpowers/specs/
+# 设计文档与 Windows OCR 说明：本地参考用，不上传 git
+/docs/design/
+/docs/WINDOWS_OCR.md
 src-tauri/icons.backup/
 .worktrees/
 .superpowers/
