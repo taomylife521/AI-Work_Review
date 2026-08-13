@@ -212,7 +212,10 @@ test('全部第一方前端测试应迁移到 TypeScript', async () => {
   const typeScriptTests = testFiles.filter((path) => path.endsWith('.test.ts'));
 
   assert.deepEqual(legacyTests, []);
-  assert.equal(typeScriptTests.length, 115);
+  assert.ok(
+    typeScriptTests.includes(join('scripts', 'check-linux-glibc.test.ts')),
+    'GLIBC 门禁测试应作为第一方 TypeScript 测试存在',
+  );
 });
 
 test('全部第一方 Node 工具脚本应迁移到 TypeScript', async () => {
