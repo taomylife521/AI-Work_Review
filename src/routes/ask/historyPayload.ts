@@ -1,16 +1,43 @@
 /**
  * 把助手多轮对话历史构造成发给后端的 payload。
  *
- * assistant 消息里的工具步骤不会被后端直接送入模型，因此这里把已完成步骤
- * 压缩成摘要附在回答末尾，避免下一轮重复走已失败或已经完成的工具路径。
+ * assistant 消息里的工具步骤不会被后端直接送入模型，因此这里只把已完成步骤的
+ * 工具名与状态附在回答末尾，不携带任何工具返回正文。
  */
+
+const TRUSTED_HISTORY_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'search_memory',
+  'analyze_intents',
+  'aggregate_stats',
+  'category_search',
+  'query_activities',
+  'trend_comparison',
+  'get_work_sessions',
+  'get_insights',
+  'weekly_review',
+  'extract_todos',
+  'get_daily_report',
+  'get_current_context',
+  'get_today_stats',
+  'create_todo',
+  'set_app_category',
+  'pause_recording',
+  'resume_recording',
+  'open_timeline',
+  'generate_daily_report',
+  'search_user_memories',
+  'remember_user_memory',
+  'update_user_memory',
+  'forget_user_memory',
+  'fetch_url',
+  'web_search',
+]);
 
 interface HistoryToolStepLike {
   tool?: unknown;
   status?: unknown;
   ok?: unknown;
   hits?: unknown;
-  digest?: unknown;
 }
 
 interface CompletedHistoryToolStep extends HistoryToolStepLike {
@@ -40,7 +67,7 @@ function isCompletedStep(value: unknown): value is CompletedHistoryToolStep {
     isRecord(value)
     && value.status === 'done'
     && typeof value.tool === 'string'
-    && value.tool.length > 0
+    && TRUSTED_HISTORY_TOOL_NAMES.has(value.tool)
   );
 }
 
@@ -52,15 +79,6 @@ function summarizeDoneStep(step: CompletedHistoryToolStep): string {
   }
   if (step.ok !== true) {
     return `${tool}?`;
-  }
-  // 只有 search_memory 的 hits 表示真实引用数量，其他工具只标记成功。
-  if (
-    tool === 'search_memory'
-    && typeof step.hits === 'number'
-    && Number.isFinite(step.hits)
-    && step.hits >= 0
-  ) {
-    return `${tool}→${step.hits}条`;
   }
   return `${tool}✓`;
 }
@@ -74,34 +92,11 @@ export function summarizeStepsForHistory(steps: unknown): string | null {
   return `[工具：${doneSteps.map(summarizeDoneStep).join(' | ')}]`;
 }
 
-/** 每轮工具结果摘要的字符预算，防止历史膨胀挤掉真实对话。 */
-const HISTORY_DIGEST_BUDGET_PER_ROUND = 600;
-
-export function buildStepDigestForHistory(steps: unknown): string | null {
-  if (!Array.isArray(steps) || steps.length === 0) return null;
-
-  const lines: string[] = [];
-  let used = 0;
-  for (const value of steps) {
-    if (!isRecord(value)) continue;
-    const step: HistoryToolStepLike = value;
-    if (step.status !== 'done' || step.ok !== true) continue;
-    if (typeof step.digest !== 'string' || !step.digest.trim()) continue;
-
-    const line = `${step.tool as string}: ${step.digest.trim()}`;
-    if (used + line.length > HISTORY_DIGEST_BUDGET_PER_ROUND) {
-      const remain = HISTORY_DIGEST_BUDGET_PER_ROUND - used;
-      if (remain > 40) {
-        lines.push(`${line.slice(0, remain)}…`);
-      }
-      break;
-    }
-    lines.push(line);
-    used += line.length;
-  }
-
-  if (lines.length === 0) return null;
-  return `[上轮工具数据摘要]\n${lines.join('\n')}`;
+/**
+ * @deprecated 工具正文不得进入对话历史；保留空实现仅用于兼容迁移期类型契约。
+ */
+export function buildStepDigestForHistory(_steps: unknown): string | null {
+  return null;
 }
 
 /**
@@ -131,16 +126,14 @@ export function buildHistoryPayload(messages: unknown): HistoryPayloadEntry[] {
 
     const baseContent = String(message.content ?? '');
     const summary = summarizeStepsForHistory(message.steps);
-    const digest = buildStepDigestForHistory(message.steps);
-    const suffixes = [summary, digest].filter(Boolean).join('\n');
     rounds.push([
       { role: 'user', content: String(pendingUser.content ?? '') },
       {
         role: 'assistant',
-        content: suffixes
+        content: summary
           ? baseContent
-            ? `${baseContent}\n\n${suffixes}`
-            : suffixes
+            ? `${baseContent}\n\n${summary}`
+            : summary
           : baseContent,
       },
     ]);

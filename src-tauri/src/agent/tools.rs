@@ -13,6 +13,8 @@ use work_review_core::database::Database;
 use work_review_core::database::MemorySearchItem;
 use work_review_core::work_intelligence;
 
+use super::AssistantRequestMode;
+
 // ══════════════════════════════════════════════════════════
 // 共享 Helper 函数
 // ══════════════════════════════════════════════════════════
@@ -2301,11 +2303,16 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
+    /// 创建空 Registry。普通聊天从零权限开始，仅按显式配置追加通用联网工具。
+    fn empty() -> Self {
+        Self {
+            tools: HashMap::new(),
+        }
+    }
+
     /// 创建一个注册了所有内置（本地）工具的 Registry
     pub fn new() -> Self {
-        let mut registry = Self {
-            tools: HashMap::new(),
-        };
+        let mut registry = Self::empty();
         registry.register_builtin_tools();
         registry
     }
@@ -2351,6 +2358,30 @@ impl ToolRegistry {
         }
         registry.register_user_memory_tools(current_user_memory_tool_capabilities(), with_actions);
         registry
+    }
+
+    /// 按请求模式注册工具。
+    ///
+    /// - 工作复盘保留完整的本机工作、行动、语义记忆、长期记忆和联网能力；
+    /// - 普通聊天从空工具集开始，只允许用户显式开启的通用联网工具。
+    pub fn for_request(
+        mode: AssistantRequestMode,
+        web: Option<&WebToolsConfig>,
+        with_actions: bool,
+        with_semantic: bool,
+    ) -> Self {
+        match mode {
+            AssistantRequestMode::WorkReview => {
+                Self::for_assistant(web, with_actions, with_semantic)
+            }
+            AssistantRequestMode::GeneralChat => {
+                let mut registry = Self::empty();
+                if let Some(web) = web {
+                    registry.register_web_tools(web);
+                }
+                registry
+            }
+        }
     }
 
     /// 注册内置工具
@@ -2665,6 +2696,7 @@ impl ToolRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::AssistantRequestMode;
 
     #[test]
     fn test_registry_has_builtin_tools() {
@@ -2845,6 +2877,96 @@ mod tests {
             .collect();
         names.sort();
         names
+    }
+
+    #[test]
+    fn 普通聊天未开启联网时不应注册任何工具() {
+        let registry =
+            ToolRegistry::for_request(AssistantRequestMode::GeneralChat, None, false, false);
+
+        assert!(
+            tool_names(&registry).is_empty(),
+            "普通聊天不应获得工作记录、行动或语义检索工具"
+        );
+    }
+
+    #[test]
+    fn 普通聊天开启联网但无搜索密钥时应仅注册网页读取() {
+        let web = WebToolsConfig {
+            provider: "tavily".to_string(),
+            api_key: None,
+        };
+        let registry =
+            ToolRegistry::for_request(AssistantRequestMode::GeneralChat, Some(&web), false, false);
+
+        assert_eq!(tool_names(&registry), vec!["fetch_url"]);
+    }
+
+    #[test]
+    fn 普通聊天配置搜索密钥时应仅注册通用联网工具() {
+        let web = WebToolsConfig {
+            provider: "tavily".to_string(),
+            api_key: Some("tvly-test".to_string()),
+        };
+        let registry =
+            ToolRegistry::for_request(AssistantRequestMode::GeneralChat, Some(&web), false, false);
+
+        assert_eq!(tool_names(&registry), vec!["fetch_url", "web_search"]);
+    }
+
+    #[tokio::test]
+    async fn 普通聊天即使开启工作能力也不应暴露工作工具() {
+        let registry = with_user_memory_tool_capabilities(
+            UserMemoryToolCapabilities {
+                search: true,
+                remember: true,
+                update: true,
+                forget: true,
+            },
+            async {
+                ToolRegistry::for_request(AssistantRequestMode::GeneralChat, None, true, true)
+            },
+        )
+        .await;
+
+        assert!(
+            tool_names(&registry).is_empty(),
+            "行动、语义检索和长期记忆能力不得扩大普通聊天的工具权限"
+        );
+    }
+
+    #[tokio::test]
+    async fn 工作复盘应保持现有工具能力() {
+        let web = WebToolsConfig {
+            provider: "tavily".to_string(),
+            api_key: Some("tvly-test".to_string()),
+        };
+        let (expected, actual) = with_user_memory_tool_capabilities(
+            UserMemoryToolCapabilities {
+                search: true,
+                remember: true,
+                update: true,
+                forget: true,
+            },
+            async {
+                (
+                    ToolRegistry::for_assistant(Some(&web), true, true),
+                    ToolRegistry::for_request(
+                        AssistantRequestMode::WorkReview,
+                        Some(&web),
+                        true,
+                        true,
+                    ),
+                )
+            },
+        )
+        .await;
+
+        assert_eq!(
+            tool_names(&actual),
+            tool_names(&expected),
+            "工作复盘模式应完整保留既有本地、联网、行动、语义检索和长期记忆能力"
+        );
     }
 
     /// 联网工具注册门控：默认不注册；开联网注册 fetch_url；有搜索 provider 才注册 web_search。
