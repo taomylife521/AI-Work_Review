@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 变更
+- **安全审计降噪**：Security Audit 工作流新增忽略 19 条 unmaintained 类 RustSec 公告（gtk-rs GTK3 全家桶、unic-\*、paste、proc-macro-error、fxhash、rustls-pemfile——均为信息性"停止维护"提示，无安全漏洞且无 patched 版本），unsound / 漏洞类公告继续建 Issue 跟踪（保留 #167-#171）；同步关闭已生成的对应机器人 Issue #148-#166。
+
 ## [1.1.1] - 2026-08-10
 
 ### 新增
