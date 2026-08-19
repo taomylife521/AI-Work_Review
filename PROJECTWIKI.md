@@ -29,12 +29,14 @@ flowchart TD
 
 - 目录：`docs/adr/`（待建立；当前以本节条目形式记录）
 - **ADR-20260818-01｜RustSec 审计降噪策略**：`cargo audit` 仅对**漏洞与 unsound 类**公告建 Issue 跟踪；unmaintained 类（gtk-rs GTK3、unic-\*、paste、proc-macro-error、fxhash、rustls-pemfile，共 19 条）加入 `security-audit.yml` 的 `ignore`。理由：unmaintained 为信息性提示、无 patched 版本、多数源于 Tauri 2 Linux 依赖树，无法通过升级消除。影响：审计 Issue 信噪比提升；待 Tauri 3 / GTK4 迁移时可重估。验证：下次周一定时审计不再生成该类 Issue。
+- **ADR-20260818-02｜AI 服务商配置缓存**：`AppConfig` 新增 `text_model_provider_cache: HashMap<String, ModelConfig>`（key 为 provider id），前端 `SettingsAI` 切换服务商时把当前配置快照写入该缓存并随保存落盘，初始化时载入。理由：原实现仅组件内存缓存（`providerConfigs`），切标签页/重启即丢，且后端 `text_model` 单值字段保存新服务商时覆盖旧 Key。兼容性：`#[serde(default)]`，旧配置文件可正常加载。测试：`src/routes/settings/ProviderKeyMemory.test.ts`。
 
 ## 4. 设计决策 & 技术债务
 
 - **screenshots 0.8.10 依赖链**：引入 rand 0.7.3（RUSTSEC-2026-0097）与 0194/0195 两条已知公告；Linux-only 路径不接触用户输入，上游暂无升级版本，待上游修复后 `cargo update`。
 - **gtk-rs GTK3（0.18.x）**：Tauri 2 Linux/webkit2gtk 固有依赖，全部 unmaintained；待 Tauri 生态迁移 GTK4 后自然消除。
 - **unsound 跟踪清单（Issue #167-#171）**：anyhow 1.0.102、event-listener 5.4.1、glib 0.18.5、memmap2 0.7.1、rand 0.7.3——均无 patched 版本，上游发布修复后应升级消化。
+- **`default-text-model` 档案覆盖行为**：`sync_text_model_profiles()` 每次保存仍会用当前 `text_model` 覆盖 `default-text-model` 档案（历史行为保留）。服务商 Key 保留已由 `text_model_provider_cache` 承担（ADR-20260818-02），档案系统若需累积历史配置需另行改造。
 - **npm 侧**：`npm audit --omit=dev` 作为门禁（高危拦截）；构建工具链漏洞仅报告（当前 9 条，含 nanoid GHSA-2v37-7h3g-55p8）。
 
 ## 5. 模块文档

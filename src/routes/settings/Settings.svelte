@@ -172,6 +172,9 @@
       if (!loadedConfig.text_model_profiles) {
         loadedConfig.text_model_profiles = [];
       }
+      if (!loadedConfig.text_model_provider_cache) {
+        loadedConfig.text_model_provider_cache = {};
+      }
       if (typeof loadedConfig.daily_report_custom_prompt !== 'string') {
         loadedConfig.daily_report_custom_prompt = '';
       }

@@ -38,6 +38,7 @@
   interface AiSettingsConfig {
     ai_mode: AiMode;
     text_model: TextModelConfig;
+    text_model_provider_cache?: Partial<Record<ProviderId, ProviderConfigCache>>;
     assistant_web_access_enabled: boolean;
     assistant_search_provider: 'duckduckgo' | 'tavily' | 'bocha';
     assistant_search_api_key: string;
@@ -83,9 +84,11 @@
   }
 
   interface ProviderConfigCache {
+    provider?: ProviderId;
     endpoint: string;
     model: string;
-    api_key: string;
+    // 后端 ModelConfig.api_key 为 Option<String>，序列化可能为 null；消费点统一用 `|| ''` 兜底
+    api_key: string | null;
   }
 
   interface ProviderLabel {
@@ -363,7 +366,10 @@
   let configInitialized = false;
 
   $: if (config?.text_model?.provider && !configInitialized) {
+    // 先载入持久化的各服务商缓存，再以激活中 provider 的实时值为准
+    providerConfigs = { ...(config.text_model_provider_cache || {}) };
     providerConfigs[config.text_model.provider] = {
+      provider: config.text_model.provider,
       endpoint: config.text_model.endpoint,
       model: config.text_model.model,
       api_key: config.text_model.api_key || ''
@@ -454,13 +460,20 @@
   }
 
   function handleProviderChange(providerId: ProviderId) {
-    // 缓存当前 provider 配置
+    // 缓存当前 provider 配置：内存一份（本会话），持久化一份（随保存落盘，
+    // 组件销毁或重启后仍能恢复各家服务商的 Key）
     if (config.text_model.provider) {
-      providerConfigs[config.text_model.provider] = {
+      const snapshot: ProviderConfigCache = {
+        provider: config.text_model.provider,
         endpoint: config.text_model.endpoint,
         model: config.text_model.model,
         api_key: config.text_model.api_key || ''
       };
+      providerConfigs[config.text_model.provider] = snapshot;
+      if (!config.text_model_provider_cache) {
+        config.text_model_provider_cache = {};
+      }
+      config.text_model_provider_cache[config.text_model.provider] = snapshot;
     }
 
     // 恢复缓存或使用默认值

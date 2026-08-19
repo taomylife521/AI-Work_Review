@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 修复
+- **模型 API Key 记忆**：设置中切换 AI 服务商后，各家已填写的 API Key / 端点 / 模型名现按服务商持久化保存（新增 `text_model_provider_cache` 配置字段），切回原服务商或重启应用后自动恢复，不再丢失。
+- **社区二维码格式**：`docs/group/wechat-group.png` 实为 JPEG 误用 .png 扩展名导致测试失败，已转换为真 PNG。
+
 ### 变更
 - **安全审计降噪**：Security Audit 工作流新增忽略 19 条 unmaintained 类 RustSec 公告（gtk-rs GTK3 全家桶、unic-\*、paste、proc-macro-error、fxhash、rustls-pemfile——均为信息性"停止维护"提示，无安全漏洞且无 patched 版本），unsound / 漏洞类公告继续建 Issue 跟踪（保留 #167-#171）；同步关闭已生成的对应机器人 Issue #148-#166。
 

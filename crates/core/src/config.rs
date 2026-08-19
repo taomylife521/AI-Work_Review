@@ -1,5 +1,6 @@
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
@@ -898,6 +899,9 @@ pub struct AppConfig {
     /// 可保存的文本模型档案
     #[serde(default)]
     pub text_model_profiles: Vec<TextModelProfile>,
+    /// 各服务商的模型配置快照（key 为 provider id；切换服务商时保留各家的地址/模型/Key，随配置一起保存）
+    #[serde(default)]
+    pub text_model_provider_cache: HashMap<String, ModelConfig>,
     /// 视觉模型配置
     #[serde(default = "ModelConfig::default_vision")]
     pub vision_model: ModelConfig,
@@ -1245,6 +1249,7 @@ impl Default for AppConfig {
             ai_mode: AiMode::Local,
             text_model: ModelConfig::default_text(),
             text_model_profiles: Vec::new(),
+            text_model_provider_cache: HashMap::new(),
             vision_model: ModelConfig::default_vision(),
             privacy: PrivacyConfig::default(),
             app_category_rules: Vec::new(),
@@ -2048,6 +2053,40 @@ mod tests {
         assert_eq!(result.status, ConfigLoadStatus::Missing);
         assert!(!result.status.requires_fail_safe());
         assert!(result.status.allows_automatic_save());
+    }
+
+    #[test]
+    fn 服务商缓存字段应兼容旧配置文件并完整往返() {
+        // 模拟旧版配置文件：序列化默认配置后移除新字段再反序列化
+        let mut legacy = serde_json::to_value(AppConfig::default()).unwrap();
+        assert!(legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("text_model_provider_cache")
+            .is_some());
+        let old: AppConfig = serde_json::from_value(legacy).expect("旧配置缺少缓存字段时应可解析");
+        assert!(old.text_model_provider_cache.is_empty());
+
+        // 各家服务商的配置（含 API Key）应无损往返
+        let mut config = AppConfig::default();
+        config.text_model_provider_cache.insert(
+            "deepseek".to_string(),
+            super::ModelConfig {
+                provider: AiProvider::DeepSeek,
+                endpoint: "https://api.deepseek.com".to_string(),
+                api_key: Some("sk-test".to_string()),
+                model: "deepseek-chat".to_string(),
+            },
+        );
+        let round: AppConfig =
+            serde_json::from_value(serde_json::to_value(&config).unwrap()).unwrap();
+        assert_eq!(
+            round
+                .text_model_provider_cache
+                .get("deepseek")
+                .and_then(|m| m.api_key.as_deref()),
+            Some("sk-test")
+        );
     }
 
     #[test]

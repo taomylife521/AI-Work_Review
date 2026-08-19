@@ -45,6 +45,9 @@ pub async fn save_config(
     for profile in &config.text_model_profiles {
         super::ai::validate_model_endpoint(&profile.model_config.endpoint)?;
     }
+    for cached in config.text_model_provider_cache.values() {
+        super::ai::validate_model_endpoint(&cached.endpoint)?;
+    }
     persist_app_config(config, app, state.inner())
 }
 
