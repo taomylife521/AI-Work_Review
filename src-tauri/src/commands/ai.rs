@@ -203,7 +203,8 @@ async fn test_ollama(
 
 /// 测试 OpenAI 连接
 fn openai_connection_test_max_tokens() -> u32 {
-    16
+    // 思考型模型先输出思维链再出正文，额度太小会"HTTP 200 但无内容"造成假阳性
+    256
 }
 
 /// 判断端点路径是否已含 OpenAI 风格版本号段（/v1、/v2、/v3 … /v9）。
@@ -275,6 +276,18 @@ async fn test_openai(
                 .json()
                 .await
                 .map_err(|e| format!("解析响应失败: {e}"))?;
+            // 必须拿到非空输出才算"模型可用"：正文或思维链（思考型模型测试额度内
+            // 可能只有思维链）任一非空即可；HTTP 200 但无内容视为不可用。
+            let message = &data["choices"][0]["message"];
+            let has_output = message["content"].as_str().is_some_and(|s| !s.trim().is_empty())
+                || message["reasoning_content"]
+                    .as_str()
+                    .is_some_and(|s| !s.trim().is_empty());
+            if !has_output {
+                last_error =
+                    Some(format!("{url} API 可达但模型未返回内容，请确认模型名称是否正确"));
+                continue;
+            }
             let model_used = data["model"].as_str().unwrap_or(&config.model);
             return Ok(format!("模型 {model_used} 响应正常"));
         }
@@ -985,8 +998,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn openai兼容探测请求的输出上限不应低于十六() {
-        assert_eq!(openai_connection_test_max_tokens(), 16);
+    fn openai兼容探测请求的输出上限不应低于二百五十六() {
+        assert_eq!(openai_connection_test_max_tokens(), 256);
     }
 
     #[test]

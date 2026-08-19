@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### 修复
+- **思考型模型兼容**（魔搭 DeepSeek-V4-Flash 等）：AI 助手流式/非流式解析支持 `reasoning_content` 思维链——思考帧实时输出、正文为空时兜底思维链，不再出现"连接测试成功但助手无回复"；`max_tokens` 1600 → 8192 给正文留足额度；连接测试改为校验模型实际返回非空内容（探测额度 16 → 256），消灭 HTTP 200 但无内容的假阳性。
 - **模型 API Key 记忆**：设置中切换 AI 服务商后，各家已填写的 API Key / 端点 / 模型名现按服务商持久化保存（新增 `text_model_provider_cache` 配置字段），切回原服务商或重启应用后自动恢复，不再丢失。
 - **社区二维码格式**：`docs/group/wechat-group.png` 实为 JPEG 误用 .png 扩展名导致测试失败，已转换为真 PNG。
 

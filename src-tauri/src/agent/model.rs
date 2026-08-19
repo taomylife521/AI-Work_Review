@@ -210,7 +210,8 @@ async fn chat_openai_compatible(
     let mut body = json!({
         "model": model_config.model,
         "messages": messages,
-        "max_tokens": 1600,
+        // 思考型模型的思维链共享输出额度，上限需给正文留足空间
+        "max_tokens": 8192,
         "temperature": 0.2
     });
 
@@ -578,7 +579,13 @@ fn parse_openai_response(result: &Value) -> Result<LlmResponse, AppError> {
         }
     };
 
-    let content = msg["content"].as_str().map(|s| s.to_string());
+    // 思考型模型的思维链在 reasoning_content；思考耗尽 max_tokens 时 content 为空，
+    // 兜底取思维链，保证助手始终有内容可展示。
+    let content = msg["content"]
+        .as_str()
+        .map(|s| s.to_string())
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| msg["reasoning_content"].as_str().map(|s| s.to_string()));
 
     Ok(LlmResponse {
         content,
@@ -865,7 +872,12 @@ impl OpenAiStreamAssembler {
                 }
             }
         }
-        let text = delta["content"].as_str()?;
+        // 思考型模型（DeepSeek V4/R1、Qwen3 等）的思维链增量走 reasoning_content，
+        // 与 content 同级；正文帧缺失/为空时输出思考增量，避免助手全程无输出。
+        let text = delta["content"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .or_else(|| delta["reasoning_content"].as_str())?;
         if text.is_empty() {
             return None;
         }
@@ -936,7 +948,8 @@ async fn chat_openai_compatible_streaming(
     let mut body = json!({
         "model": model_config.model,
         "messages": messages,
-        "max_tokens": 1600,
+        // 思考型模型的思维链共享输出额度，上限需给正文留足空间
+        "max_tokens": 8192,
         "temperature": 0.2,
         "stream": true
     });
@@ -1394,6 +1407,68 @@ mod tests {
         assert_eq!(msg.content.as_deref(), Some("你好"));
         assert!(msg.tool_calls.is_none());
         assert!(msg.tool_call_id.is_none());
+    }
+
+    #[test]
+    fn 非流式解析应在正文为空时兜底思维链() {
+        // 思考型模型耗尽额度：content 为空、思维链在 reasoning_content
+        let response = json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "用户在询问工作情况，我需要查询记录…"
+                },
+                "finish_reason": "length"
+            }]
+        });
+
+        let parsed = parse_openai_response(&response).unwrap();
+        assert_eq!(
+            parsed.content.as_deref(),
+            Some("用户在询问工作情况，我需要查询记录…")
+        );
+        assert_eq!(parsed.stop_reason, StopReason::MaxTokens);
+
+        // 正文非空时不受 reasoning_content 影响
+        let normal = json!({
+            "choices": [{
+                "message": { "role": "assistant", "content": "正文回答", "reasoning_content": "思考" },
+                "finish_reason": "stop"
+            }]
+        });
+        let parsed = parse_openai_response(&normal).unwrap();
+        assert_eq!(parsed.content.as_deref(), Some("正文回答"));
+    }
+
+    #[test]
+    fn 流式装配器应输出思维链增量() {
+        let mut assembler = OpenAiStreamAssembler::default();
+
+        // 思考阶段：delta 只有 reasoning_content
+        let thinking_frame = json!({
+            "choices": [{ "delta": { "reasoning_content": "先查数据库…" }, "finish_reason": null }]
+        });
+        assert_eq!(
+            assembler.ingest(&thinking_frame),
+            Some("先查数据库…".to_string())
+        );
+
+        // 正文阶段：delta 有 content
+        let answer_frame = json!({
+            "choices": [{ "delta": { "content": "今日工作总结如下" }, "finish_reason": null }]
+        });
+        assert_eq!(
+            assembler.ingest(&answer_frame),
+            Some("今日工作总结如下".to_string())
+        );
+
+        // 全程只有思维链（额度耗尽）时，finish 结果仍应包含思考文本
+        let finished = assembler.finish();
+        assert!(finished
+            .content
+            .as_deref()
+            .is_some_and(|s| s.contains("先查数据库…")));
     }
 
     #[test]
