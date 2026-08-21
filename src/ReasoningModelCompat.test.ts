@@ -46,10 +46,10 @@ test('连接测试必须校验模型返回非空内容，消灭假阳性', async
     'utf8'
   );
 
-  // content 或 reasoning_content 任一非空才算可用
+  // content 或 reasoning_content 任一非空才算可用（[\s\S] 允许 rustfmt 换行）
   assert.match(
     source,
-    /let has_output = message\["content"\]\.as_str\(\)\.is_some_and/
+    /let has_output = message\["content"\][\s\S]*?\.is_some_and/
   );
   assert.match(source, /API 可达但模型未返回内容/);
   // 测试请求额度提升到 256（思考模型能产出思维链片段）
