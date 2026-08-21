@@ -279,13 +279,16 @@ async fn test_openai(
             // 必须拿到非空输出才算"模型可用"：正文或思维链（思考型模型测试额度内
             // 可能只有思维链）任一非空即可；HTTP 200 但无内容视为不可用。
             let message = &data["choices"][0]["message"];
-            let has_output = message["content"].as_str().is_some_and(|s| !s.trim().is_empty())
+            let has_output = message["content"]
+                .as_str()
+                .is_some_and(|s| !s.trim().is_empty())
                 || message["reasoning_content"]
                     .as_str()
                     .is_some_and(|s| !s.trim().is_empty());
             if !has_output {
-                last_error =
-                    Some(format!("{url} API 可达但模型未返回内容，请确认模型名称是否正确"));
+                last_error = Some(format!(
+                    "{url} API 可达但模型未返回内容，请确认模型名称是否正确"
+                ));
                 continue;
             }
             let model_used = data["model"].as_str().unwrap_or(&config.model);
