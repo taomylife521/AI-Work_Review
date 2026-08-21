@@ -28,7 +28,7 @@ flowchart TD
 ## 3. 架构决策记录（ADR）
 
 - 目录：`docs/adr/`（待建立；当前以本节条目形式记录）
-- **ADR-20260818-01｜RustSec 审计降噪策略**：`cargo audit` 仅对**漏洞与 unsound 类**公告建 Issue 跟踪；unmaintained 类（gtk-rs GTK3、unic-\*、paste、proc-macro-error、fxhash、rustls-pemfile，共 19 条）加入 `security-audit.yml` 的 `ignore`。理由：unmaintained 为信息性提示、无 patched 版本、多数源于 Tauri 2 Linux 依赖树，无法通过升级消除。影响：审计 Issue 信噪比提升；待 Tauri 3 / GTK4 迁移时可重估。验证：下次周一定时审计不再生成该类 Issue。
+- **ADR-20260818-01｜RustSec 审计降噪策略**：`cargo audit` 仅对**漏洞与 unsound 类**公告建 Issue 跟踪；unmaintained 类（gtk-rs GTK3、unic-\*、paste、proc-macro-error、fxhash、rustls-pemfile，共 19 条）加入 `security-audit.yml` 的 `ignore`。理由：unmaintained 为信息性提示、无 patched 版本、多数源于 Tauri 2 Linux 依赖树，无法通过升级消除。影响：审计 Issue 信噪比提升；待 Tauri 3 / GTK4 迁移时可重估。2026-08-20 追加：应作者要求移除每周定时触发（ADR-20260820-01），改为锁文件变更触发 + 手动运行。
 - **ADR-20260818-02｜AI 服务商配置缓存**：`AppConfig` 新增 `text_model_provider_cache: HashMap<String, ModelConfig>`（key 为 provider id），前端 `SettingsAI` 切换服务商时把当前配置快照写入该缓存并随保存落盘，初始化时载入。理由：原实现仅组件内存缓存（`providerConfigs`），切标签页/重启即丢，且后端 `text_model` 单值字段保存新服务商时覆盖旧 Key。兼容性：`#[serde(default)]`，旧配置文件可正常加载。测试：`src/routes/settings/ProviderKeyMemory.test.ts`。
 - **ADR-20260819-01｜思考型模型兼容**：DeepSeek V4/R1、Qwen3 等"对话+思考"混合模型的思维链走 `reasoning_content` 字段（与 `content` 同级）。此前应用完全不解析该字段，且助手链路 `max_tokens=1600` 会被思考耗尽导致"连接测试成功但助手无回复"（测试仅校验 HTTP 200）。决策：① 流式装配器与非流式解析均支持 `reasoning_content`（思考帧实时输出、空正文兜底思维链）；② OpenAI 兼容链路 `max_tokens` 提至 8192（Claude 链路暂保持 1600）；③ 连接测试校验非空输出（content 或 reasoning_content），探测额度 16→256。不做：自动发送 `enable_thinking`/`thinking` 关思考参数——各平台参数名不一致，乱发会 400；如需关闭思考后续在设置页加显式开关。测试：`src/ReasoningModelCompat.test.ts` + `agent/model.rs` 单测。
 
@@ -48,7 +48,7 @@ flowchart TD
 | `src-tauri/` | Tauri 主程序（Rust 核心、IPC、本地 API） | 待补全 |
 | `crates/` | Rust workspace 子模块 | 待补全 |
 | `scripts/` | 构建/发布脚本（TypeScript） | 待补全 |
-| `.github/workflows/` | CI（`ci.yml`）、发布（`release.yml`）、安全审计（`security-audit.yml` 每周一 03:00 UTC + 锁文件变更触发） | `rustsec/audit-check@v2` 仅在 schedule 触发时建 Issue，push/PR 仅出 Check 报告 |
+| `.github/workflows/` | CI（`ci.yml`）、发布（`release.yml`）、安全审计（`security-audit.yml` 锁文件变更触发 + 手动运行，已移除每周定时） | `rustsec/audit-check@v2` 仅在 schedule 触发时建 Issue；定时已关闭，审计结果只出现在 Check 报告，不再产生 Issue 通知 |
 
 ## 6. API 手册
 
@@ -80,7 +80,7 @@ flowchart LR
 
 ## 10. 维护建议
 
-- **安全审计**：每周一 03:00 UTC 定时 `cargo audit` + `npm audit`；新增 unmaintained 噪音时优先评估是否入 `ignore`，unsound/漏洞必须跟踪。
+- **安全审计**：锁文件（Cargo.lock / package-lock.json）变更时自动 `cargo audit` + `npm audit`，也可在 Actions 页手动运行；新增 unmaintained 噪音时优先评估是否入 `ignore`，unsound/漏洞必须跟踪。
 - **发布**：`release.yml` 要求 tag 与五个版本源及 `origin/main` 一致；缺安装包/便携包/附件即失败。
 - 详细运维/监控建议待补全。
 
