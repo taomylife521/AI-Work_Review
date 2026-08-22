@@ -453,7 +453,8 @@
         <span class="switch-thumb {avatarToggleUi.thumbClass}"></span>
       </button>
     </div>
-    <div class="settings-block pt-1">
+    <div class="grid gap-x-10 gap-y-3 border-t border-slate-200 pt-3.5 dark:border-[#30363d] lg:grid-cols-2">
+    <div>
       <div class="flex items-center justify-between gap-3">
         <div>
           <div class="settings-text">{t('settingsAppearance.avatarSize')}</div>
@@ -483,7 +484,7 @@
       </div>
     </div>
 
-    <div class="settings-block pt-1">
+    <div>
       <div class="flex items-center justify-between gap-3">
         <div>
           <div class="settings-text">{t('settingsAppearance.avatarOpacity')}</div>
@@ -513,8 +514,9 @@
         <span>{t('settingsAppearance.moreSolid')}</span>
       </div>
     </div>
+    </div>
 
-    <div class="settings-block pt-1">
+    <div class="settings-block border-t border-slate-200 pt-3.5 dark:border-[#30363d]">
       <div class="flex items-center justify-between gap-3">
         <div>
           <div class="settings-text">{t('settingsAppearance.avatarPersona')}</div>
@@ -582,8 +584,7 @@
       </div>
     </div>
 
-    <hr class="border-slate-200 dark:border-[#30363d]" />
-
+    <div class="grid gap-x-10 gap-y-4 border-t border-slate-200 pt-3.5 dark:border-[#30363d] lg:grid-cols-2">
     <div class="flex items-center justify-between gap-4">
       <div>
         <div class="settings-text">{t('settingsAppearance.avatarClickThrough')}</div>
@@ -600,8 +601,6 @@
         <span class="switch-thumb {config.avatar_click_through ? 'translate-x-5' : 'translate-x-0'}"></span>
       </button>
     </div>
-
-    <hr class="border-slate-200 dark:border-[#30363d]" />
 
     <div class="flex items-center justify-between gap-4">
       <div>
@@ -621,8 +620,7 @@
       </button>
     </div>
 
-    <hr class="border-slate-200 dark:border-[#30363d]" />
-
+    <div>
     <div class="flex items-center justify-between gap-4">
       <div>
         <div class="settings-text">{t('settingsAppearance.breakReminder')}</div>
@@ -645,7 +643,7 @@
     </div>
 
     {#if config.break_reminder_enabled}
-      <div class="settings-block pt-3 border-t border-slate-200 dark:border-[#30363d]">
+      <div class="settings-block mt-3">
         <label for="break-reminder-interval" class="settings-label mb-1.5">
           {t('settingsAppearance.breakReminderInterval')}
         </label>
@@ -662,12 +660,7 @@
         </select>
       </div>
     {/if}
-
-    <div class="settings-muted text-xs leading-5">
-      {t('settingsAppearance.avatarLocalReminderNote')}
     </div>
-
-    <hr class="border-slate-200 dark:border-[#30363d]" />
 
     <div class="flex items-start justify-between gap-4">
       <div>
@@ -689,6 +682,11 @@
       >
         <span class="switch-thumb {config.avatar_proactive_ai_enabled && config.avatar_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
       </button>
+    </div>
+    </div>
+
+    <div class="settings-muted text-xs leading-5">
+      {t('settingsAppearance.avatarLocalReminderNote')}
     </div>
   </div>
 </div>

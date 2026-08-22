@@ -85,8 +85,8 @@ test('应用应提供 A/B/C 三套可持久化界面风格并作用到根壳层'
     tailwindSource,
     /sans:\s*\[\s*'-apple-system',\s*'BlinkMacSystemFont',\s*'SF Pro Text',\s*'PingFang SC'/,
   );
-  assert.match(appCssSource, /\.page-shell\s*\{[\s\S]*?max-width:\s*108rem/);
-  assert.match(appCssSource, /\.app-shell-stage\s*\{[\s\S]*?max-width:\s*136rem/);
+  assert.match(appCssSource, /\.page-shell\s*\{[\s\S]*?max-width:\s*128rem/);
+  assert.match(appCssSource, /\.app-shell-stage\s*\{[\s\S]*?max-width:\s*160rem/);
   assert.match(appCssSource, /\.settings-style-preview__sidebar\b/);
   assert.match(appCssSource, /\.settings-style-current-mark\b/);
   assert.match(appCssSource, /\.settings-style-option-active\s+\.settings-style-current-mark/);

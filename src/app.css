@@ -20,8 +20,10 @@
   --editorial-shell-bg: linear-gradient(180deg, #f4f7ff 0%, #eef2ff 28%, #f8fafc 100%);
   --editorial-surface-featured: #ffffff;
   --editorial-surface-subtle: #f8fafc;
-  --content-width-operation: 78rem;
-  --content-width-reading: 64rem;
+  /* 操作型页面（设置/概览页头等）满宽铺开，与 page-shell 类页面一致；
+     宽度由页面内部网格吸收。阅读型内容保留行长上限以保证可读性。 */
+  --content-width-operation: none;
+  --content-width-reading: 84rem;
   --surface-border-subtle: rgba(203, 213, 225, 0.62);
   --surface-border-default: rgba(148, 163, 184, 0.46);
   --surface-border-emphasis: rgba(79, 70, 229, 0.42);
@@ -450,7 +452,7 @@
 /* 超宽屏下做轻量收束，避免窗口最大化时内容被横向拉得过散 */
 @media (min-width: 1600px) {
   .page-shell {
-    max-width: 108rem;
+    max-width: 128rem;
     margin-left: auto;
     margin-right: auto;
   }
@@ -458,7 +460,7 @@
 
 @media (min-width: 1920px) {
   .app-shell-stage {
-    max-width: 136rem;
+    max-width: 160rem;
     margin: 0.5rem auto;
   }
 }

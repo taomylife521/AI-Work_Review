@@ -41,13 +41,14 @@ flowchart TD
 - **unsound 跟踪清单（Issue #167-#171）**：anyhow 1.0.102、event-listener 5.4.1、glib 0.18.5、memmap2 0.7.1、rand 0.7.3——均无 patched 版本，上游发布修复后应升级消化。
 - **`default-text-model` 档案覆盖行为**：`sync_text_model_profiles()` 每次保存仍会用当前 `text_model` 覆盖 `default-text-model` 档案（历史行为保留）。服务商 Key 保留已由 `text_model_provider_cache` 承担（ADR-20260818-02），档案系统若需累积历史配置需另行改造。
 - **助手问题细分类已移除**：`AssistantQuestionKind` / `detect_assistant_question_kind` 在 Agent 路由落地后不再参与生产分类（入口只区分工作复盘 / 普通聊天）。2026-08-22 已删除该死路径及只测它的用例。
+- **布局内容轴策略**（2026-08-22）：操作型页面（设置板面等 `page-axis-operation`）满宽铺开（`--content-width-operation: none`），与概览/时间线一致，宽度由卡片内部网格吸收；阅读型内容（AI 对话、日报正文 `page-axis-reading`）保留 `84rem` 行长上限保证可读性。超宽屏仍受 page-shell（`128rem`@≥1600px）/stage（`160rem`@≥1920px）收束。玻璃拟态（backdrop-blur）在 Linux（WebKitGTK）通过 `platform-linux` 类平台级降级为高不透明度实底。
 - **npm 侧**：`npm audit --omit=dev` 作为门禁（高危拦截）；构建工具链漏洞仅报告（当前 9 条，含 nanoid GHSA-2v37-7h3g-55p8）。
 
 ## 5. 模块文档
 
 | 模块 | 职责 | 备注 |
 |---|---|---|
-| `src/` | Svelte 前端（界面、设置、助手、桌宠） | 待补全 |
+| `src/` | Svelte 前端（界面、设置、助手、桌宠） | 布局内容轴与玻璃拟态 token 见 `src/app.css`；桌宠设置卡为双列网格布局 |
 | `src-tauri/` | Tauri 主程序（Rust 核心、IPC、本地 API） | 含 `wecom_aibot.rs` 企微长连接运行时；助手 deadline 见 `agent/deadline.rs`；配置同步见 `config_sync.rs` |
 | `crates/core/src/generation_params.rs` | 思考/token 预算按 Provider 协议映射 | 未支持的提供商不写扩展字段 |
 | `src-tauri/src/wecom_bot.rs` | 企业微信自建应用 HTTP 回调（需公网） | 与长连接并存 |

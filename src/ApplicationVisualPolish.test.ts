@@ -52,8 +52,9 @@ function readCssBlockContaining(
 test('全应用应提供操作与阅读内容轴以及三级边界 token', async () => {
   const css = await readFile(cssUrl, 'utf8');
 
-  assert.match(css, /--content-width-operation:\s*78rem/);
-  assert.match(css, /--content-width-reading:\s*64rem/);
+  // 操作轴满宽铺开（与 page-shell 类页面一致），阅读轴保留行长上限
+  assert.match(css, /--content-width-operation:\s*none/);
+  assert.match(css, /--content-width-reading:\s*84rem/);
   assert.match(css, /--surface-border-subtle:/);
   assert.match(css, /--surface-border-default:/);
   assert.match(css, /--surface-border-emphasis:/);
