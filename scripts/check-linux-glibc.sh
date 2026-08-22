@@ -132,12 +132,15 @@ extract_artifact() {
     *.rpm)
       require_command rpm2cpio
       require_command cpio
-      if ! (
+      # ubuntu-22.04 的 rpm2cpio 4.17 解 Tauri 生成的 RPM 时会完整输出 payload
+      # 却以退出码 1 结束（rpm >= 4.19 已修复），退出码不能作为成败依据；
+      # 改以解包产物（目标二进制是否落地）判断。
+      (
         cd "$output_dir"
-        rpm2cpio "$artifact" | cpio -idm --quiet
-      ); then
-        die "RPM 解包失败：$artifact"
-      fi
+        rpm2cpio "$artifact" | cpio -idm --quiet || true
+      )
+      [[ -f "$output_dir/usr/bin/$BINARY_NAME" ]] ||
+        die "RPM 解包失败：$artifact（未找到 usr/bin/$BINARY_NAME）"
       BINARY_PATH="$output_dir/usr/bin/$BINARY_NAME"
       ;;
     *.AppImage)
