@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-08-22
+
 ### 新增
 - **企业微信智能机器人长连接**（#147）：无公网地址时可用 Bot ID + Secret 主动连接 `wss://openws.work.weixin.qq.com`，心跳保活、断线重连、被踢后提示。命令处理仍复用 `/devices` `/report` `/generate`。原 Corp ID 回调模式保留为可选项。
 - **助手/日报超时可配置**：设置 → AI 模型可调助手绝对超时（默认 120s）与日报外层超时（默认 300s）。一次助手请求共用一份剩余预算（响应头、流式、回退、429 重试、工具确认、收束）；前端超时会发送取消。日报超时会 abort 后台任务。

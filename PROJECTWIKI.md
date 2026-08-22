@@ -99,4 +99,4 @@ flowchart LR
 
 ## 12. 变更日志
 
-- 参见 [CHANGELOG.md](./CHANGELOG.md)（本节与该文件双向关联；条目按 Keep a Changelog 维护）。
+- 参见 [CHANGELOG.md](./CHANGELOG.md)（本节与该文件双向关联；条目按 Keep a Changelog 维护）。当前发布版本：[1.1.2](./CHANGELOG.md#112---2026-08-22)。
