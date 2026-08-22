@@ -804,7 +804,7 @@
     <svelte:component this={AvatarWindowComponent} />
   {/if}
 {:else}
-<div class="app-shell ui-style-{uiVisualStyle} flex h-screen overflow-hidden relative">
+<div class="app-shell ui-style-{uiVisualStyle} platform-{platform || 'web'} flex h-screen overflow-hidden relative">
   <div class="app-shell-ambient pointer-events-none absolute inset-0 z-0 opacity-80">
     <div class="absolute inset-x-0 top-0 h-40 bg-[radial-gradient(circle_at_top,rgba(99,102,241,0.14),transparent_62%)] dark:bg-[radial-gradient(circle_at_top,rgba(99,102,241,0.18),transparent_62%)]"></div>
     <div class="absolute -right-16 top-24 h-48 w-48 rounded-full bg-indigo-200/20 blur-3xl dark:bg-indigo-500/12"></div>

@@ -8,11 +8,12 @@
     info: 'M13 16h-1v-4h-1m1-4h.01M12 22a10 10 0 110-20 10 10 0 010 20z',
   };
 
+  // Alger Music 式语义 tint 玻璃：半透明主题色底 + 亮暗各自前景 + 毛玻璃
   const colorMap: Record<ToastType, string> = {
-    success: 'bg-slate-800 dark:bg-[#30363d] text-white dark:text-[#c9d1d9]',
-    error: 'bg-red-600 text-white',
-    warning: 'bg-amber-500 text-white',
-    info: 'bg-sky-600 text-white',
+    success: 'bg-[rgba(34,197,94,0.15)] dark:bg-[rgba(34,197,94,0.18)] text-[#16a34a] dark:text-[#4ade80]',
+    error: 'bg-[rgba(239,68,68,0.12)] dark:bg-[rgba(239,68,68,0.18)] text-[#dc2626] dark:text-[#f87171]',
+    warning: 'bg-[rgba(245,158,11,0.12)] dark:bg-[rgba(245,158,11,0.18)] text-[#d97706] dark:text-[#fbbf24]',
+    info: 'bg-[rgba(59,130,246,0.12)] dark:bg-[rgba(59,130,246,0.18)] text-[#2563eb] dark:text-[#60a5fa]',
   };
 
   $: toastState = $toast;
@@ -29,7 +30,7 @@
     <button
       type="button"
       on:click={clearToast}
-      class={`max-w-xl min-h-11 px-4 py-2.5 rounded-xl shadow-lg dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] text-sm font-medium flex items-center gap-2 pointer-events-auto ${toastClass}`}
+      class={`toast-glass max-w-xl min-h-11 px-[18px] py-2.5 text-sm font-medium flex items-center gap-2 pointer-events-auto ${toastClass}`}
     >
       <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={iconPath} />
