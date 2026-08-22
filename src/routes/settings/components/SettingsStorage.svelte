@@ -38,6 +38,7 @@
     provider: string;
     s3: S3StorageSettings;
     webdav: WebDavStorageSettings;
+    sync_app_config?: boolean;
   }
 
   interface StorageConfig {
@@ -313,7 +314,7 @@
     cleanupCandidateDir = '';
   }
   $: {
-    if (!config.remote_storage) config.remote_storage = { provider: 'none', s3: {}, webdav: {} };
+    if (!config.remote_storage) config.remote_storage = { provider: 'none', s3: {}, webdav: {}, sync_app_config: false };
     if (!config.remote_storage.s3) config.remote_storage.s3 = {};
     if (!config.remote_storage.webdav) config.remote_storage.webdav = {};
   }
@@ -619,7 +620,7 @@
           <button
             type="button"
             on:click={() => {
-              if (!config.remote_storage) config.remote_storage = { provider: 'none', s3: {}, webdav: {} };
+              if (!config.remote_storage) config.remote_storage = { provider: 'none', s3: {}, webdav: {}, sync_app_config: false };
               config.remote_storage = { ...config.remote_storage, provider: opt.value };
               handleChange();
             }}
@@ -885,6 +886,26 @@
             placeholder={t('settingsStorage.webdavPublicUrlBaseHint')}
           />
         </label>
+        <div class="flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <span class="settings-text text-sm">{t('settingsStorage.syncAppConfig')}</span>
+            <p class="settings-note mt-1">{t('settingsStorage.syncAppConfigHint')}</p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-label={t('settingsStorage.syncAppConfig')}
+            aria-checked={Boolean(config.remote_storage?.sync_app_config)}
+            class="switch-track {config.remote_storage?.sync_app_config ? 'bg-primary-500' : 'bg-slate-300 dark:bg-[#484f58]'}"
+            on:click={() => {
+              if (!config.remote_storage) return;
+              config.remote_storage.sync_app_config = !config.remote_storage.sync_app_config;
+              handleChange();
+            }}
+          >
+            <span class="switch-thumb {config.remote_storage?.sync_app_config ? 'translate-x-5' : 'translate-x-0'}"></span>
+          </button>
+        </div>
 
         <div class="flex items-center justify-between pt-1">
           <p class="text-[11px] text-slate-400 dark:text-[#636c76]">{t('settingsStorage.publicUrlBaseEffectHint')}</p>

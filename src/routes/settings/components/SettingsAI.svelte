@@ -33,11 +33,23 @@
     endpoint: string;
     model: string;
     api_key: string | null;
+    enable_thinking?: boolean | null;
+    thinking_budget?: number | null;
+    max_output_tokens?: number | null;
+  }
+
+  interface GenerationCapabilities {
+    thinking: boolean;
+    thinkingStreamingOnly: boolean;
+    thinkingBudget: boolean;
+    maxOutputTokens: boolean;
   }
 
   interface AiSettingsConfig {
     ai_mode: AiMode;
     text_model: TextModelConfig;
+    assistant_timeout_secs?: number;
+    report_generation_timeout_secs?: number;
     text_model_provider_cache?: Partial<Record<ProviderId, ProviderConfigCache>>;
     assistant_web_access_enabled: boolean;
     assistant_search_provider: 'duckduckgo' | 'tavily' | 'bocha';
@@ -57,6 +69,7 @@
     default_endpoint: string;
     default_model: string;
     requires_api_key: boolean;
+    generation_capabilities?: GenerationCapabilities;
   }
 
   interface AiModeOption {
@@ -89,6 +102,9 @@
     model: string;
     // 后端 ModelConfig.api_key 为 Option<String>，序列化可能为 null；消费点统一用 `|| ''` 兜底
     api_key: string | null;
+    enable_thinking?: boolean | null;
+    thinking_budget?: number | null;
+    max_output_tokens?: number | null;
   }
 
   interface ProviderLabel {
@@ -357,6 +373,19 @@
   // 当前提供商
   $: currentProvider = localizedProviders.find(p => p.id === config?.text_model?.provider) || localizedProviders[0];
   $: requiresApiKey = currentProvider?.requires_api_key ?? true;
+  $: generationCaps = currentProvider?.generation_capabilities;
+  $: thinkingModeValue = config.text_model?.enable_thinking === true
+    ? 'on'
+    : config.text_model?.enable_thinking === false
+      ? 'off'
+      : '';
+
+  function setThinkingMode(value: string) {
+    if (value === 'on') config.text_model.enable_thinking = true;
+    else if (value === 'off') config.text_model.enable_thinking = false;
+    else config.text_model.enable_thinking = null;
+    handleChange();
+  }
 
   // 是否选择了 AI 增强模式（决定是否展开配置面板）
   $: isAiMode = config.ai_mode === 'summary';
@@ -372,7 +401,10 @@
       provider: config.text_model.provider,
       endpoint: config.text_model.endpoint,
       model: config.text_model.model,
-      api_key: config.text_model.api_key || ''
+      api_key: config.text_model.api_key || '',
+      enable_thinking: config.text_model.enable_thinking ?? null,
+      thinking_budget: config.text_model.thinking_budget ?? null,
+      max_output_tokens: config.text_model.max_output_tokens ?? null,
     };
     configInitialized = true;
   }
@@ -467,7 +499,10 @@
         provider: config.text_model.provider,
         endpoint: config.text_model.endpoint,
         model: config.text_model.model,
-        api_key: config.text_model.api_key || ''
+        api_key: config.text_model.api_key || '',
+        enable_thinking: config.text_model.enable_thinking ?? null,
+        thinking_budget: config.text_model.thinking_budget ?? null,
+        max_output_tokens: config.text_model.max_output_tokens ?? null,
       };
       providerConfigs[config.text_model.provider] = snapshot;
       if (!config.text_model_provider_cache) {
@@ -484,6 +519,9 @@
     config.text_model.endpoint = cached?.endpoint || defaults.endpoint;
     config.text_model.model = cached?.model || defaults.model;
     config.text_model.api_key = cached?.api_key || '';
+    config.text_model.enable_thinking = cached?.enable_thinking ?? null;
+    config.text_model.thinking_budget = cached?.thinking_budget ?? null;
+    config.text_model.max_output_tokens = cached?.max_output_tokens ?? null;
 
     // 切换提供商时清空状态
     textTestStatus = null;
@@ -895,6 +933,97 @@
         <p class="settings-note">{t('settingsAI.loadedModels', { count: modelsLoaded })}</p>
       {/if}
     </div>
+
+    <div class="settings-responsive-field-grid grid gap-2">
+      <label class="block">
+        <span class="settings-label">{t('settingsAI.assistantTimeout')}</span>
+        <input
+          type="number"
+          min="30"
+          max="900"
+          class="control-input mt-1"
+          value={config.assistant_timeout_secs ?? 120}
+          on:change={(e) => {
+            const next = Number.parseInt(e.currentTarget.value, 10);
+            config.assistant_timeout_secs = Number.isFinite(next) ? next : 120;
+            handleChange();
+          }}
+        />
+        <p class="settings-note mt-1">{t('settingsAI.assistantTimeoutHint')}</p>
+      </label>
+      <label class="block">
+        <span class="settings-label">{t('settingsAI.reportTimeout')}</span>
+        <input
+          type="number"
+          min="60"
+          max="1800"
+          class="control-input mt-1"
+          value={config.report_generation_timeout_secs ?? 300}
+          on:change={(e) => {
+            const next = Number.parseInt(e.currentTarget.value, 10);
+            config.report_generation_timeout_secs = Number.isFinite(next) ? next : 300;
+            handleChange();
+          }}
+        />
+        <p class="settings-note mt-1">{t('settingsAI.reportTimeoutHint')}</p>
+      </label>
+    </div>
+
+    {#if generationCaps?.thinking || generationCaps?.maxOutputTokens}
+      <div class="settings-responsive-field-grid grid gap-2">
+        {#if generationCaps.thinking}
+          <label class="block">
+            <span class="settings-label">{t('settingsAI.thinkingMode')}</span>
+            <select
+              class="control-input mt-1"
+              value={thinkingModeValue}
+              on:change={(e) => setThinkingMode(e.currentTarget.value)}
+            >
+              <option value="">{t('settingsAI.thinkingServerDefault')}</option>
+              <option value="on">{t('settingsAI.thinkingOn')}</option>
+              <option value="off">{t('settingsAI.thinkingOff')}</option>
+            </select>
+            {#if generationCaps.thinkingStreamingOnly}
+              <p class="settings-note mt-1">{t('settingsAI.thinkingStreamingOnlyHint')}</p>
+            {/if}
+          </label>
+        {:else}
+          <p class="settings-note">{t('settingsAI.thinkingUnsupported')}</p>
+        {/if}
+        {#if generationCaps.thinkingBudget && thinkingModeValue === 'on'}
+          <label class="block">
+            <span class="settings-label">{t('settingsAI.thinkingBudget')}</span>
+            <input
+              type="number"
+              min="1"
+              class="control-input mt-1"
+              value={config.text_model.thinking_budget ?? ''}
+              on:change={(e) => {
+                const next = Number.parseInt(e.currentTarget.value, 10);
+                config.text_model.thinking_budget = Number.isFinite(next) && next > 0 ? next : null;
+                handleChange();
+              }}
+            />
+          </label>
+        {/if}
+        {#if generationCaps.maxOutputTokens}
+          <label class="block">
+            <span class="settings-label">{t('settingsAI.maxOutputTokens')}</span>
+            <input
+              type="number"
+              min="1"
+              class="control-input mt-1"
+              value={config.text_model.max_output_tokens ?? ''}
+              on:change={(e) => {
+                const next = Number.parseInt(e.currentTarget.value, 10);
+                config.text_model.max_output_tokens = Number.isFinite(next) && next > 0 ? next : null;
+                handleChange();
+              }}
+            />
+          </label>
+        {/if}
+      </div>
+    {/if}
 
     <!-- 测试结果详情 -->
     {#if textTestMessage}

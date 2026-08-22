@@ -88,6 +88,7 @@
     unmaximize: () => Promise<void>;
     maximize: () => Promise<void>;
     isVisible: () => Promise<boolean>;
+    onResized: (handler: () => void) => Promise<() => void>;
   }
 
   function isRecord(value: unknown): value is Record<string, unknown> {
@@ -193,6 +194,7 @@
       unmaximize: async () => {},
       maximize: async () => {},
       isVisible: async () => true,
+      onResized: async () => () => {},
     };
   }
 
@@ -244,6 +246,7 @@
 
   // 視窗拖拽（Linux WebKitGTK 不支援 -webkit-app-region: drag，改用 Tauri API）
   let lastDragClick = 0;
+  let windowMaximized = false;
   async function startDrag(e: MouseEvent): Promise<void> {
     const target = e.target;
     if (e.button !== 0 || (target instanceof Element && target.closest('button'))) return;
@@ -272,6 +275,14 @@
     await appWindow.minimize();
   }
 
+  async function refreshMaximizedState(): Promise<void> {
+    try {
+      windowMaximized = await appWindow.isMaximized();
+    } catch (e) {
+      console.warn('读取窗口最大化状态失败:', e);
+    }
+  }
+
   async function maximizeWindow(): Promise<void> {
     const isMaximized = await appWindow.isMaximized();
     if (isMaximized) {
@@ -279,6 +290,7 @@
     } else {
       await appWindow.maximize();
     }
+    await refreshMaximizedState();
   }
 
   // 预加载核心数据
@@ -535,6 +547,19 @@
         devLog('当前平台:', platform);
       } catch (e) {
         console.error('获取平台信息失败:', e);
+      }
+      try {
+        await refreshMaximizedState();
+        const unlistenResized = await appWindow.onResized(() => {
+          void refreshMaximizedState();
+        });
+        if (disposed) {
+          try { unlistenResized(); } catch {}
+        } else {
+          pendingCleanup.push(unlistenResized);
+        }
+      } catch (e) {
+        console.warn('监听窗口尺寸失败:', e);
       }
       if (disposed) return;
 
@@ -812,7 +837,7 @@
     <!-- 仅 Windows/Linux 平台显示自定义窗口控制按钮，macOS 使用原生控件 -->
     {#if platform && platform !== 'macos'}
     <!-- Windows 风格窗口控制按钮 (右上角) -->
-    <div class="app-shell-window-controls absolute right-0 top-0 flex items-stretch h-7" style="-webkit-app-region: no-drag;">
+    <div class="app-shell-window-controls absolute end-0 top-0 flex items-stretch h-7" style="-webkit-app-region: no-drag;">
       <!-- Minimize -->
       <button
         on:click={minimizeWindow}
@@ -828,11 +853,18 @@
       <button
         on:click={maximizeWindow}
         class="app-shell-window-btn"
-        title={t('window.maximize')}
+        title={windowMaximized ? t('window.restore') : t('window.maximize')}
       >
-        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <rect x="4" y="4" width="16" height="16" rx="1" />
-        </svg>
+        {#if windowMaximized}
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linejoin="round" d="M8 8h10v10H8z" />
+            <path stroke-linejoin="round" d="M6 14V6h8" />
+          </svg>
+        {:else}
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <rect x="4" y="4" width="16" height="16" rx="1" />
+          </svg>
+        {/if}
       </button>
 
       <!-- Close -->

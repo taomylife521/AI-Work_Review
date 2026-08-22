@@ -33,11 +33,20 @@ test('OpenAI 兼容链路的输出上限应为思考模型留足空间', async (
     'utf8'
   );
 
-  const count = (source.match(/"max_tokens": 8192,/g) || []).length;
-  assert.equal(count, 2, '流式与非流式两处均应为 8192');
-  // Claude 链路保持原有上限，不在本次范围
-  const claudeCount = (source.match(/"max_tokens": 1600,/g) || []).length;
-  assert.equal(claudeCount, 2);
+  assert.match(
+    source,
+    /generation_params::apply_openai_compatible\(&mut body, model_config, false\)/,
+  );
+  assert.match(
+    source,
+    /generation_params::apply_openai_compatible\(&mut body, model_config, true\)/,
+  );
+  const params = await readFile(
+    new URL('../crates/core/src/generation_params.rs', import.meta.url),
+    'utf8',
+  );
+  assert.match(params, /resolved_max_tokens\(config, 8192\)/);
+  assert.match(params, /resolved_max_tokens\(config, 1600\)/);
 });
 
 test('连接测试必须校验模型返回非空内容，消灭假阳性', async () => {

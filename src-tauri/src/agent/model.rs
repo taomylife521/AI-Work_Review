@@ -3,12 +3,14 @@
 //! 职责：把统一的消息格式翻译成各家 API 的请求格式，
 //!       把各家 API 的响应翻译回统一格式。
 
+use super::deadline::Deadline;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::OnceLock;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use work_review_core::config::{AiProvider, ModelConfig};
 use work_review_core::error::AppError;
+use work_review_core::generation_params;
 
 /// 非流式共享 HTTP 客户端（整体 60s / 连接 10s 超时）。
 /// 进程内复用连接池，避免每次模型调用都重建客户端与 TLS 连接。
@@ -21,7 +23,6 @@ fn chat_client() -> Result<&'static reqwest::Client, AppError> {
         return Ok(client);
     }
     let built = reqwest::Client::builder()
-        .timeout(Duration::from_secs(60))
         .connect_timeout(Duration::from_secs(10))
         .build()
         .map_err(|e| AppError::Unknown(e.to_string()))?;
@@ -39,16 +40,37 @@ fn stream_client() -> Result<&'static reqwest::Client, AppError> {
     Ok(STREAM_CLIENT.get_or_init(|| built))
 }
 
+async fn send_until(
+    request: reqwest::RequestBuilder,
+    deadline: Deadline,
+) -> Result<reqwest::Response, AppError> {
+    if deadline.is_expired() {
+        return Err(AppError::Analysis("助手请求已超时".to_string()));
+    }
+    tokio::time::timeout(deadline.remaining(), request.send())
+        .await
+        .map_err(|_| AppError::Analysis("等待模型响应头超时".to_string()))?
+        .map_err(|e| AppError::Unknown(e.to_string()))
+}
+
 /// 非流式请求发送：命中 429/5xx 时等待 2 秒重试一次（流式路径不重试）。
-async fn send_with_retry(request: reqwest::RequestBuilder) -> Result<reqwest::Response, AppError> {
+/// 重试等待与第二次发送都消费同一 deadline。
+async fn send_with_retry(
+    request: reqwest::RequestBuilder,
+    deadline: Deadline,
+) -> Result<reqwest::Response, AppError> {
     let retry = request.try_clone();
-    let response = request.send().await?;
+    let response = send_until(request, deadline).await?;
     let status = response.status();
     if status.as_u16() == 429 || status.is_server_error() {
         if let Some(retry_request) = retry {
-            log::warn!("模型请求返回 {status}，2 秒后重试一次");
-            tokio::time::sleep(Duration::from_secs(2)).await;
-            return Ok(retry_request.send().await?);
+            let wait = deadline.cap(Duration::from_secs(2));
+            if wait.is_zero() {
+                return Ok(response);
+            }
+            log::warn!("模型请求返回 {status}，{wait:?} 后重试一次");
+            tokio::time::sleep(wait).await;
+            return send_until(retry_request, deadline).await;
         }
     }
     Ok(response)
@@ -166,6 +188,7 @@ pub async fn chat_with_tools(
     system_prompt: &str,
     messages: &[Message],
     tools: &[Value],
+    deadline: Deadline,
 ) -> Result<LlmResponse, AppError> {
     let client = chat_client()?;
 
@@ -180,10 +203,16 @@ pub async fn chat_with_tools(
 
     // 根据提供商分发
     match model_config.provider {
-        AiProvider::Ollama => chat_ollama(client, model_config, &full_messages, tools).await,
-        AiProvider::Claude => chat_claude(client, model_config, &full_messages, tools).await,
-        AiProvider::Gemini => chat_gemini(client, model_config, &full_messages, tools).await,
-        _ => chat_openai_compatible(client, model_config, &full_messages, tools).await,
+        AiProvider::Ollama => {
+            chat_ollama(client, model_config, &full_messages, tools, deadline).await
+        }
+        AiProvider::Claude => {
+            chat_claude(client, model_config, &full_messages, tools, deadline).await
+        }
+        AiProvider::Gemini => {
+            chat_gemini(client, model_config, &full_messages, tools, deadline).await
+        }
+        _ => chat_openai_compatible(client, model_config, &full_messages, tools, deadline).await,
     }
 }
 
@@ -199,6 +228,7 @@ async fn chat_openai_compatible(
     model_config: &ModelConfig,
     messages: &[Value],
     tools: &[Value],
+    deadline: Deadline,
 ) -> Result<LlmResponse, AppError> {
     let endpoint = model_config.endpoint.trim().trim_end_matches('/');
     let url = if endpoint.ends_with("/chat/completions") {
@@ -210,10 +240,9 @@ async fn chat_openai_compatible(
     let mut body = json!({
         "model": model_config.model,
         "messages": messages,
-        // 思考型模型的思维链共享输出额度，上限需给正文留足空间
-        "max_tokens": 8192,
         "temperature": 0.2
     });
+    generation_params::apply_openai_compatible(&mut body, model_config, false);
 
     // 只有提供了工具定义时才加 tools 参数
     if !tools.is_empty() {
@@ -227,7 +256,7 @@ async fn chat_openai_compatible(
         }
     }
 
-    let response = send_with_retry(request).await?;
+    let response = send_with_retry(request, deadline).await?;
     if !response.status().is_success() {
         let error_text = response.text().await.unwrap_or_default();
         return Err(AppError::Analysis(format!("LLM 调用失败: {error_text}")));
@@ -243,6 +272,7 @@ async fn chat_ollama(
     model_config: &ModelConfig,
     messages: &[Value],
     tools: &[Value],
+    deadline: Deadline,
 ) -> Result<LlmResponse, AppError> {
     let ollama_base = model_config.endpoint.trim().trim_end_matches('/');
     let url = if ollama_base.ends_with("/api/chat") {
@@ -261,8 +291,9 @@ async fn chat_ollama(
     if !tools.is_empty() {
         body["tools"] = json!(tools);
     }
+    generation_params::apply_ollama(&mut body, model_config);
 
-    let response = send_with_retry(client.post(&url).json(&body)).await?;
+    let response = send_with_retry(client.post(&url).json(&body), deadline).await?;
     if !response.status().is_success() {
         return Err(AppError::Analysis(format!(
             "Ollama 调用失败: {}",
@@ -356,6 +387,7 @@ async fn chat_claude(
     model_config: &ModelConfig,
     messages: &[Value],
     tools: &[Value],
+    deadline: Deadline,
 ) -> Result<LlmResponse, AppError> {
     let api_key = model_config
         .api_key
@@ -374,13 +406,13 @@ async fn chat_claude(
 
     let mut body = json!({
         "model": model_config.model,
-        "max_tokens": 1600,
         "system": system_content,
         "messages": claude_messages,
     });
     if !claude_tools.is_empty() {
         body["tools"] = json!(claude_tools);
     }
+    generation_params::apply_claude(&mut body, model_config, !claude_tools.is_empty());
 
     let response = send_with_retry(
         client
@@ -389,6 +421,7 @@ async fn chat_claude(
             .header("content-type", "application/json")
             .header("x-api-key", api_key)
             .json(&body),
+        deadline,
     )
     .await?;
 
@@ -503,6 +536,7 @@ async fn chat_gemini(
     model_config: &ModelConfig,
     messages: &[Value],
     tools: &[Value],
+    deadline: Deadline,
 ) -> Result<LlmResponse, AppError> {
     let endpoint = model_config.endpoint.trim().trim_end_matches('/');
     let api_key = model_config
@@ -511,13 +545,21 @@ async fn chat_gemini(
         .ok_or_else(|| AppError::Analysis("Gemini 需要 API Key，请在设置中配置".to_string()))?;
     let url = format!("{endpoint}/models/{}:generateContent", model_config.model);
 
-    let body = build_gemini_request_body(messages, tools);
+    let mut body = build_gemini_request_body(messages, tools);
+    let mut generation_config = body
+        .get("generationConfig")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    generation_params::apply_gemini(&mut generation_config, model_config);
+    body["generationConfig"] = Value::Object(generation_config);
 
     let response = send_with_retry(
         client
             .post(&url)
             .header("x-goog-api-key", api_key)
             .json(&body),
+        deadline,
     )
     .await?;
     if !response.status().is_success() {
@@ -700,8 +742,8 @@ fn parse_gemini_response(result: &Value) -> Result<LlmResponse, AppError> {
 //   + 一个 HTTP 驱动（chunk 循环 + 行缓冲 + 喂装配器 + 文本增量回调）。
 // - 入口 chat_with_tools_streaming 与 chat_with_tools 同参，多一个 on_text 回调；
 //   流式路径任何失败都回退到既有非流式实现，保证不比旧行为差。
-// - 超时策略：流式不用整体 60s 超时（长答案会被掐断），改为逐块空闲 30s
-//   + 总时长 120s 双护栏。
+// - 超时策略：流式不用整体 HTTP timeout（长答案会被掐断），改为逐块空闲
+//   最多 30s，且与非流式共用调用方传入的绝对 deadline。
 
 /// 文本增量回调。executor 层把增量批量合并成 StreamEvent::Token 推给前端。
 pub type OnTextDelta<'a> = &'a mut (dyn FnMut(&str) + Send);
@@ -716,6 +758,7 @@ pub async fn chat_with_tools_streaming(
     messages: &[Message],
     tools: &[Value],
     on_text: OnTextDelta<'_>,
+    deadline: Deadline,
 ) -> Result<LlmResponse, AppError> {
     // 流式客户端：只限制连接超时，读取超时由逐块 idle 超时控制。
     let client = stream_client()?;
@@ -730,17 +773,48 @@ pub async fn chat_with_tools_streaming(
 
     let streamed = match model_config.provider {
         AiProvider::Ollama => {
-            chat_ollama_streaming(client, model_config, &full_messages, tools, on_text).await
+            chat_ollama_streaming(
+                client,
+                model_config,
+                &full_messages,
+                tools,
+                on_text,
+                deadline,
+            )
+            .await
         }
         AiProvider::Claude => {
-            chat_claude_streaming(client, model_config, &full_messages, tools, on_text).await
+            chat_claude_streaming(
+                client,
+                model_config,
+                &full_messages,
+                tools,
+                on_text,
+                deadline,
+            )
+            .await
         }
         AiProvider::Gemini => {
-            chat_gemini_streaming(client, model_config, &full_messages, tools, on_text).await
+            chat_gemini_streaming(
+                client,
+                model_config,
+                &full_messages,
+                tools,
+                on_text,
+                deadline,
+            )
+            .await
         }
         _ => {
-            chat_openai_compatible_streaming(client, model_config, &full_messages, tools, on_text)
-                .await
+            chat_openai_compatible_streaming(
+                client,
+                model_config,
+                &full_messages,
+                tools,
+                on_text,
+                deadline,
+            )
+            .await
         }
     };
 
@@ -748,7 +822,7 @@ pub async fn chat_with_tools_streaming(
         Ok(response) => Ok(response),
         Err(e) => {
             log::warn!("流式调用失败，回退非流式: {e}");
-            chat_with_tools(model_config, system_prompt, messages, tools).await
+            chat_with_tools(model_config, system_prompt, messages, tools, deadline).await
         }
     }
 }
@@ -785,17 +859,21 @@ fn sse_data_payload(line: &str) -> Option<&str> {
 /// `on_line` 返回 true 表示流已到终态（如 OpenAI 的 [DONE]），提前结束。
 async fn drive_stream(
     response: reqwest::Response,
+    deadline: Deadline,
     mut on_line: impl FnMut(&str) -> bool,
 ) -> Result<(), AppError> {
     let mut response = response;
     let mut line_buf = LineBuffer::new();
-    let started = Instant::now();
 
     loop {
-        if started.elapsed() > Duration::from_secs(120) {
+        if deadline.is_expired() {
             return Err(AppError::Analysis("流式响应总时长超限".to_string()));
         }
-        let chunk = tokio::time::timeout(Duration::from_secs(30), response.chunk())
+        let idle = deadline.cap(Duration::from_secs(30));
+        if idle.is_zero() {
+            return Err(AppError::Analysis("流式响应总时长超限".to_string()));
+        }
+        let chunk = tokio::time::timeout(idle, response.chunk())
             .await
             .map_err(|_| AppError::Analysis("流式响应空闲超时".to_string()))?
             .map_err(|e| AppError::Analysis(format!("流式读取失败: {e}")))?;
@@ -937,6 +1015,7 @@ async fn chat_openai_compatible_streaming(
     messages: &[Value],
     tools: &[Value],
     on_text: OnTextDelta<'_>,
+    deadline: Deadline,
 ) -> Result<LlmResponse, AppError> {
     let endpoint = model_config.endpoint.trim().trim_end_matches('/');
     let url = if endpoint.ends_with("/chat/completions") {
@@ -948,11 +1027,10 @@ async fn chat_openai_compatible_streaming(
     let mut body = json!({
         "model": model_config.model,
         "messages": messages,
-        // 思考型模型的思维链共享输出额度，上限需给正文留足空间
-        "max_tokens": 8192,
         "temperature": 0.2,
         "stream": true
     });
+    generation_params::apply_openai_compatible(&mut body, model_config, true);
     if !tools.is_empty() {
         body["tools"] = json!(tools);
     }
@@ -964,10 +1042,10 @@ async fn chat_openai_compatible_streaming(
         }
     }
 
-    let response = ensure_stream_status(request.send().await?, "LLM").await?;
+    let response = ensure_stream_status(send_until(request, deadline).await?, "LLM").await?;
 
     let mut assembler = OpenAiStreamAssembler::default();
-    drive_stream(response, |line| {
+    drive_stream(response, deadline, |line| {
         let Some(payload) = sse_data_payload(line) else {
             return false;
         };
@@ -1066,6 +1144,7 @@ async fn chat_ollama_streaming(
     messages: &[Value],
     tools: &[Value],
     on_text: OnTextDelta<'_>,
+    deadline: Deadline,
 ) -> Result<LlmResponse, AppError> {
     let ollama_base = model_config.endpoint.trim().trim_end_matches('/');
     let url = if ollama_base.ends_with("/api/chat") {
@@ -1082,12 +1161,16 @@ async fn chat_ollama_streaming(
     if !tools.is_empty() {
         body["tools"] = json!(tools);
     }
+    generation_params::apply_ollama(&mut body, model_config);
 
-    let response =
-        ensure_stream_status(client.post(&url).json(&body).send().await?, "Ollama").await?;
+    let response = ensure_stream_status(
+        send_until(client.post(&url).json(&body), deadline).await?,
+        "Ollama",
+    )
+    .await?;
 
     let mut assembler = OllamaStreamAssembler::default();
-    drive_stream(response, |line| {
+    drive_stream(response, deadline, |line| {
         if let Ok(value) = serde_json::from_str::<Value>(line) {
             if let Some(delta) = assembler.ingest(&value) {
                 on_text(&delta);
@@ -1215,6 +1298,7 @@ async fn chat_claude_streaming(
     messages: &[Value],
     tools: &[Value],
     on_text: OnTextDelta<'_>,
+    deadline: Deadline,
 ) -> Result<LlmResponse, AppError> {
     let api_key = model_config
         .api_key
@@ -1233,7 +1317,6 @@ async fn chat_claude_streaming(
 
     let mut body = json!({
         "model": model_config.model,
-        "max_tokens": 1600,
         "system": system_content,
         "messages": claude_messages,
         "stream": true
@@ -1241,22 +1324,25 @@ async fn chat_claude_streaming(
     if !claude_tools.is_empty() {
         body["tools"] = json!(claude_tools);
     }
+    generation_params::apply_claude(&mut body, model_config, !claude_tools.is_empty());
 
     let response = ensure_stream_status(
-        client
-            .post(&url)
-            .header("anthropic-version", "2023-06-01")
-            .header("content-type", "application/json")
-            .header("x-api-key", api_key)
-            .json(&body)
-            .send()
-            .await?,
+        send_until(
+            client
+                .post(&url)
+                .header("anthropic-version", "2023-06-01")
+                .header("content-type", "application/json")
+                .header("x-api-key", api_key)
+                .json(&body),
+            deadline,
+        )
+        .await?,
         "Claude",
     )
     .await?;
 
     let mut assembler = ClaudeStreamAssembler::default();
-    drive_stream(response, |line| {
+    drive_stream(response, deadline, |line| {
         let Some(payload) = sse_data_payload(line) else {
             return false;
         };
@@ -1351,6 +1437,7 @@ async fn chat_gemini_streaming(
     messages: &[Value],
     tools: &[Value],
     on_text: OnTextDelta<'_>,
+    deadline: Deadline,
 ) -> Result<LlmResponse, AppError> {
     let endpoint = model_config.endpoint.trim().trim_end_matches('/');
     let api_key = model_config
@@ -1362,21 +1449,30 @@ async fn chat_gemini_streaming(
         model_config.model
     );
 
-    let body = build_gemini_request_body(messages, tools);
+    let mut body = build_gemini_request_body(messages, tools);
+    let mut generation_config = body
+        .get("generationConfig")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    generation_params::apply_gemini(&mut generation_config, model_config);
+    body["generationConfig"] = Value::Object(generation_config);
 
     let response = ensure_stream_status(
-        client
-            .post(&url)
-            .header("x-goog-api-key", api_key)
-            .json(&body)
-            .send()
-            .await?,
+        send_until(
+            client
+                .post(&url)
+                .header("x-goog-api-key", api_key)
+                .json(&body),
+            deadline,
+        )
+        .await?,
         "Gemini",
     )
     .await?;
 
     let mut assembler = GeminiStreamAssembler::default();
-    drive_stream(response, |line| {
+    drive_stream(response, deadline, |line| {
         let Some(payload) = sse_data_payload(line) else {
             return false;
         };

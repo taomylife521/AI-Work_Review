@@ -30,6 +30,7 @@ test('节点设置组件应复用设置页配置对象并读取节点与本地 A
   assert.match(source, /invoke(?:<[^>]+>)?\('get_node_gateway_status'\)/);
   assert.match(source, /invoke(?:<[^>]+>)?\('get_localhost_api_status'\)/);
   assert.match(source, /invoke(?:<[^>]+>)?\('get_telegram_bot_status'\)/);
+  assert.match(source, /invoke(?:<[^>]+>)?\('get_wecom_bot_status'\)/);
   assert.match(source, /invoke(?:<[^>]+>)?\('save_config', \{ config \}\)/);
   assert.match(source, /nodeGatewayPage\.title/);
 });
@@ -55,6 +56,7 @@ test('节点子面板的二元开关应提供本地化 switch 语义', async () 
     'McpServerPanel.svelte',
     'TelegramBotPanel.svelte',
     'BotCredentialsPanel.svelte',
+    'WecomBotPanel.svelte',
   ].map((file) => readFile(new URL(`./components/nodeGateway/${file}`, import.meta.url), 'utf8')));
 
   for (const source of sources) {
@@ -64,6 +66,7 @@ test('节点子面板的二元开关应提供本地化 switch 语义', async () 
   }
   assert.match(sources[2], /nodeGatewayPage\.(?:showSecret|hideSecret)/);
   assert.match(sources[3], /nodeGatewayPage\.(?:showSecret|hideSecret)/);
+  assert.match(sources[4], /nodeGatewayPage\.(?:showSecret|hideSecret)/);
 });
 
 test('Telegram Bot 状态应在页面加载后轮询并在销毁时清理定时器', async () => {
@@ -89,5 +92,26 @@ test('拆分后应包含三个分组的 CollapsibleSection', async () => {
   assert.match(source, /McpServerPanel/);
   assert.match(source, /LocalApiPanel/);
   assert.match(source, /TelegramBotPanel/);
+  assert.match(source, /WecomBotPanel/);
   assert.match(source, /BotCredentialsPanel/);
+});
+
+test('企业微信 Bot 应走智能机器人长连接并轮询状态', async () => {
+  const [gatewaySource, wecomSource, configSource, mainSource] = await Promise.all([
+    readFile(new URL('./components/SettingsNodeGateway.svelte', import.meta.url), 'utf8'),
+    readFile(new URL('./components/nodeGateway/WecomBotPanel.svelte', import.meta.url), 'utf8'),
+    readFile(new URL('../../../crates/core/src/config.rs', import.meta.url), 'utf8'),
+    readFile(new URL('../../../src-tauri/src/main.rs', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(gatewaySource, /function startWecomStatusPolling\(\)/);
+  assert.match(gatewaySource, /if \(config\.wecom_bot_enabled\) \{\s*startWecomStatusPolling\(\);/);
+  assert.match(gatewaySource, /onDestroy\(\(\) => \{\s*stopTelegramStatusPolling\(\);\s*stopWecomStatusPolling\(\);/);
+  assert.match(wecomSource, /wecom_bot_id/);
+  assert.match(wecomSource, /wecom_bot_secret/);
+  assert.match(wecomSource, /nodeGatewayPage\.wecomConnecting/);
+  assert.match(wecomSource, /nodeGatewayPage\.wecomConnected/);
+  assert.match(configSource, /pub wecom_bot_id: Option<String>/);
+  assert.match(configSource, /pub wecom_bot_secret: Option<String>/);
+  assert.match(mainSource, /commands::get_wecom_bot_status/);
 });

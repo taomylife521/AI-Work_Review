@@ -66,9 +66,11 @@ hex = "0.4"
 # 常量时间比较（防签名时序侧信道）
 subtle = "2.5"
 
-# 企业微信 AES 加解密
+# 企业微信 AES 加解密 / 智能机器人长连接
 aes = "0.8"
 cbc = "0.1"
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 
 # 平台特定依赖 - Windows
 [target.'cfg(windows)'.dependencies]

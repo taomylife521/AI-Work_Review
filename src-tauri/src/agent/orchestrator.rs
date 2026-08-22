@@ -3,6 +3,7 @@
 //! 路由决策：简单 → FastPath，复杂 → AgentPath
 //! 降级策略：工作复盘的 Agent 失败可降级到本地统计，普通聊天只返回通用错误
 
+use super::deadline::Deadline;
 use super::events::{StreamEvent, StreamEventSender};
 use super::executor::{AgentExecutor, AgentRunError};
 use super::model::Message;
@@ -33,8 +34,6 @@ pub enum QueryPath {
 #[derive(Debug)]
 pub struct RouteDecision {
     pub path: QueryPath,
-    #[allow(dead_code)] // 路由原因：保留用于调试输出，业务逻辑未读取
-    pub reason: String,
 }
 
 // ══════════════════════════════════════════════════════════
@@ -57,7 +56,6 @@ pub fn route_query(
     if has_model {
         return RouteDecision {
             path: QueryPath::Agent,
-            reason: "交给模型判断意图".to_string(),
         };
     }
 
@@ -65,7 +63,6 @@ pub fn route_query(
     if request.mode == AssistantRequestMode::WorkReview && request.requires_model_action {
         return RouteDecision {
             path: QueryPath::Fallback,
-            reason: "无模型，动作请求无法安全执行".to_string(),
         };
     }
 
@@ -74,7 +71,6 @@ pub fn route_query(
     if request.mode == AssistantRequestMode::WorkReview {
         return RouteDecision {
             path: QueryPath::Fast,
-            reason: "无模型，工作复盘走本地统计".to_string(),
         };
     }
 
@@ -106,13 +102,11 @@ pub fn route_query(
     if greetings.iter().any(|g| q.contains(g)) && q.len() < 30 {
         return RouteDecision {
             path: QueryPath::Direct,
-            reason: "身份/问候/能力问答".to_string(),
         };
     }
 
     RouteDecision {
         path: QueryPath::Fallback,
-        reason: "无模型，普通聊天走通用兜底".to_string(),
     }
 }
 
@@ -150,6 +144,7 @@ impl Orchestrator {
         web_tools: Option<super::tools::WebToolsConfig>,
         runtime: super::tools::AssistantRuntime,
         event_tx: Option<StreamEventSender>,
+        deadline: Deadline,
     ) -> Result<OrchestratorResult, AppError> {
         let has_model = model_config
             .map(|c| !c.endpoint.trim().is_empty() && !c.model.trim().is_empty())
@@ -204,6 +199,7 @@ impl Orchestrator {
                     web_tools,
                     runtime,
                     event_tx.clone(),
+                    deadline,
                 )
                 .await
                 {
@@ -625,7 +621,7 @@ fn fallback_answer(question: &str) -> String {
 mod tests {
     use super::*;
     use crate::agent::AssistantRequestMode;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
     use work_review_core::config::AiProvider;
 
     fn test_database(name: &str) -> Database {
@@ -1057,6 +1053,7 @@ mod tests {
             None,
             Default::default(),
             Some(tx),
+            Deadline::after(Duration::from_secs(120)),
         );
         let receive = async {
             assert!(matches!(
@@ -1097,6 +1094,7 @@ mod tests {
             None,
             Default::default(),
             Some(tx),
+            Deadline::after(Duration::from_secs(120)),
         );
         let reject = async {
             let envelope = rx.recv().await.expect("应收到 Done 事件");
@@ -1123,6 +1121,7 @@ mod tests {
             endpoint: "not-a-valid-url".to_string(),
             api_key: None,
             model: "test-model".to_string(),
+            ..ModelConfig::default_text()
         };
         let (tx, rx) = StreamEventSender::channel(1);
         drop(rx);
@@ -1141,6 +1140,7 @@ mod tests {
             None,
             Default::default(),
             Some(tx),
+            Deadline::after(Duration::from_secs(120)),
         )
         .await
         .expect_err("接收端关闭时应终止，而不是继续模型或降级流程");

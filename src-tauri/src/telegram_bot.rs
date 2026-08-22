@@ -338,7 +338,16 @@ async fn run(
                                             send_text(&client, bot_token, msg.chat.id, progress)
                                                 .await;
                                         }
-                                        handle_cmd(&client, &devices, text).await
+                                        let generate_timeout = state
+                                            .lock()
+                                            .ok()
+                                            .map(|s| {
+                                                crate::bot_common::report_generate_timeout(
+                                                    &s.config,
+                                                )
+                                            })
+                                            .unwrap_or_else(|| std::time::Duration::from_secs(120));
+                                        handle_cmd(&client, &devices, text, generate_timeout).await
                                     } else {
                                         Some(NON_TEXT_REPLY.to_string())
                                     };

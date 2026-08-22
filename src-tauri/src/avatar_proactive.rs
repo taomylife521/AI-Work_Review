@@ -64,7 +64,15 @@ pub async fn decide_and_speak(
     let system = build_system_prompt(avatar_persona, locale);
     let event = build_event_prompt(context, avatar_persona);
 
-    let response = match chat_with_tools(text_model, &system, &[Message::user(&event)], &[]).await {
+    let response = match chat_with_tools(
+        text_model,
+        &system,
+        &[Message::user(&event)],
+        &[],
+        crate::agent::deadline::Deadline::after(std::time::Duration::from_secs(120)),
+    )
+    .await
+    {
         Ok(r) => r,
         Err(e) => {
             log::warn!("桌宠主动开口 LLM 调用失败: {e}");

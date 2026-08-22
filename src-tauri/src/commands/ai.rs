@@ -438,25 +438,6 @@ fn ollama_model_should_be_listed(
     }
 }
 
-#[allow(dead_code)]
-fn parse_ollama_model_names(data: &serde_json::Value) -> Result<Vec<String>, AppError> {
-    let models = data["models"]
-        .as_array()
-        .ok_or_else(|| AppError::Unknown("无法获取 Ollama 模型列表".to_string()))?;
-
-    let mut names = models
-        .iter()
-        .filter(|model| !is_ollama_embedding_model(model))
-        .filter_map(|model| model["name"].as_str().map(|name| name.trim().to_string()))
-        .filter(|name| !name.is_empty())
-        .collect::<Vec<_>>();
-
-    names.sort();
-    names.dedup();
-
-    Ok(names)
-}
-
 async fn fetch_ollama_show_response(
     client: &reqwest::Client,
     endpoint: &str,
@@ -839,7 +820,7 @@ pub async fn test_assistant_search(
 
 #[tauri::command]
 pub async fn get_ai_providers() -> Result<Vec<serde_json::Value>, AppError> {
-    Ok(vec![
+    let mut providers = vec![
         serde_json::json!({
             "id": "ollama",
             "name": "Ollama (本地)",
@@ -993,7 +974,15 @@ pub async fn get_ai_providers() -> Result<Vec<serde_json::Value>, AppError> {
             "requires_api_key": true,
             "supports_vision": false,
         }),
-    ])
+    ];
+    for provider in &mut providers {
+        let id = provider["id"].as_str().unwrap_or("custom").to_string();
+        let parsed = serde_json::from_value::<AiProvider>(serde_json::Value::String(id))
+            .unwrap_or(AiProvider::Custom);
+        provider["generation_capabilities"] =
+            work_review_core::generation_params::capabilities_for(parsed).to_json();
+    }
+    Ok(providers)
 }
 
 #[cfg(test)]
@@ -1003,6 +992,26 @@ mod tests {
     #[test]
     fn openai兼容探测请求的输出上限不应低于二百五十六() {
         assert_eq!(openai_connection_test_max_tokens(), 256);
+    }
+
+    #[tokio::test]
+    async fn 提供商列表应带上生成能力映射() {
+        let providers = get_ai_providers().await.expect("应返回提供商列表");
+        let qwen = providers
+            .iter()
+            .find(|provider| provider["id"] == "qwen")
+            .expect("应包含 qwen");
+        assert_eq!(qwen["generation_capabilities"]["thinking"], true);
+        assert_eq!(
+            qwen["generation_capabilities"]["thinkingStreamingOnly"],
+            true
+        );
+        let openai = providers
+            .iter()
+            .find(|provider| provider["id"] == "openai")
+            .expect("应包含 openai");
+        assert_eq!(openai["generation_capabilities"]["thinking"], false);
+        assert_eq!(openai["generation_capabilities"]["maxOutputTokens"], true);
     }
 
     #[test]
@@ -1068,39 +1077,17 @@ mod tests {
     }
 
     #[test]
-    fn 应能解析_ollama_模型列表响应() {
-        let payload = serde_json::json!({
-            "models": [
-                { "name": "qwen2.5:latest" },
-                { "name": "llama3.1:8b" },
-                { "name": "qwen2.5:latest" }
-            ]
-        });
-
-        let names = parse_ollama_model_names(&payload).expect("应能解析模型列表");
-
-        assert_eq!(
-            names,
-            vec!["llama3.1:8b".to_string(), "qwen2.5:latest".to_string()]
-        );
-    }
-
-    #[test]
-    fn 解析_ollama_模型列表时应过滤嵌入模型() {
-        let payload = serde_json::json!({
-            "models": [
-                { "name": "qwen3.5:4b" },
-                { "name": "nomic-embed-text:latest" },
-                { "name": "llama3.2:latest" }
-            ]
-        });
-
-        let names = parse_ollama_model_names(&payload).expect("应能解析模型列表");
-
-        assert_eq!(
-            names,
-            vec!["llama3.2:latest".to_string(), "qwen3.5:4b".to_string()]
-        );
+    fn ollama名称启发式应过滤嵌入模型() {
+        assert!(!is_ollama_embedding_model(&serde_json::json!({
+            "name": "qwen3.5:4b"
+        })));
+        assert!(is_ollama_embedding_model(&serde_json::json!({
+            "name": "nomic-embed-text:latest"
+        })));
+        assert!(!ollama_model_should_be_listed(
+            &serde_json::json!({ "name": "nomic-embed-text:latest" }),
+            None
+        ));
     }
 
     #[test]

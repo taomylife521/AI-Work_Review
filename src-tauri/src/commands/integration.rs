@@ -39,6 +39,20 @@ pub async fn get_telegram_bot_status(
 }
 
 #[tauri::command]
+pub async fn get_wecom_bot_status(
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<serde_json::Value, AppError> {
+    let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+    Ok(serde_json::json!({
+        "running": s.wecom_bot_runtime.is_running(),
+        "starting": s.wecom_bot_runtime.is_starting(),
+        "lastError": s.wecom_bot_runtime.last_error(),
+        "longConnectionConfigured": crate::wecom_aibot::long_connection_configured(&s.config),
+        "callbackConfigured": crate::wecom_aibot::callback_configured(&s.config),
+    }))
+}
+
+#[tauri::command]
 pub async fn generate_telegram_bot_bind_code(
     app: AppHandle,
     state: State<'_, Arc<Mutex<AppState>>>,

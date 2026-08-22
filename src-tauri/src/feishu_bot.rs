@@ -297,9 +297,14 @@ pub async fn handle_feishu_webhook(
         }
     }
 
-    let reply = handle_cmd(&client, &devices, text)
-        .await
-        .unwrap_or_else(|| UNKNOWN_CMD_REPLY.to_string());
+    let reply = handle_cmd(
+        &client,
+        &devices,
+        text,
+        crate::bot_common::report_generate_timeout(config),
+    )
+    .await
+    .unwrap_or_else(|| UNKNOWN_CMD_REPLY.to_string());
 
     let tenant_token = match get_tenant_token(&client, app_id, app_secret).await {
         Some(t) => t,

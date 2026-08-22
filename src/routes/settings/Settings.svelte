@@ -64,6 +64,8 @@
     | 'wecom_corp_id'
     | 'wecom_token'
     | 'wecom_encoding_aes_key'
+    | 'wecom_bot_id'
+    | 'wecom_bot_secret'
     | 'dingtalk_app_secret';
 
   type DraftPrivacySettings = Partial<PrivacyConfig['privacy']> & {
@@ -237,6 +239,12 @@
       }
       if (typeof loadedConfig.wecom_encoding_aes_key !== 'string' && loadedConfig.wecom_encoding_aes_key !== null) {
         loadedConfig.wecom_encoding_aes_key = null;
+      }
+      if (typeof loadedConfig.wecom_bot_id !== 'string' && loadedConfig.wecom_bot_id !== null) {
+        loadedConfig.wecom_bot_id = null;
+      }
+      if (typeof loadedConfig.wecom_bot_secret !== 'string' && loadedConfig.wecom_bot_secret !== null) {
+        loadedConfig.wecom_bot_secret = null;
       }
       if (typeof loadedConfig.dingtalk_bot_enabled !== 'boolean') {
         loadedConfig.dingtalk_bot_enabled = false;

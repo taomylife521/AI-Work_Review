@@ -192,6 +192,15 @@ pub struct ModelConfig {
     pub api_key: Option<String>,
     /// 模型名称
     pub model: String,
+    /// 思考模式：None=跟随服务端，Some(true/false)=显式开关
+    #[serde(default)]
+    pub enable_thinking: Option<bool>,
+    /// 思考 token 预算；0 或空表示不发送
+    #[serde(default)]
+    pub thinking_budget: Option<u32>,
+    /// 最大输出 token；0 或空表示使用链路默认值
+    #[serde(default)]
+    pub max_output_tokens: Option<u32>,
 }
 
 impl ModelConfig {
@@ -203,6 +212,9 @@ impl ModelConfig {
             endpoint: AiProvider::Ollama.default_endpoint().to_string(),
             api_key: None,
             model: String::new(), // 默认为空，用户需手动填写
+            enable_thinking: None,
+            thinking_budget: None,
+            max_output_tokens: None,
         }
     }
 
@@ -213,6 +225,9 @@ impl ModelConfig {
             endpoint: AiProvider::Ollama.default_endpoint().to_string(),
             api_key: None,
             model: "llava".to_string(),
+            enable_thinking: None,
+            thinking_budget: None,
+            max_output_tokens: None,
         }
     }
 }
@@ -641,6 +656,9 @@ pub struct RemoteStorageConfig {
     pub s3: S3Config,
     #[serde(default)]
     pub webdav: WebDavConfig,
+    /// 将常用应用配置同步到 WebDAV（最后写入获胜）。本机端口、窗口位置等不覆盖。
+    #[serde(default)]
+    pub sync_app_config: bool,
 }
 
 pub const DEFAULT_LOCALHOST_API_PORT: u16 = 47_831;
@@ -896,6 +914,12 @@ pub struct AppConfig {
     /// 文本模型配置
     #[serde(default = "ModelConfig::default_text")]
     pub text_model: ModelConfig,
+    /// 助手整次请求绝对超时（秒）
+    #[serde(default = "default_assistant_timeout_secs")]
+    pub assistant_timeout_secs: u64,
+    /// 日报生成外层超时（秒）
+    #[serde(default = "default_report_generation_timeout_secs")]
+    pub report_generation_timeout_secs: u64,
     /// 可保存的文本模型档案
     #[serde(default)]
     pub text_model_profiles: Vec<TextModelProfile>,
@@ -932,6 +956,9 @@ pub struct AppConfig {
     /// 远程存储配置（S3/MinIO 或 WebDAV）
     #[serde(default)]
     pub remote_storage: RemoteStorageConfig,
+    /// 最近一次成功参与 WebDAV 配置同步的时间戳（毫秒）。0 表示从未同步。
+    #[serde(default)]
+    pub config_synced_at: u64,
     /// 日报附加提示词
     #[serde(default)]
     pub daily_report_custom_prompt: String,
@@ -1013,6 +1040,12 @@ pub struct AppConfig {
     /// 企业微信 EncodingAESKey
     #[serde(default)]
     pub wecom_encoding_aes_key: Option<String>,
+    /// 企业微信智能机器人 Bot ID（长连接）
+    #[serde(default)]
+    pub wecom_bot_id: Option<String>,
+    /// 企业微信智能机器人 Secret（长连接）
+    #[serde(default)]
+    pub wecom_bot_secret: Option<String>,
     /// 是否启用钉钉 Bot
     #[serde(default)]
     pub dingtalk_bot_enabled: bool,
@@ -1239,6 +1272,21 @@ fn default_avatar_persona() -> String {
 fn default_ui_visual_style() -> String {
     "c".to_string()
 }
+pub fn default_assistant_timeout_secs() -> u64 {
+    120
+}
+pub fn default_report_generation_timeout_secs() -> u64 {
+    300
+}
+fn normalize_assistant_timeout_secs(value: u64) -> u64 {
+    value.clamp(30, 900)
+}
+fn normalize_report_generation_timeout_secs(value: u64) -> u64 {
+    value.clamp(60, 1800)
+}
+fn normalize_positive_token(value: Option<u32>) -> Option<u32> {
+    value.filter(|n| *n > 0)
+}
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -1248,6 +1296,8 @@ impl Default for AppConfig {
             idle_threshold_minutes: default_idle_threshold_minutes(),
             ai_mode: AiMode::Local,
             text_model: ModelConfig::default_text(),
+            assistant_timeout_secs: default_assistant_timeout_secs(),
+            report_generation_timeout_secs: default_report_generation_timeout_secs(),
             text_model_profiles: Vec::new(),
             text_model_provider_cache: HashMap::new(),
             vision_model: ModelConfig::default_vision(),
@@ -1260,6 +1310,7 @@ impl Default for AppConfig {
             deleted_default_semantic_categories: Vec::new(),
             storage: StorageConfig::default(),
             remote_storage: RemoteStorageConfig::default(),
+            config_synced_at: 0,
             daily_report_custom_prompt: String::new(),
             daily_report_prompt_presets: Vec::new(),
             daily_report_system_prompt_override: None,
@@ -1287,6 +1338,8 @@ impl Default for AppConfig {
             wecom_corp_id: None,
             wecom_token: None,
             wecom_encoding_aes_key: None,
+            wecom_bot_id: None,
+            wecom_bot_secret: None,
             dingtalk_bot_enabled: false,
             dingtalk_app_secret: None,
             mcp_server_enabled: false,
@@ -1361,6 +1414,42 @@ impl Default for AppConfig {
 }
 
 impl AppConfig {
+    /// 应用远端同步快照，保留本机专属字段（端口、窗口位置、自启、导出目录等）。
+    pub fn apply_synced_remote(&mut self, remote: AppConfig) {
+        let localhost_api_enabled = self.localhost_api_enabled;
+        let localhost_api_host = self.localhost_api_host.clone();
+        let localhost_api_port = self.localhost_api_port;
+        let auto_start = self.auto_start;
+        let auto_start_silent = self.auto_start_silent;
+        let macos_screen_capture_permission_prompted =
+            self.macos_screen_capture_permission_prompted;
+        let last_app_version = self.last_app_version.clone();
+        let daily_report_export_dir = self.daily_report_export_dir.clone();
+        let node_gateway = self.node_gateway.clone();
+        let avatar_x = self.avatar_x;
+        let avatar_y = self.avatar_y;
+        let telegram_bot_bind_code = self.telegram_bot_bind_code.clone();
+        let telegram_bot_bind_code_expires_at = self.telegram_bot_bind_code_expires_at;
+        let background_image = self.background_image.clone();
+
+        *self = remote;
+
+        self.localhost_api_enabled = localhost_api_enabled;
+        self.localhost_api_host = localhost_api_host;
+        self.localhost_api_port = localhost_api_port;
+        self.auto_start = auto_start;
+        self.auto_start_silent = auto_start_silent;
+        self.macos_screen_capture_permission_prompted = macos_screen_capture_permission_prompted;
+        self.last_app_version = last_app_version;
+        self.daily_report_export_dir = daily_report_export_dir;
+        self.node_gateway = node_gateway;
+        self.avatar_x = avatar_x;
+        self.avatar_y = avatar_y;
+        self.telegram_bot_bind_code = telegram_bot_bind_code;
+        self.telegram_bot_bind_code_expires_at = telegram_bot_bind_code_expires_at;
+        self.background_image = background_image;
+    }
+
     /// 规范化配置，兼容旧字段并补齐助手可用的文本模型档案
     pub fn normalize(&mut self) {
         self.migrate_legacy_config();
@@ -1391,12 +1480,25 @@ impl AppConfig {
         self.break_reminder_interval_minutes =
             normalize_break_reminder_interval_minutes(self.break_reminder_interval_minutes);
         self.standard_work_hours = self.standard_work_hours.clamp(1.0, 24.0);
+        self.assistant_timeout_secs = normalize_assistant_timeout_secs(self.assistant_timeout_secs);
+        self.report_generation_timeout_secs =
+            normalize_report_generation_timeout_secs(self.report_generation_timeout_secs);
+        self.text_model.thinking_budget = normalize_positive_token(self.text_model.thinking_budget);
+        self.text_model.max_output_tokens =
+            normalize_positive_token(self.text_model.max_output_tokens);
+        if self.text_model.enable_thinking == Some(true)
+            && self.text_model.thinking_budget == Some(0)
+        {
+            self.text_model.thinking_budget = None;
+        }
         self.daily_report_custom_prompt = self.daily_report_custom_prompt.trim().to_string();
         normalize_prompt_presets(&mut self.daily_report_prompt_presets);
         self.daily_report_export_dir =
             normalize_optional_string(self.daily_report_export_dir.take());
         self.localhost_api_port = normalize_localhost_api_port(self.localhost_api_port);
         self.localhost_api_host = normalize_optional_string(self.localhost_api_host.take());
+        self.wecom_bot_id = normalize_optional_string(self.wecom_bot_id.take());
+        self.wecom_bot_secret = normalize_optional_string(self.wecom_bot_secret.take());
         self.telegram_bot_bind_code = normalize_optional_string(self.telegram_bot_bind_code.take())
             .map(|code| code.to_ascii_uppercase());
         if self.telegram_bot_bind_code.is_none() {
@@ -1560,6 +1662,9 @@ impl AppConfig {
                 endpoint: self.ai_provider.endpoint.clone(),
                 api_key: self.ai_provider.api_key.clone(),
                 model: self.ai_provider.model.clone(),
+                enable_thinking: None,
+                thinking_budget: None,
+                max_output_tokens: None,
             };
         }
 
@@ -1570,6 +1675,9 @@ impl AppConfig {
                     endpoint: self.ai_provider.endpoint.clone(),
                     api_key: self.ai_provider.api_key.clone(),
                     model: vision_model.clone(),
+                    enable_thinking: None,
+                    thinking_budget: None,
+                    max_output_tokens: None,
                 };
             }
         }
@@ -1672,6 +1780,9 @@ fn same_model_config(left: &ModelConfig, right: &ModelConfig) -> bool {
         && left.model.trim() == right.model.trim()
         && left.api_key.as_deref().unwrap_or("").trim()
             == right.api_key.as_deref().unwrap_or("").trim()
+        && left.enable_thinking == right.enable_thinking
+        && left.thinking_budget == right.thinking_budget
+        && left.max_output_tokens == right.max_output_tokens
 }
 
 fn default_profile_name(model_config: &ModelConfig) -> String {
@@ -2076,6 +2187,7 @@ mod tests {
                 endpoint: "https://api.deepseek.com".to_string(),
                 api_key: Some("sk-test".to_string()),
                 model: "deepseek-chat".to_string(),
+                ..super::ModelConfig::default_text()
             },
         );
         let round: AppConfig =
@@ -2087,6 +2199,85 @@ mod tests {
                 .and_then(|m| m.api_key.as_deref()),
             Some("sk-test")
         );
+    }
+
+    #[test]
+    fn 应用远端同步快照时应保留本机端口与窗口位置() {
+        let mut local = AppConfig::default();
+        local.localhost_api_port = 12345;
+        local.avatar_x = Some(40);
+        local.locale = "zh-CN".to_string();
+        let mut remote = AppConfig::default();
+        remote.localhost_api_port = 47831;
+        remote.avatar_x = Some(9);
+        remote.locale = "en".to_string();
+        remote.assistant_timeout_secs = 180;
+        local.apply_synced_remote(remote);
+        assert_eq!(local.localhost_api_port, 12345);
+        assert_eq!(local.avatar_x, Some(40));
+        assert_eq!(local.locale, "en");
+        assert_eq!(local.assistant_timeout_secs, 180);
+    }
+
+    #[test]
+    fn 旧配置缺少超时与思考字段时应使用默认值() {
+        let mut legacy = serde_json::to_value(AppConfig::default()).unwrap();
+        let object = legacy.as_object_mut().unwrap();
+        assert!(object.remove("assistant_timeout_secs").is_some());
+        assert!(object.remove("report_generation_timeout_secs").is_some());
+        let text_model = object
+            .get_mut("text_model")
+            .unwrap()
+            .as_object_mut()
+            .unwrap();
+        text_model.remove("enable_thinking");
+        text_model.remove("thinking_budget");
+        text_model.remove("max_output_tokens");
+        let old: AppConfig =
+            serde_json::from_value(legacy).expect("旧配置缺少超时与思考字段时应可解析");
+        assert_eq!(old.assistant_timeout_secs, 120);
+        assert_eq!(old.report_generation_timeout_secs, 300);
+        assert_eq!(old.text_model.enable_thinking, None);
+        assert_eq!(old.text_model.thinking_budget, None);
+        assert_eq!(old.text_model.max_output_tokens, None);
+    }
+
+    #[test]
+    fn 超时与思考预算应规范化到合法范围() {
+        let mut config = AppConfig::default();
+        config.assistant_timeout_secs = 1;
+        config.report_generation_timeout_secs = 10_000;
+        config.text_model.thinking_budget = Some(0);
+        config.text_model.max_output_tokens = Some(0);
+        config.normalize();
+        assert_eq!(config.assistant_timeout_secs, 30);
+        assert_eq!(config.report_generation_timeout_secs, 1800);
+        assert_eq!(config.text_model.thinking_budget, None);
+        assert_eq!(config.text_model.max_output_tokens, None);
+    }
+
+    #[test]
+    fn 旧配置缺少企微长连接字段时应可解析() {
+        let mut legacy = serde_json::to_value(AppConfig::default()).unwrap();
+        let object = legacy.as_object_mut().unwrap();
+        assert!(object.remove("wecom_bot_id").is_some());
+        assert!(object.remove("wecom_bot_secret").is_some());
+        let old: AppConfig =
+            serde_json::from_value(legacy).expect("旧配置缺少企微长连接字段时应可解析");
+        assert_eq!(old.wecom_bot_id, None);
+        assert_eq!(old.wecom_bot_secret, None);
+    }
+
+    #[test]
+    fn 配置规范化应清理企微长连接空白凭证() {
+        let mut config = AppConfig {
+            wecom_bot_id: Some("  bot-id  ".to_string()),
+            wecom_bot_secret: Some("   ".to_string()),
+            ..AppConfig::default()
+        };
+        config.normalize();
+        assert_eq!(config.wecom_bot_id.as_deref(), Some("bot-id"));
+        assert_eq!(config.wecom_bot_secret, None);
     }
 
     #[test]

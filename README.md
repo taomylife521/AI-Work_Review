@@ -282,7 +282,7 @@ Still being actively refined — interaction linkage, state expression, and pres
 <details>
 <summary>Bot Integration (Telegram / Feishu / DingTalk / WeCom)</summary>
 
-Query records and generate daily reports remotely from Telegram / Feishu / DingTalk / WeCom via local API + multi-device registration. Supported commands: `/devices`, `/report`, `/generate`, etc. Restricted to personal and own multi-device use only.
+Query records and generate daily reports remotely from Telegram / Feishu / DingTalk / WeCom via local API + multi-device registration. Supported commands: `/devices`, `/report`, `/generate`, etc. WeCom prefers the intelligent-bot long connection (Bot ID + Secret, no public URL); only one live connection is allowed per bot. Restricted to personal and own multi-device use only.
 
 </details>
 

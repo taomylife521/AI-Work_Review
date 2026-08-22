@@ -15,6 +15,7 @@ mod avatar_input;
 mod avatar_proactive;
 mod bot_common;
 mod commands;
+mod config_sync;
 mod dingtalk_bot;
 mod feishu_bot;
 mod idle_detector;
@@ -28,6 +29,7 @@ mod screen_lock;
 mod screenshot;
 mod storage;
 mod telegram_bot;
+mod wecom_aibot;
 mod wecom_bot;
 
 use once_cell::sync::OnceCell;
@@ -432,6 +434,7 @@ pub struct AppState {
     pub generating_report: bool,
     pub localhost_api_runtime: localhost_api::LocalhostApiRuntime,
     pub telegram_bot_runtime: telegram_bot::TelegramBotRuntime,
+    pub wecom_bot_runtime: wecom_aibot::WecomBotRuntime,
     /// avatar 循环缓存的活动窗口（时间戳 + 窗口信息），供 screenshot 循环复用
     pub cached_active_window: Option<(std::time::Instant, monitor::ActiveWindow)>,
 }
@@ -533,6 +536,7 @@ fn clear_legacy_keychain_placeholders(config: &mut work_review_core::config::App
         clear_opt(&mut config.feishu_encrypt_key);
         clear_opt(&mut config.wecom_token);
         clear_opt(&mut config.wecom_encoding_aes_key);
+        clear_opt(&mut config.wecom_bot_secret);
         clear_opt(&mut config.dingtalk_app_secret);
         for profile in config.text_model_profiles.iter_mut() {
             clear_opt(&mut profile.model_config.api_key);
@@ -3387,7 +3391,7 @@ pub(crate) fn build_hourly_summary(
 
     match activities {
         Ok(acts) if !acts.is_empty() => {
-            let stats = HourlyStats::from_activities(date, hour, acts);
+            let stats = HourlyStats::from_activities(acts);
             let summary = generate_fallback_summary(&stats);
 
             Some(work_review_core::database::HourlySummary {
@@ -4197,6 +4201,7 @@ async fn main() {
         generating_report: false,
         localhost_api_runtime: localhost_api::LocalhostApiRuntime::default(),
         telegram_bot_runtime: telegram_bot::TelegramBotRuntime::default(),
+        wecom_bot_runtime: wecom_aibot::WecomBotRuntime::default(),
         cached_active_window: None,
     }));
     let app_lifecycle_state = Arc::new(Mutex::new(AppLifecycleState::default()));
@@ -4362,6 +4367,10 @@ async fn main() {
             if let Err(e) = telegram_bot::sync_telegram_bot_runtime(state.inner()) {
                 log::warn!("初始化 Telegram Bot 失败: {e}");
             }
+            if let Err(e) = wecom_aibot::sync_wecom_bot_runtime(state.inner()) {
+                log::warn!("初始化企业微信 Bot 失败: {e}");
+            }
+            config_sync::spawn_pull_on_startup(app.handle().clone(), state.inner().clone());
 
             // 创建 Tauri v2 系统托盘
             let tray_locale = state
@@ -4571,6 +4580,7 @@ async fn main() {
             commands::get_localhost_api_status,
             commands::get_node_gateway_status,
             commands::get_telegram_bot_status,
+            commands::get_wecom_bot_status,
             commands::generate_telegram_bot_bind_code,
             commands::generate_text_with_model,
             commands::reveal_localhost_api_token,
@@ -5193,6 +5203,7 @@ mod tests {
             endpoint: "http://localhost:11434".to_string(),
             api_key: None,
             model: "qwen3".to_string(),
+            ..ModelConfig::default_text()
         };
 
         assert!(avatar_proactive_ai_should_run(

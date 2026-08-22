@@ -315,6 +315,7 @@ pub(crate) fn persist_app_config(
 
         // 先持久化文件；失败时内存配置和运行时隐私过滤器保持旧值。
         let config_path = state.config_path.clone();
+        crate::config_sync::stamp_local_sync(&mut config);
         config.save(&config_path)?;
 
         state.config = config.clone();
@@ -397,6 +398,8 @@ pub(crate) fn persist_app_config(
 
     crate::localhost_api::sync_localhost_api_runtime(&app, state)?;
     crate::telegram_bot::sync_telegram_bot_runtime(state)?;
+    crate::wecom_aibot::sync_wecom_bot_runtime(state)?;
+    crate::config_sync::spawn_push(config.clone());
     crate::emit_config_changed(&app, &config);
 
     log::info!("配置已保存");

@@ -159,9 +159,14 @@ pub async fn handle_dingtalk_callback(
         Err(e) => return DingtalkResponse::error(500, format!("HTTP client error: {e}")),
     };
 
-    let reply = handle_cmd(&client, &devices, &text)
-        .await
-        .unwrap_or_else(|| UNKNOWN_CMD_REPLY.to_string());
+    let reply = handle_cmd(
+        &client,
+        &devices,
+        &text,
+        crate::bot_common::report_generate_timeout(config),
+    )
+    .await
+    .unwrap_or_else(|| UNKNOWN_CMD_REPLY.to_string());
 
     // 通过 sessionWebhook 回复，但必须先校验目标域名属于钉钉，避免 SSRF。
     if session_webhook.is_empty() {

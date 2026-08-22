@@ -3,6 +3,7 @@
 //! 五层结构：Tools → Model → Executor → Orchestrator
 //! 当前进度：Stage 1-5 全部完成 ✅
 
+pub mod deadline;
 pub mod events;
 pub mod executor;
 pub mod model;

@@ -319,9 +319,14 @@ pub async fn handle_wecom_callback(
     };
 
     // WeCom 被动回复必须在 5 秒内返回，所以不发送"处理中"提示，直接执行命令并回包。
-    let reply = handle_cmd(&client, &devices, &text)
-        .await
-        .unwrap_or_else(|| UNKNOWN_CMD_REPLY.to_string());
+    let reply = handle_cmd(
+        &client,
+        &devices,
+        &text,
+        crate::bot_common::report_generate_timeout(config),
+    )
+    .await
+    .unwrap_or_else(|| UNKNOWN_CMD_REPLY.to_string());
 
     let reply_xml = encrypt_reply(&key, token, corp_id, &reply, timestamp, nonce);
     WecomResponse::xml(200, reply_xml)

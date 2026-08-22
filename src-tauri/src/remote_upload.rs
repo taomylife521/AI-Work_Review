@@ -196,6 +196,7 @@ fn content_type_for_extension(path: &str) -> &'static str {
     match ext.as_str() {
         "jpg" | "jpeg" => "image/jpeg",
         "png" => "image/png",
+        "json" => "application/json",
         _ => "application/octet-stream",
     }
 }
@@ -309,6 +310,48 @@ async fn upload_webdav(
     Ok(public_url)
 }
 
+pub const APP_CONFIG_OBJECT: &str = "work-review/app-config.json";
+
+pub fn should_sync_app_config(config: &RemoteStorageConfig) -> bool {
+    config.sync_app_config
+        && config.provider == RemoteStorageProvider::WebDav
+        && !config.webdav.url.trim().is_empty()
+}
+
+pub async fn push_app_config_bytes(config: &RemoteStorageConfig, bytes: Vec<u8>) -> Result<String> {
+    upload_webdav(upload_client()?, &config.webdav, &bytes, APP_CONFIG_OBJECT).await
+}
+
+pub async fn pull_app_config_bytes(config: &RemoteStorageConfig) -> Result<Option<Vec<u8>>> {
+    ensure_webdav_endpoint_allowed(&config.webdav.url)?;
+    let base = config.webdav.url.trim_end_matches('/');
+    let object_path = remote_object_path(&config.webdav.path_prefix, APP_CONFIG_OBJECT);
+    let get_url = format!("{base}/{object_path}");
+    let resp = upload_client()?
+        .get(&get_url)
+        .basic_auth(&config.webdav.username, Some(&config.webdav.password))
+        .send()
+        .await
+        .map_err(|e| AppError::Unknown(format!("WebDAV GET 失败: {e}")))?;
+    let status = resp.status().as_u16();
+    if status == 404 {
+        return Ok(None);
+    }
+    if !resp.status().is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(AppError::Unknown(format!(
+            "WebDAV GET 返回 {status}: {}",
+            body.chars().take(300).collect::<String>()
+        )));
+    }
+    Ok(Some(
+        resp.bytes()
+            .await
+            .map_err(|e| AppError::Unknown(format!("读取 WebDAV 配置失败: {e}")))?
+            .to_vec(),
+    ))
+}
+
 /// 逐级确保远程目录存在（带进程内缓存，已确认过的目录不再重复 MKCOL）。
 async fn ensure_webdav_directories(
     client: &Client,
@@ -395,6 +438,10 @@ mod tests {
         assert_eq!(content_type_for_extension("a/b/shot.jpg"), "image/jpeg");
         assert_eq!(content_type_for_extension("shot.JPEG"), "image/jpeg");
         assert_eq!(content_type_for_extension("shot.png"), "image/png");
+        assert_eq!(
+            content_type_for_extension("work-review/app-config.json"),
+            "application/json"
+        );
         assert_eq!(
             content_type_for_extension("shot.webp"),
             "application/octet-stream"

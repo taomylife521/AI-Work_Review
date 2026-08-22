@@ -52,11 +52,6 @@ fn update_daily_report_ai_order_cache(
     true
 }
 
-#[allow(dead_code)]
-fn normalize_saved_report_ai_mode(value: &str) -> String {
-    value.trim().to_lowercase()
-}
-
 fn build_daily_report_export_path(export_dir: &Path, date: &str) -> PathBuf {
     let safe_date = date.replace(['/', '\\'], "-");
     export_dir.join(format!("{safe_date}.md"))
@@ -180,6 +175,9 @@ pub(crate) async fn generate_report_inner(
         );
     }
 
+    let report_timeout =
+        std::time::Duration::from_secs(config.report_generation_timeout_secs.max(60));
+
     // 创建分析器（使用 text_model 配置）
     let analyzer = work_review_core::analysis::create_analyzer(
         config.ai_mode,
@@ -196,10 +194,11 @@ pub(crate) async fn generate_report_inner(
         } else {
             Some(config.daily_report_last_ai_order.clone())
         },
+        report_timeout,
     );
 
     // 生成报告（spawn 隔离 panic，防止内部错误杀死整个 tokio 线程）
-    // 外层加 300 秒总超时，防止 AI 调用卡死后前端永远等待
+    // 外层超时可配置（默认 300 秒），到期 abort 后台任务。
     let screenshots_dir = data_dir.clone();
     let date_gen = date.clone();
     let category_name_overrides: std::collections::HashMap<String, String> = config
@@ -225,23 +224,25 @@ pub(crate) async fn generate_report_inner(
             )
             .await
     });
+    let abort = spawn_result.abort_handle();
 
-    let report_result =
-        match tokio::time::timeout(std::time::Duration::from_secs(300), spawn_result).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(work_review_core::error::AppError::Analysis(
-                match report_locale {
-                    AppLocale::ZhCn => "日报生成过程中发生内部错误，请重试".to_string(),
-                    AppLocale::ZhTw => "日報生成過程中發生內部錯誤，請重試".to_string(),
-                    AppLocale::En => {
-                        "Internal error during report generation, please retry".to_string()
-                    }
-                    AppLocale::Ar => {
-                        "حدث خطأ داخلي أثناء إنشاء التقرير، يرجى المحاولة مرة أخرى".to_string()
-                    }
-                },
-            )),
-            Err(_) => Err(work_review_core::error::AppError::Analysis(
+    let report_result = match tokio::time::timeout(report_timeout, spawn_result).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(_)) => Err(work_review_core::error::AppError::Analysis(
+            match report_locale {
+                AppLocale::ZhCn => "日报生成过程中发生内部错误，请重试".to_string(),
+                AppLocale::ZhTw => "日報生成過程中發生內部錯誤，請重試".to_string(),
+                AppLocale::En => {
+                    "Internal error during report generation, please retry".to_string()
+                }
+                AppLocale::Ar => {
+                    "حدث خطأ داخلي أثناء إنشاء التقرير، يرجى المحاولة مرة أخرى".to_string()
+                }
+            },
+        )),
+        Err(_) => {
+            abort.abort();
+            Err(work_review_core::error::AppError::Analysis(
                 match report_locale {
                     AppLocale::ZhCn => "日报生成超时，请稍后重试".to_string(),
                     AppLocale::ZhTw => "日報生成逾時，請稍後重試".to_string(),
@@ -252,8 +253,9 @@ pub(crate) async fn generate_report_inner(
                         "انتهت مهلة إنشاء التقرير، يرجى المحاولة مرة أخرى لاحقاً".to_string()
                     }
                 },
-            )),
-        };
+            ))
+        }
+    };
 
     let avatar_finish_state = {
         let mut state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
@@ -775,12 +777,6 @@ mod tests {
 
         assert_eq!(ai_mode, "summary");
         assert_eq!(model_name, Some("gpt-5.4".to_string()));
-    }
-
-    #[test]
-    fn 保存的日报模式应统一转为小写() {
-        assert_eq!(normalize_saved_report_ai_mode("Summary"), "summary");
-        assert_eq!(normalize_saved_report_ai_mode(" local "), "local");
     }
 
     #[test]

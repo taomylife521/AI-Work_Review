@@ -1,5 +1,6 @@
 <script lang="ts">
   import { afterUpdate, onDestroy, onMount, tick } from 'svelte';
+  import { get } from 'svelte/store';
   import { fly } from 'svelte/transition';
   import { invoke, Channel } from '@tauri-apps/api/core';
   import { marked } from 'marked';
@@ -22,6 +23,7 @@
   import { reduceStreamEvent } from './streamEvent.ts';
   import { formatDurationLocalized, locale, t, tm, translateCategoryLabel } from '$lib/i18n/index.ts';
   import { formatUserError } from '$lib/utils/errorDisplay.ts';
+  import { cache } from '../../lib/stores/cache.ts';
   import { trapFocus } from '$lib/utils/focusTrap.ts';
 
   marked.use({
@@ -678,12 +680,20 @@
     }
   }
 
-  const ASK_TIMEOUT_MS = 120_000;
+  function assistantTimeoutMs(): number {
+    const raw = Number((get(cache).config as { assistant_timeout_secs?: number } | null)?.assistant_timeout_secs);
+    const secs = Number.isFinite(raw) ? raw : 120;
+    // 前端略宽于后端绝对截止，给收束/取消留出回包时间。
+    return Math.min(Math.max(secs, 30), 900) * 1000 + 2000;
+  }
 
-  function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout?: () => void): Promise<T> {
     let timer: ReturnType<typeof setTimeout>;
     const timeout = new Promise<T>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(t('ask.timeoutError'))), ms);
+      timer = setTimeout(() => {
+        onTimeout?.();
+        reject(new Error(t('ask.timeoutError')));
+      }, ms);
     });
     return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
   }
@@ -753,7 +763,10 @@
           requestId: assistantMessageId,
           onEvent: channel,
         }),
-        ASK_TIMEOUT_MS
+        assistantTimeoutMs(),
+        () => {
+          void stopCurrentRequest();
+        }
       );
 
       // 事件优先：已收到 done/error 则保留事件内容；否则用 await 返回值兜底。

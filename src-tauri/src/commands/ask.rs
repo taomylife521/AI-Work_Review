@@ -592,26 +592,6 @@ fn build_user_memory_prompt(
     ))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-enum AssistantQuestionKind {
-    StageSummary,
-    OutcomeRecap,
-    ProcessRecap,
-    EvidenceQuery,
-    TimeStat,
-    Comparison,
-    Listing,
-    Freeform,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-enum AssistantReasoningMode {
-    Basic,
-    AiEnhanced,
-}
-
 fn is_short_follow_up_question(question: &str) -> bool {
     let normalized = normalize_context_utterance(question);
 
@@ -1475,137 +1455,6 @@ fn classify_standalone_assistant_request_mode(
     classify_standalone_assistant_request(question).mode
 }
 
-fn detect_question_kind_from_text(text: &str) -> AssistantQuestionKind {
-    let context = text.trim().to_lowercase();
-
-    if context.is_empty() {
-        return AssistantQuestionKind::Freeform;
-    }
-
-    let time_stat_patterns = ["花了多少时间", "多少时间", "总时长", "时间分布", "时间占比"];
-    if time_stat_patterns
-        .iter()
-        .any(|pattern| context.contains(pattern))
-    {
-        return AssistantQuestionKind::TimeStat;
-    }
-
-    let comparison_patterns = ["对比", "比较", "和上周", "相比", "比上周", "变化", "差异"];
-    if comparison_patterns
-        .iter()
-        .any(|pattern| context.contains(pattern))
-    {
-        return AssistantQuestionKind::Comparison;
-    }
-
-    let listing_patterns = ["列出", "列举", "全部", "哪些", "清单"];
-    if listing_patterns
-        .iter()
-        .any(|pattern| context.contains(pattern))
-    {
-        return AssistantQuestionKind::Listing;
-    }
-
-    let evidence_patterns = [
-        "依据",
-        "证据",
-        "怎么得出",
-        "怎么判断",
-        "为什么这么说",
-        "哪些记录",
-        "哪条记录",
-        "从哪里看",
-        "原文",
-    ];
-    if evidence_patterns
-        .iter()
-        .any(|pattern| context.contains(pattern))
-    {
-        return AssistantQuestionKind::EvidenceQuery;
-    }
-
-    let process_patterns = [
-        "过程",
-        "怎么推进",
-        "时间花在哪",
-        "花在哪",
-        "节奏",
-        "session",
-        "工作段",
-        "时段",
-        "时间线",
-        "切换",
-        "过程复盘",
-    ];
-    if process_patterns
-        .iter()
-        .any(|pattern| context.contains(pattern))
-    {
-        return AssistantQuestionKind::ProcessRecap;
-    }
-
-    let outcome_patterns = [
-        "结果",
-        "产出",
-        "完成了什么",
-        "推进到哪",
-        "进展",
-        "交付",
-        "没收口",
-        "待办",
-        "下一步",
-        "后续",
-        "风险",
-        "阻塞",
-    ];
-    if outcome_patterns
-        .iter()
-        .any(|pattern| context.contains(pattern))
-    {
-        return AssistantQuestionKind::OutcomeRecap;
-    }
-
-    let stage_patterns = [
-        "工作复盘",
-        "工作总结",
-        "主要做了什么",
-        "做得怎么样",
-        "最近怎么样",
-        "最近忙什么",
-        "状态如何",
-        "work review",
-        "what did i do",
-        "how has my work",
-    ];
-    if stage_patterns
-        .iter()
-        .any(|pattern| context.contains(pattern))
-    {
-        return AssistantQuestionKind::StageSummary;
-    }
-
-    AssistantQuestionKind::Freeform
-}
-
-fn last_user_question_kind(history: &[AssistantChatMessage]) -> Option<AssistantQuestionKind> {
-    last_explicit_user_message(history)
-        .map(|message| detect_question_kind_from_text(&message.content))
-}
-
-fn detect_assistant_question_kind_with_mode(
-    question: &str,
-    history: &[AssistantChatMessage],
-    _mode: AssistantReasoningMode,
-) -> AssistantQuestionKind {
-    let trimmed = question.trim();
-
-    if is_short_follow_up_question(trimmed) {
-        return last_user_question_kind(history).unwrap_or(AssistantQuestionKind::Freeform);
-    }
-
-    detect_question_kind_from_text(trimmed)
-}
-
 fn classify_assistant_request(
     question: &str,
     history: &[AssistantChatMessage],
@@ -1752,41 +1601,6 @@ where
             prompt
         }
     }
-}
-
-#[allow(dead_code)]
-fn detect_assistant_question_kind(
-    question: &str,
-    history: &[AssistantChatMessage],
-) -> AssistantQuestionKind {
-    detect_assistant_question_kind_with_mode(question, history, AssistantReasoningMode::Basic)
-}
-
-#[allow(dead_code)]
-fn push_markdown_section(answer: &mut String, title: &str, lines: Vec<String>, empty_text: &str) {
-    if lines.is_empty() && empty_text.is_empty() {
-        return;
-    }
-
-    answer.push_str(title);
-    answer.push_str("\n\n");
-
-    if lines.is_empty() {
-        answer.push_str(empty_text);
-        answer.push_str("\n\n");
-        return;
-    }
-
-    for line in lines {
-        if line.starts_with("- ") || line.starts_with("> ") {
-            answer.push_str(&line);
-        } else {
-            answer.push_str("- ");
-            answer.push_str(&line);
-        }
-        answer.push('\n');
-    }
-    answer.push('\n');
 }
 
 pub(crate) async fn generate_text_answer_with_model(
@@ -2292,6 +2106,15 @@ async fn execute_assistant_action(
                 }
                 s.generating_report = true;
             }
+            struct GeneratingReportGuard(Arc<Mutex<AppState>>);
+            impl Drop for GeneratingReportGuard {
+                fn drop(&mut self) {
+                    if let Ok(mut state) = self.0.lock() {
+                        state.generating_report = false;
+                    }
+                }
+            }
+            let _guard = GeneratingReportGuard(state_arc.clone());
             let result = super::report::generate_report_inner(
                 date.clone(),
                 Some(force),
@@ -2300,9 +2123,6 @@ async fn execute_assistant_action(
                 &state_arc,
             )
             .await;
-            if let Ok(mut s) = state_arc.lock() {
-                s.generating_report = false;
-            }
             match result {
                 Ok(_) => Ok(format!(
                     "已生成 {date} 的日报。可调用 get_daily_report 读取内容，或让用户到日报页查看。"
@@ -2479,6 +2299,7 @@ pub async fn chat_work_assistant(
         web_tools,
         avatar_followups,
         assistant_memory_enabled,
+        assistant_timeout_secs,
     ) = {
         let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
         let (ignored_apps, excluded_domains) = collect_privacy_filters(&s);
@@ -2498,6 +2319,7 @@ pub async fn chat_work_assistant(
             web_tools,
             s.config.avatar_followups.clone(),
             s.config.assistant_memory_enabled,
+            s.config.assistant_timeout_secs,
         )
     };
     let work_review_mode = request_mode == crate::agent::AssistantRequestMode::WorkReview;
@@ -2630,6 +2452,9 @@ pub async fn chat_work_assistant(
             web_tools,
             runtime,
             Some(tx),
+            crate::agent::deadline::Deadline::after(std::time::Duration::from_secs(
+                assistant_timeout_secs,
+            )),
         ),
     )
     .await;
@@ -3397,11 +3222,6 @@ mod tests {
             classify_assistant_request_mode("继续", &history),
             crate::agent::AssistantRequestMode::WorkReview
         );
-        assert_eq!(
-            detect_assistant_question_kind("继续", &history),
-            AssistantQuestionKind::OutcomeRecap,
-            "问题细分类也应跳过确认语并继承明确用户问题"
-        );
 
         let mode_history = assistant_history_for_request_mode(
             &history,
@@ -3426,11 +3246,6 @@ mod tests {
                 classify_assistant_request_mode("继续", &history),
                 crate::agent::AssistantRequestMode::GeneralChat,
                 "结束语后不能恢复更早的工作模式: {closing_message}"
-            );
-            assert_eq!(
-                detect_assistant_question_kind("继续", &history),
-                AssistantQuestionKind::Freeform,
-                "结束语后不能恢复更早的问题细分类: {closing_message}"
             );
             assert!(
                 assistant_history_for_request_mode(
@@ -3457,10 +3272,6 @@ mod tests {
         assert_eq!(
             classify_assistant_request_mode("为什么会这样？", &history),
             crate::agent::AssistantRequestMode::GeneralChat
-        );
-        assert_eq!(
-            detect_assistant_question_kind("为什么会这样？", &history),
-            AssistantQuestionKind::Freeform
         );
 
         let mode_history = assistant_history_for_request_mode(
@@ -3689,11 +3500,6 @@ mod tests {
             classify_assistant_request_mode("继续", &history),
             crate::agent::AssistantRequestMode::GeneralChat
         );
-        assert_eq!(
-            detect_assistant_question_kind("继续", &history),
-            AssistantQuestionKind::Freeform,
-            "问题细分类也只能继承用户问题，不能读取助手措辞"
-        );
     }
 
     #[test]
@@ -3782,110 +3588,6 @@ mod tests {
         assert!(prompt.contains("证据不足"));
         assert!(prompt.contains("工作复盘"));
         assert!(prompt.contains("真实记录"));
-    }
-
-    fn sample_process_follow_up_history() -> Vec<AssistantChatMessage> {
-        vec![
-            AssistantChatMessage {
-                role: "user".to_string(),
-                content: "最近时间主要花在哪？".to_string(),
-            },
-            AssistantChatMessage {
-                role: "assistant".to_string(),
-                content: "## 结论\n\n- 这段时间更像是围绕少数主题持续推进。\n\n## 过程分析\n\n- 主要是编码开发相关 session。\n".to_string(),
-            },
-        ]
-    }
-
-    fn sample_stage_follow_up_history() -> Vec<AssistantChatMessage> {
-        vec![
-            AssistantChatMessage {
-                role: "user".to_string(),
-                content: "这周主要做了什么？".to_string(),
-            },
-            AssistantChatMessage {
-                role: "assistant".to_string(),
-                content: "## 结论\n\n- 这周主线是助手回答链路改造。\n".to_string(),
-            },
-        ]
-    }
-
-    #[test]
-    fn 助手问题分类应识别阶段总结与过程复盘和证据追问() {
-        assert_eq!(
-            detect_assistant_question_kind("这周主要做了什么？", &[]),
-            AssistantQuestionKind::StageSummary
-        );
-        assert_eq!(
-            detect_assistant_question_kind("最近时间主要花在哪？", &[]),
-            AssistantQuestionKind::ProcessRecap
-        );
-        assert_eq!(
-            detect_assistant_question_kind("这个结论的依据是什么？", &[]),
-            AssistantQuestionKind::EvidenceQuery
-        );
-    }
-
-    #[test]
-    fn 助手问题分类应继承上一轮过程复盘语境() {
-        let history = sample_process_follow_up_history();
-
-        assert_eq!(
-            detect_assistant_question_kind("继续", &history),
-            AssistantQuestionKind::ProcessRecap
-        );
-        assert_eq!(
-            detect_assistant_question_kind("展开说说这个", &history),
-            AssistantQuestionKind::ProcessRecap
-        );
-    }
-
-    #[test]
-    fn 助手问题分类应让纯依据追问继承用户语境并保留明确证据问题() {
-        let history = sample_stage_follow_up_history();
-
-        assert_eq!(
-            detect_assistant_question_kind("那依据呢", &history),
-            AssistantQuestionKind::StageSummary,
-            "纯短追问应继承最近明确用户问题的细分类"
-        );
-        assert_eq!(
-            detect_assistant_question_kind("这个结论怎么得出的", &history),
-            AssistantQuestionKind::EvidenceQuery
-        );
-    }
-
-    #[test]
-    fn 所有识别模式都不得从助手回答推断问题类型() {
-        let history = vec![
-            AssistantChatMessage {
-                role: "user".to_string(),
-                content: "这周主要做了什么？".to_string(),
-            },
-            AssistantChatMessage {
-                role: "assistant".to_string(),
-                content: "## 结论\n\n- 这周主线是助手回答链路改造。\n\n## 过程分析\n\n- 主要是编码开发相关 session。\n".to_string(),
-            },
-        ];
-
-        assert_eq!(
-            detect_assistant_question_kind_with_mode(
-                "展开说说这个",
-                &history,
-                AssistantReasoningMode::Basic
-            ),
-            AssistantQuestionKind::StageSummary,
-            "应继承上一轮用户的阶段总结问题"
-        );
-        assert_eq!(
-            detect_assistant_question_kind_with_mode(
-                "展开说说这个",
-                &history,
-                AssistantReasoningMode::AiEnhanced
-            ),
-            AssistantQuestionKind::StageSummary,
-            "AI 增强模式也不得读取助手回答里的“过程”措辞"
-        );
     }
 
     #[test]

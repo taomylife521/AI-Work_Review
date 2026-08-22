@@ -38,6 +38,13 @@ test('Ask 将异常占位消息标记为失败，避免进入下一轮历史', (
 
 test('Ask 使用请求级 sending，后台请求跨页面存活且旧 finally 不会释放新请求', () => {
   assert.match(askSource, /let activeSendingRequestId(?:\s*:[^=]+)?\s*= null/);
+});
+
+test('Ask 超时应读取配置并在到期后取消后端请求', () => {
+  assert.match(askSource, /assistant_timeout_secs/);
+  assert.match(askSource, /function assistantTimeoutMs/);
+  assert.match(askSource, /cancel_assistant_request/);
+  assert.match(askSource, /stopCurrentRequest\(\)/);
   assert.match(askSource, /assistantStore\.beginSending\(assistantMessageId\)/);
   // 行为变更（切页面不取消生成）：onDestroy 不得清 sending——
   // 请求在后台继续，全局 store 保留"生成中"标记，切回助手页可见进行中状态；

@@ -69,6 +69,19 @@ test('刷新模型列表后应给出反馈，且仅在模型为空时才默认�
   assert.match(source, /settingsAI\.loadedModels/);
 });
 
+test('AI 设置应提供超时与思考模式控件', async () => {
+  const source = await readFile(
+    new URL('./components/SettingsAI.svelte', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(source, /settingsAI\.assistantTimeout/);
+  assert.match(source, /settingsAI\.reportTimeout/);
+  assert.match(source, /settingsAI\.thinkingMode/);
+  assert.match(source, /generation_capabilities/);
+  assert.match(source, /enable_thinking/);
+});
+
 test('已获取模型数量通过 modelsLoaded 变量追踪', async () => {
   const source = await readFile(
     new URL('./components/SettingsAI.svelte', import.meta.url),

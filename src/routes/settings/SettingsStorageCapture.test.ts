@@ -30,3 +30,12 @@ test('存储设置数值输入和自动导出开关应提供本地化可访问�
   assert.match(source, /aria-label=\{`\$\{t\(s3AccessKeyVisible/);
   assert.match(source, /aria-label=\{`\$\{t\(webdavPasswordVisible/);
 });
+
+test('WebDAV 应提供常用配置同步开关', async () => {
+  const source = await readFile(
+    new URL('./components/SettingsStorage.svelte', import.meta.url),
+    'utf8'
+  );
+  assert.match(source, /settingsStorage\.syncAppConfig/);
+  assert.match(source, /sync_app_config/);
+});

@@ -66,6 +66,10 @@ test('自定义窗口栏应只保留拖拽命中区，不再形成明显顶部�
   assert.match(appCssSource, /\.app-shell-stage\s*\{[^}]*padding-bottom:\s*0\.35rem/);
   assert.match(appCssSource, /\.app-shell-stage\s*\{[^}]*padding-left:\s*0\.35rem/);
   assert.match(appCssSource, /\.app-shell-stage--windowbar\s*\{[^}]*padding-top:\s*1\.75rem/);
+  assert.match(
+    appCssSource,
+    /\.app-shell\.ui-style-c\s+\.app-shell-stage--windowbar\s*\{[^}]*padding-top:\s*1\.75rem/,
+  );
   assert.match(appCssSource, /\.app-shell-stage--macos\s*\{[^}]*padding-top:\s*0\.6rem/);
   assert.match(appCssSource, /\.app-shell-windowbar\s*\{[^}]*background:\s*transparent/);
   assert.match(appCssSource, /\.dark\s+\.app-shell-windowbar\s*\{[^}]*background:\s*transparent/);
@@ -133,4 +137,25 @@ test('浮层滚动条应使用轻量内嵌样式，避免下拉菜单出现厚�
   assert.match(appCssSource, /\.app-floating-scroll::-webkit-scrollbar-track\s*\{[^}]*margin-block:\s*0\.35rem/);
   assert.match(appCssSource, /\.app-floating-scroll::-webkit-scrollbar-button\s*\{[^}]*display:\s*none/);
   assert.doesNotMatch(appCssSource, /\.app-floating-scroll::-webkit-scrollbar-button:vertical:start:decrement,\s*\.app-floating-scroll::-webkit-scrollbar-button:vertical:end:increment\s*\{[^}]*display:\s*block/);
+});
+
+test('Windows 自定义标题栏应避免与内容重叠，并切换最大化/还原图标', async () => {
+  const [appSource, appCssSource, zhCNSource, enSource] = await Promise.all([
+    readFile(new URL('./App.svelte', import.meta.url), 'utf8'),
+    readFile(new URL('./app.css', import.meta.url), 'utf8'),
+    readFile(new URL('./lib/i18n/locales/zh-CN.ts', import.meta.url), 'utf8'),
+    readFile(new URL('./lib/i18n/locales/en.ts', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(appSource, /let windowMaximized = false/);
+  assert.match(appSource, /async function refreshMaximizedState/);
+  assert.match(appSource, /appWindow\.onResized/);
+  assert.match(appSource, /windowMaximized \? t\('window\.restore'\) : t\('window\.maximize'\)/);
+  assert.match(appSource, /app-shell-window-controls absolute end-0/);
+  assert.match(
+    appCssSource,
+    /\.app-shell\.ui-style-c\s+\.app-shell-stage--windowbar\s*\{[^}]*padding-top:\s*1\.75rem/,
+  );
+  assert.match(zhCNSource, /restore:\s*'还原'/);
+  assert.match(enSource, /restore:\s*'Restore'/);
 });

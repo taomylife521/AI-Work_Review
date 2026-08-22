@@ -282,7 +282,7 @@ GDK_BACKEND=x11 ./Work_Review
 <details>
 <summary>Bot 聯動（Telegram / 飛書 / 釘釘 / 企業微信）</summary>
 
-通過本地 API + 多設備註冊，從 Telegram / 飛書 / 釘釘 / 企業微信遠端查詢記錄與生成日報。支持命令：`/devices`、`/report`、`/generate` 等。僅限個人和本人多設備聯動使用。
+通過本地 API + 多設備註冊，從 Telegram / 飛書 / 釘釘 / 企業微信遠端查詢記錄與生成日報。支持命令：`/devices`、`/report`、`/generate` 等。企業微信優先使用智能機器人長連線（Bot ID + Secret，無需公網）；同一機器人同時只能保持一條長連線。僅限個人和本人多設備聯動使用。
 
 </details>
 

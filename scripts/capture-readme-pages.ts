@@ -611,6 +611,8 @@ async function installTauriMock(
             return { enabled: true, baseUrl: 'http://127.0.0.1:47831', tokenPreview: 'wr_••••••••demo', lastError: null };
           case 'get_telegram_bot_status':
             return { running: false, starting: false, allowedChatIds: [], lastError: null };
+          case 'get_wecom_bot_status':
+            return { running: false, starting: false, lastError: null, longConnectionConfigured: false, callbackConfigured: false };
           case 'get_update_settings':
             return { autoCheck: true, lastCheck: null };
           case 'plugin:app|version':
