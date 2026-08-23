@@ -38,7 +38,7 @@ flowchart TD
 
 - **screenshots 0.8.10 依赖链**：引入 rand 0.7.3（RUSTSEC-2026-0097）与 0194/0195 两条已知公告；Linux-only 路径不接触用户输入，上游暂无升级版本，待上游修复后 `cargo update`。
 - **gtk-rs GTK3（0.18.x）**：Tauri 2 Linux/webkit2gtk 固有依赖，全部 unmaintained；待 Tauri 生态迁移 GTK4 后自然消除。
-- **unsound 跟踪清单（Issue #167-#171）**：anyhow 1.0.102、event-listener 5.4.1、glib 0.18.5、memmap2 0.7.1、rand 0.7.3——均无 patched 版本，上游发布修复后应升级消化。
+- **unsound 评估结论（#167-#171 已关闭）**：anyhow 1.0.102（无 `downcast_mut` 调用，仅 image/rav1e 错误传播）、event-listener 5.4.1（zbus 等传递依赖，不直接调用 tag API）、glib 0.18.5（gtk/tray-icon 传递依赖，不迭代 `VariantStrIter`）、memmap2 0.7.1（screenshots/libwayshot 传递依赖，不接受不可信 offset）、rand 0.7.3（仅构建依赖链 phf_generator，运行时不存在）——触发条件均不可达，2026-08-23 评估后全部关闭；后续 unsound/漏洞类公告仍按 Issue 跟踪。
 - **`default-text-model` 档案覆盖行为**：`sync_text_model_profiles()` 每次保存仍会用当前 `text_model` 覆盖 `default-text-model` 档案（历史行为保留）。服务商 Key 保留已由 `text_model_provider_cache` 承担（ADR-20260818-02），档案系统若需累积历史配置需另行改造。
 - **助手问题细分类已移除**：`AssistantQuestionKind` / `detect_assistant_question_kind` 在 Agent 路由落地后不再参与生产分类（入口只区分工作复盘 / 普通聊天）。2026-08-22 已删除该死路径及只测它的用例。
 - **布局内容轴策略**（2026-08-22）：操作型页面（设置板面等 `page-axis-operation`）满宽铺开（`--content-width-operation: none`），与概览/时间线一致，宽度由卡片内部网格吸收；阅读型内容（AI 对话、日报正文 `page-axis-reading`）保留 `84rem` 行长上限保证可读性。超宽屏仍受 page-shell（`128rem`@≥1600px）/stage（`160rem`@≥1920px）收束。玻璃拟态（backdrop-blur）在 Linux（WebKitGTK）通过 `platform-linux` 类平台级降级为高不透明度实底。

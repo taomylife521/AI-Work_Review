@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 变更
+- **安全公告评估关闭**：五条 unsound 类 RustSec 跟踪 Issue（#167-#171：anyhow / event-listener / glib / memmap2 / rand）经 `cargo tree --target all` 依赖路径评估，确认触发条件在本项目均不可达（自有代码不调用受影响 API，相关 crate 均为传递依赖，rand 0.7 仅存在于构建依赖链），全部评估关闭；unsound / 漏洞类公告继续按 Issue 跟踪。
+
 ## [1.1.2] - 2026-08-22
 
 ### 新增
