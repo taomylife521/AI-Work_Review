@@ -8,6 +8,7 @@
   import ActivityHourlyChart from '../lib/components/ActivityHourlyChart.svelte';
   import LocalizedDatePicker from '../lib/components/LocalizedDatePicker.svelte';
   import { cache } from '../lib/stores/cache.ts';
+  import { portalToBody } from '$lib/actions/portal.ts';
   import { recordingStore, isActiveRecording } from '../lib/stores/recording.ts';
   import { confirm } from '../lib/stores/confirm.ts';
   import { showToast } from '../lib/stores/toast.ts';
@@ -2039,6 +2040,7 @@
               bind:this={semanticCategoryPopover}
               id={`semantic-category-popover-${domain.domain}`}
                   class="overview-semantic-popover fixed z-[160] overflow-y-auto rounded-lg border border-slate-200 bg-white p-3 shadow-xl dark:border-[#30363d] dark:bg-[#161b22] dark:shadow-black/30"
+              use:portalToBody
               role="dialog"
               tabindex="-1"
               aria-label={t('overview.changeCategory')}

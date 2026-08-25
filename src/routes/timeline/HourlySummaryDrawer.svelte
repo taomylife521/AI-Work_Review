@@ -2,6 +2,7 @@
   import { createEventDispatcher, tick } from 'svelte';
   import { formatDurationLocalized, t } from '$lib/i18n/index.ts';
   import { trapFocus } from '$lib/utils/focusTrap.ts';
+  import { portalToBody } from '$lib/actions/portal.ts';
   import {
     formatHourRange,
     getFullSummary,
@@ -108,6 +109,7 @@
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div
     class="hourly-summary-overlay"
+    use:portalToBody
     role="presentation"
     on:click|self={requestClose}
     on:keydown={handleOverlayKeydown}

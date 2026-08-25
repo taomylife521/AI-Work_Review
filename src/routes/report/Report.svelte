@@ -8,6 +8,7 @@
   import { get } from 'svelte/store';
   import { showToast } from '../../lib/stores/toast.ts';
   import { confirm } from '../../lib/stores/confirm.ts';
+  import { portalToBody } from '$lib/actions/portal.ts';
   import { cache, type CacheState } from '../../lib/stores/cache.ts';
   import { formatLocalizedDate, formatLocalizedTime, formatDurationLocalized, locale, t, tm, translateCategoryLabel } from '$lib/i18n/index.ts';
   import { formatUserError } from '$lib/utils/errorDisplay.ts';
@@ -1573,7 +1574,7 @@
 
 <!-- 段落编辑弹窗 -->
 {#if editingSection >= 0}
-  <div class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="report-edit-section-title">
+  <div class="modal-overlay" use:portalToBody role="dialog" aria-modal="true" aria-labelledby="report-edit-section-title">
     <button type="button" class="absolute inset-0 cursor-default" aria-label={t('report.cancelEdit')} on:click={cancelEditSection}></button>
     <div class="modal-panel relative z-10">
       <div class="modal-header">
@@ -1616,7 +1617,7 @@
 <!-- 表格 / 标题 / 列表等 markdown 样式已统一放到 app.css .markdown-body -->
 
 {#if showPresetModal}
-  <div class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="report-preset-dialog-title">
+  <div class="modal-overlay" use:portalToBody role="dialog" aria-modal="true" aria-labelledby="report-preset-dialog-title">
     <button type="button" class="absolute inset-0 cursor-default" aria-label={t('report.cancelEdit')} on:click={() => { showPresetModal = false; }}></button>
     <div class="modal-panel relative z-10" style="max-width: 36rem;">
       <div class="modal-header">
@@ -1674,7 +1675,7 @@
 {/if}
 
 {#if showBatchExportModal}
-  <div class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="report-batch-export-dialog-title">
+  <div class="modal-overlay" use:portalToBody role="dialog" aria-modal="true" aria-labelledby="report-batch-export-dialog-title">
     <button type="button" class="absolute inset-0 cursor-default" aria-label={t('report.cancelEdit')} on:click={() => { if (!batchExporting) showBatchExportModal = false; }}></button>
     <div class="modal-panel relative z-10" style="max-width: 32rem;">
       <div class="modal-header">

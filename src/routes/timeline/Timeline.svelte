@@ -7,6 +7,7 @@
   import { cache } from '../../lib/stores/cache.ts';
   import { recordingStore, isActiveRecording } from '../../lib/stores/recording.ts';
   import { showToast } from '../../lib/stores/toast.ts';
+  import { portalToBody } from '$lib/actions/portal.ts';
   import {
     appIconStore,
     getIconCacheKey,
@@ -1688,6 +1689,7 @@
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div
     class="timeline-detail-overlay fixed inset-0 z-[140] bg-slate-950/52 backdrop-blur-md flex items-center justify-end p-4 animate-fadeIn"
+    use:portalToBody
     role="presentation"
     on:click|self={handleDetailDismiss}
     on:keydown={handleDetailOverlayKeydown}
@@ -1835,6 +1837,7 @@
               <div
                 bind:this={categoryPopover}
                 class="timeline-category-popover"
+                use:portalToBody
                 role="dialog"
                 tabindex="-1"
                 aria-label={t('timeline.detail.appCategory')}
