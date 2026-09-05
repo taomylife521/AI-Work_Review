@@ -703,9 +703,9 @@ fn get_active_window_with_options(include_browser_url: bool) -> Result<ActiveWin
         let len = GetWindowTextW(hwnd, title.as_mut_ptr(), 512);
         let window_title = if len > 0 {
             strip_not_responding_suffix(
-                &OsString::from_wide(&title[..len as usize])
+                OsString::from_wide(&title[..len as usize])
                     .to_string_lossy()
-                    .to_string(),
+                    .as_ref(),
             )
         } else {
             String::new()
