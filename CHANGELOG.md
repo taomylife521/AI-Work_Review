@@ -7,17 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.3-rc.2] - 2026-09-05
-
-This release candidate includes the changes documented for [1.1.3-rc.1](https://github.com/wm94i/Work-Review/blob/v1.1.3-rc.1/CHANGELOG.md#113-rc1---2026-09-05). RC.1 failed its Windows Clippy gate and was not published.
-
-### Fixed
-- Remove an unnecessary owned-string allocation when normalizing Windows window titles, resolving the Windows-only `clippy::unnecessary_to_owned` build failure without weakening lint checks.
-
-### Testing Notice
-- This is not a stable release and does not replace Latest. Back up your data before installing.
-- Windows native OCR, fast application switching, privacy persistence, category management, data migration, and installer upgrades still require smoke testing on supported platforms.
-
 ## [1.1.3-rc.1] - 2026-09-05
 
 This is a release candidate for testing, not a stable release. Back up your data before installing, especially before testing data-directory migration. RC releases are not marked as Latest and are not offered through the stable automatic-update endpoint.
@@ -31,6 +20,7 @@ This is a release candidate for testing, not a stable release. Back up your data
 - Validate canonical data-directory paths before migration cleanup or copying, rejecting parent/child targets reached through aliases or symbolic links.
 - Allow every custom category to be renamed or deleted without first applying it to an application or rewriting activity history.
 - Save AI settings before semantic indexing and clarify embedding configuration errors.
+- Remove an unnecessary owned-string allocation when normalizing Windows window titles, resolving the Windows-only `clippy::unnecessary_to_owned` build failure without weakening lint checks.
 
 ### Changed
 - Simplify screenshot-focused timeline details and inline category selection. Applying a category uses a second-click confirmation; deletion and privacy-rule changes retain confirmation dialogs.
