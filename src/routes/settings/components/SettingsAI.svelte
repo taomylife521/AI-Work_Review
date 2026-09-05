@@ -184,6 +184,9 @@
     semanticError = '';
     semanticIndexText = '';
     try {
+      // 索引命令读取的是已持久化配置；先把当前界面配置落盘，
+      // 避免开关已打开但未保存时出现"界面已启用、后端报未启用"的矛盾
+      await invoke('save_config', { config });
       // 后端持久化真实状态；前端只分批推进，直到状态不再是 building。
       while (!semanticDestroyed) {
         const progress = await invoke<SemanticIndexProgress>('index_semantic_memory');
@@ -1245,8 +1248,8 @@
               <p class="text-xs text-rose-500 dark:text-rose-400 break-words">
                 {t('settingsAI.semanticMemory.lastError', { error: semanticState.lastError })}
               </p>
-            {/if}
-            {#if semanticError}
+            {:else if semanticError}
+              <!-- 兜底：仅在状态区未记录到错误时显示，避免同一错误重复出现 -->
               <p class="text-xs text-rose-500 dark:text-rose-400 break-words">{semanticError}</p>
             {/if}
             {#if semanticIndexText}

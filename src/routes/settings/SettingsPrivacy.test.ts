@@ -73,6 +73,20 @@ test('内容过滤应默认折叠、显示数量摘要并暴露展开状态', as
   assert.match(source, /config\.privacy\.excluded_domains/);
 });
 
+test('敏感词增删后应立即持久化，避免重启恢复默认值', async () => {
+  const [source, settingsSource] = await Promise.all([
+    readPrivacySource(),
+    readFile(new URL('./Settings.svelte', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(source, /function persistKeywordChange\(\)/);
+  assert.match(source, /invoke(?:<[^>]+>)?\('save_config', \{ config \}\)/);
+  assert.match(source, /revision === keywordRevision/);
+  assert.match(source, /autosaved: true/);
+  assert.match(settingsSource, /<SettingsPrivacy[\s\S]*?on:change=\{handleSettingsChange\}/);
+  assert.equal((source.match(/persistKeywordChange\(\)/g) || []).length, 3);
+});
+
 const appCssUrl = new URL('../../app.css', import.meta.url);
 
 test('隐私设置语义 class 应使用共享低对比边界并提供窄屏布局', async () => {

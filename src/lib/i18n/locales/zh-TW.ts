@@ -217,6 +217,8 @@ export default {
       detail: {
         appCategory: '應用預設分類',
         appCategoryHelp: '修改後會同步更新該應用的歷史記錄',
+        appCategoryPendingConfirm: '再次點擊「{category}」確認，將同步更新該應用的歷史記錄',
+        appSettings: '對此應用',
         saving: '儲存中...',
         screenshot: '螢幕截圖',
         screenshotAlt: '螢幕截圖',

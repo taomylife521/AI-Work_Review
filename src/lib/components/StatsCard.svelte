@@ -8,6 +8,8 @@
   export let href: string | null = null;
   export let embedded = false;
   export let subtitle: string | null = null;
+  /** 标记为概览 KPI 卡：供 ui-style-c 紧凑样式精准命中，避免误伤 subtitle */
+  export let dataKpiCard = false;
 
   const iconColors: Record<StatsCardColor, string> = {
     indigo: 'text-indigo-500 dark:text-indigo-400',
@@ -45,6 +47,7 @@
   <a
     {href}
     class="{cardClass} {interactiveClass}"
+    data-kpi-card={dataKpiCard ? '' : undefined}
   >
     <div class="flex h-full items-center justify-between gap-4">
       <div class="min-w-0 flex-1">
@@ -81,7 +84,7 @@
     </div>
   </a>
 {:else}
-  <div class={cardClass}>
+  <div class={cardClass} data-kpi-card={dataKpiCard ? '' : undefined}>
     <div class="flex h-full items-center justify-between gap-4">
       <div class="min-w-0 flex-1">
         <span class="text-[13px] font-medium text-slate-500 dark:text-[#7d8590] leading-none">{title}</span>

@@ -129,6 +129,24 @@ pub struct ActiveWindow {
     pub is_minimized: bool,
 }
 
+/// 剥离 Windows 在应用挂起时给窗口标题追加的"（未响应）"/"(Not Responding)"后缀。
+/// 这是系统瞬时状态而非窗口内容，且第四级 app_name 回退会从标题推断应用名，
+/// 不剥离会把"ChatGPT（未响应）"整串存成应用名。
+// 仅在 Windows 采集路径调用；macOS/Linux 编译时保留给跨平台单元测试
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn strip_not_responding_suffix(title: &str) -> String {
+    let trimmed = title.trim_end();
+    let lowered = trimmed.to_lowercase();
+    for suffix in ["（未响应）", "(未响应)", "(not responding)"] {
+        if lowered.ends_with(suffix) {
+            return trimmed[..trimmed.len() - suffix.len()]
+                .trim_end()
+                .to_string();
+        }
+    }
+    trimmed.to_string()
+}
+
 /// 清理浏览器窗口标题中的内部页面信息。
 /// Chrome 等浏览器会把内存警告、标签页计数等信息拼到窗口标题里，
 /// 例如 "文档查看 - 内存用量高 - 841 MB - Google Chrome - momoi (行走的卫星)"
@@ -680,13 +698,15 @@ fn get_active_window_with_options(include_browser_url: bool) -> Result<ActiveWin
             return Err(AppError::Unknown("没有前台窗口".to_string()));
         }
 
-        // 获取窗口标题
+        // 获取窗口标题（剥离挂起时系统追加的"（未响应）"后缀）
         let mut title: [u16; 512] = [0; 512];
         let len = GetWindowTextW(hwnd, title.as_mut_ptr(), 512);
         let window_title = if len > 0 {
-            OsString::from_wide(&title[..len as usize])
-                .to_string_lossy()
-                .to_string()
+            strip_not_responding_suffix(
+                &OsString::from_wide(&title[..len as usize])
+                    .to_string_lossy()
+                    .to_string(),
+            )
         } else {
             String::new()
         };
@@ -1695,8 +1715,9 @@ mod tests {
         parse_hyprland_window_bounds, parse_kdotool_geometry_output,
         parse_macos_window_bounds_fields, parse_xdotool_geometry_shell_output,
         resolve_browser_url_for_window_linux, should_run_windows_browser_url_fallback,
-        BrowserUrlCacheKey, BrowserUrlProtection, BrowserUrlProtectionConfig,
-        BrowserUrlQueryDecision, BrowserUrlQueryTicket, LatestOnlySlot, WindowBounds,
+        strip_not_responding_suffix, BrowserUrlCacheKey, BrowserUrlProtection,
+        BrowserUrlProtectionConfig, BrowserUrlQueryDecision, BrowserUrlQueryTicket, LatestOnlySlot,
+        WindowBounds,
     };
     use std::path::Path;
     #[cfg(target_os = "macos")]
@@ -1705,6 +1726,30 @@ mod tests {
         process::Command,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    #[test]
+    fn 未响应后缀应被剥离且不影响正常标题() {
+        assert_eq!(strip_not_responding_suffix("ChatGPT（未响应）"), "ChatGPT");
+        assert_eq!(
+            strip_not_responding_suffix("任务管理器 (未响应)"),
+            "任务管理器"
+        );
+        assert_eq!(
+            strip_not_responding_suffix("Notepad (Not Responding)"),
+            "Notepad"
+        );
+        assert_eq!(strip_not_responding_suffix("App (not responding) "), "App");
+        assert_eq!(
+            strip_not_responding_suffix("正常标题 - ChatGPT"),
+            "正常标题 - ChatGPT"
+        );
+        assert_eq!(strip_not_responding_suffix(""), "");
+        // 后缀必须是结尾才剥离
+        assert_eq!(
+            strip_not_responding_suffix("（未响应）的窗口记录"),
+            "（未响应）的窗口记录",
+        );
+    }
 
     #[test]
     fn current_process_owner当前进程拥有的浮动窗口应被识别() {

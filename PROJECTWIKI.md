@@ -42,7 +42,8 @@ flowchart TD
 - **`default-text-model` 档案覆盖行为**：`sync_text_model_profiles()` 每次保存仍会用当前 `text_model` 覆盖 `default-text-model` 档案（历史行为保留）。服务商 Key 保留已由 `text_model_provider_cache` 承担（ADR-20260818-02），档案系统若需累积历史配置需另行改造。
 - **助手问题细分类已移除**：`AssistantQuestionKind` / `detect_assistant_question_kind` 在 Agent 路由落地后不再参与生产分类（入口只区分工作复盘 / 普通聊天）。2026-08-22 已删除该死路径及只测它的用例。
 - **布局内容轴策略**（2026-08-22）：操作型页面（设置板面等 `page-axis-operation`）满宽铺开（`--content-width-operation: none`），与概览/时间线一致，宽度由卡片内部网格吸收；阅读型内容（AI 对话、日报正文 `page-axis-reading`）保留 `84rem` 行长上限保证可读性。超宽屏仍受 page-shell（`128rem`@≥1600px）/stage（`160rem`@≥1920px）收束。玻璃拟态（backdrop-blur）在 Linux（WebKitGTK）通过 `platform-linux` 类平台级降级为高不透明度实底。
-- **浮层 portal 约定**（2026-08-23）：玻璃壳层（`.app-shell-*-frame`）与详情遮罩的 `backdrop-filter` 会把内部 `position: fixed` 的包含块从视口劫持为该祖先，视口坐标定位的浮层会错位/被裁。因此所有 fixed 浮层必须挂 `use:portalToBody`（`src/lib/actions/portal.ts`）移挂 `document.body`——已覆盖时间线详情遮罩/分类弹层、概览分类弹层、时段摘要抽屉、日报三个模态；`absolute` 定位浮层（如日报导出菜单面板）不受影响无需处理。契约测试 `src/lib/actions/portal.test.ts` 守护。
+- **浮层 portal 约定**（2026-08-23）：玻璃壳层（`.app-shell-*-frame`）与详情遮罩的 `backdrop-filter` 会把内部 `position: fixed` 的包含块从视口劫持为该祖先，视口坐标定位的浮层会错位/被裁。因此所有 fixed 浮层必须挂 `use:portalToBody`（`src/lib/actions/portal.ts`）移挂 `document.body`——已覆盖时间线详情遮罩、概览分类弹层、时段摘要抽屉、日报三个模态；时间线分类已改为行内标签，不再使用视口定位弹层。`absolute` 定位浮层（如日报导出菜单面板）不受影响无需处理。契约测试 `src/lib/actions/portal.test.ts` 守护。
+- **时间线详情阅读顺序**（2026-08-25）：活动详情抽屉以截图为视觉中心，窗口标题/网址作图注，当前分类单独钉在标签最前，其余分类作备选，记录策略收入「对此应用」折叠区；避免分类管理面板盖住截图。
 - **npm 侧**：`npm audit --omit=dev` 作为门禁（高危拦截）；构建工具链漏洞仅报告（当前 9 条，含 nanoid GHSA-2v37-7h3g-55p8）。
 
 ## 5. 模块文档
@@ -101,4 +102,4 @@ flowchart LR
 
 ## 12. 变更日志
 
-- 参见 [CHANGELOG.md](./CHANGELOG.md)（本节与该文件双向关联；条目按 Keep a Changelog 维护）。当前发布版本：[1.1.2](./CHANGELOG.md#112---2026-08-22)。
+- 参见 [CHANGELOG.md](./CHANGELOG.md)（本节与该文件双向关联；条目按 Keep a Changelog 维护）。当前发布版本：[1.1.2](./CHANGELOG.md#112---2026-08-22)。未发布条目见 [Unreleased](./CHANGELOG.md#unreleased)（时间线详情改为截图 + 图注 + 分类标签）。

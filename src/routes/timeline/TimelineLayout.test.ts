@@ -99,9 +99,9 @@ test('时间线结构容器与普通控件应使用统一圆角令牌', async ()
     ['timeline-load-more-btn', 'var\\(--radius-md\\)'],
     ['timeline-detail-drawer', 'var\\(--radius-lg\\)'],
     ['timeline-detail-preview-frame', 'var\\(--radius-md\\)'],
-    ['timeline-category-trigger', 'var\\(--radius-md\\)'],
-    ['timeline-category-popover', 'var\\(--radius-md\\)'],
-    ['timeline-category-option', 'var\\(--radius-sm\\)'],
+    ['timeline-category-chip-current', 'var\\(--radius-full\\)'],
+    ['timeline-category-chip', 'var\\(--radius-full\\)'],
+    ['timeline-category-editor', 'var\\(--radius-md\\)'],
   ];
 
   for (const [className, radius] of expected) {
@@ -292,25 +292,38 @@ test('加载更多应使用日期与偏移快照，并丢弃日期切换后的�
   );
 });
 
-test('活动详情应按阅读顺序组织截图、活动信息与记录设置，并避免多层卡片', async () => {
+test('活动详情应按身份→证据→管理的层级组织：标题为主角、元数据归一行、设置沉底', async () => {
   const source = await readFile(new URL('./Timeline.svelte', import.meta.url), 'utf8');
 
+  const headerIndex = source.indexOf('class="timeline-detail-header"');
+  const titleIndex = source.indexOf('class="timeline-detail-title"');
+  const metaIndex = source.indexOf('timeline-detail-meta-category');
   const bodyIndex = source.indexOf('class="timeline-detail-body"');
-  const heroIndex = source.indexOf('class="timeline-detail-hero"', bodyIndex);
   const previewIndex = source.indexOf('class="timeline-detail-preview"', bodyIndex);
-  const metaIndex = source.indexOf('class="timeline-detail-meta"', bodyIndex);
+  const chipsIndex = source.indexOf('class="timeline-category-chips"', bodyIndex);
+  const currentIndex = source.indexOf('timeline-category-chip-current', bodyIndex);
   const settingsIndex = source.indexOf('class="timeline-detail-settings"', bodyIndex);
 
-  assert.ok(bodyIndex >= 0, '应提供详情主体语义容器');
-  assert.ok(heroIndex > bodyIndex, '应用身份与时间应位于详情主体顶部');
-  assert.ok(previewIndex > heroIndex, '截图应紧随应用身份信息');
-  assert.ok(metaIndex > previewIndex, '标题和网址应位于截图之后');
-  assert.ok(settingsIndex > metaIndex, '分类和记录策略应收拢到详情底部');
+  assert.ok(headerIndex >= 0, '应提供详情头部容器');
+  assert.ok(titleIndex > headerIndex, '窗口标题应是详情主标题（位于头部）');
+  assert.ok(metaIndex > titleIndex, '时间/时长/分类应收敛为标题下的元数据行');
+  assert.ok(bodyIndex > metaIndex, '主体内容应跟随身份区');
+  assert.ok(previewIndex > bodyIndex, '截图应位于主体顶部');
+  assert.ok(chipsIndex > previewIndex, '分类管理应位于证据区之后');
+  assert.ok(currentIndex > chipsIndex, '当前分类应是标签列表的第一个');
+  assert.ok(settingsIndex > chipsIndex, '记录策略应收拢到详情底部');
+  // 应用名降为次要身份信息，不再占用主标题
+  assert.match(source, /timeline-detail-app-line/);
+  assert.doesNotMatch(source, /timeline-detail-caption-title/, '窗口标题不再作为截图图注出现两份');
+  assert.match(source, /timeline-detail-header-meta/);
+  assert.match(source, /timeline-detail-settings-toggle/);
+  assert.match(source, /aria-expanded=\{showAppSettings\}/);
+  assert.doesNotMatch(source, /timeline-detail-hero/);
+  assert.doesNotMatch(source, /timeline-detail-meta-row/);
   assert.match(source, /\.timeline-detail-settings\s*\{[\s\S]*border-top:\s*1px solid rgba\(148, 163, 184, 0\.2\)/);
   assert.match(source, /\.timeline-detail-preview-frame\s*\{[\s\S]*background:\s*rgba\(148, 163, 184, 0\.1\)/);
   assert.doesNotMatch(source, /\.timeline-detail-settings\s*\{[^}]*box-shadow:/);
   assert.match(source, /:global\(\.dark\) \.timeline-detail-preview-frame[\s\S]*background:\s*rgba\(48, 54, 61, 0\.38\)/);
-  assert.match(source, /@media \(max-width: 640px\)[\s\S]*\.timeline-detail-meta-row\s*\{[\s\S]*grid-template-columns:\s*1fr/);
 });
 
 test('640px 及以下活动详情抽屉应全屏展示并移除圆角', async () => {

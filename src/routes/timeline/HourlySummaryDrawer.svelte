@@ -241,7 +241,6 @@
     justify-content: flex-end;
     padding: 1rem;
     background: rgba(15, 23, 42, 0.48);
-    backdrop-filter: blur(7px);
   }
 
   .hourly-summary-drawer {
@@ -275,7 +274,7 @@
   .hourly-summary-kicker {
     display: block;
     margin-bottom: 0.28rem;
-    color: #a16207;
+    color: #78716c;
     font-size: 0.75rem;
     font-weight: 700;
     letter-spacing: 0.08em;
@@ -314,7 +313,7 @@
 
   .hourly-summary-close:focus-visible,
   .hourly-summary-expand:focus-visible {
-    outline: 2px solid rgba(217, 119, 6, 0.62);
+    outline: 2px solid rgba(87, 83, 78, 0.4);
     outline-offset: 2px;
   }
 
@@ -354,7 +353,7 @@
     width: 0.9rem;
     height: 0.9rem;
     border: 2px solid rgba(120, 113, 108, 0.24);
-    border-top-color: #d97706;
+    border-top-color: #57534e;
     border-radius: var(--radius-full);
     animation: hourly-summary-spin 700ms linear infinite;
   }
@@ -386,10 +385,6 @@
     border-radius: var(--radius-md);
     background: rgba(255, 255, 255, 0.92);
     box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
-  }
-
-  .hourly-summary-item-peak {
-    border-color: rgba(217, 119, 6, 0.2);
   }
 
   .hourly-summary-item-header {
@@ -430,24 +425,16 @@
     white-space: nowrap;
   }
 
+  /* 徽章走中性体系：高峰用深实底突出，节奏档位统一灰胶囊（靠文字区分） */
   .hourly-summary-peak {
-    color: #b45309;
-    background: rgba(254, 243, 199, 0.88);
+    color: #fafaf9;
+    background: #292524;
   }
 
-  .hourly-summary-rhythm-deep {
-    color: #f8fafc;
-    background: #334155;
-  }
-
-  .hourly-summary-rhythm-steady {
-    color: #4338ca;
-    background: #eef2ff;
-  }
-
-  .hourly-summary-rhythm-light {
-    color: #c2410c;
-    background: #fff7ed;
+  .hourly-summary-rhythm {
+    border: 1px solid rgba(148, 163, 184, 0.32);
+    color: #57534e;
+    background: #fff;
   }
 
   .hourly-summary-primary {
@@ -531,7 +518,7 @@
   }
 
   :global(.dark) .hourly-summary-kicker {
-    color: #d29922;
+    color: #8b949e;
   }
 
   :global(.dark) .hourly-summary-close {
@@ -561,28 +548,15 @@
     box-shadow: none;
   }
 
-  :global(.dark) .hourly-summary-item-peak {
-    border-color: rgba(210, 153, 34, 0.24);
-  }
-
   :global(.dark) .hourly-summary-peak {
-    color: #e3b341;
-    background: rgba(187, 128, 9, 0.16);
+    color: #161b22;
+    background: #8b949e;
   }
 
-  :global(.dark) .hourly-summary-rhythm-deep {
-    color: #e6edf3;
-    background: #30363d;
-  }
-
-  :global(.dark) .hourly-summary-rhythm-steady {
-    color: #a5b4fc;
-    background: rgba(79, 70, 229, 0.2);
-  }
-
-  :global(.dark) .hourly-summary-rhythm-light {
-    color: #ffa657;
-    background: rgba(158, 69, 0, 0.2);
+  :global(.dark) .hourly-summary-rhythm {
+    border-color: rgba(48, 54, 61, 0.9);
+    color: #adbac7;
+    background: #21262d;
   }
 
   :global(.dark) .hourly-summary-apps span {

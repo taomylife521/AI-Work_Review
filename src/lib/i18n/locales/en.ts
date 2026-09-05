@@ -219,6 +219,8 @@ export default {
       detail: {
         appCategory: 'Default App Category',
         appCategoryHelp: 'Changes will be synced to this app across historical records',
+        appCategoryPendingConfirm: 'Click "{category}" again to confirm — this also updates this app’s history',
+        appSettings: 'For this app',
         saving: 'Saving...',
         screenshot: 'Screenshot',
         screenshotAlt: 'Screenshot',

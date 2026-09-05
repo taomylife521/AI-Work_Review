@@ -533,7 +533,7 @@
             bind:config
             {runningApps}
             {recentApps}
-            on:change={() => dirty = true}
+            on:change={handleSettingsChange}
             on:refresh-apps={() => { loadRunningApps(); loadRecentApps(); }}
           />
         {:else if activeTab === 'storage'}

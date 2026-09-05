@@ -218,6 +218,8 @@ export default {
       detail: {
         appCategory: 'التصنيف الافتراضي للتطبيق',
         appCategoryHelp: 'ستتم مزامنة التغييرات لهذا التطبيق عبر السجلات التاريخية',
+        appCategoryPendingConfirm: 'انقر "{category}" مرة أخرى للتأكيد — سيتم أيضًا تحديث سجل هذا التطبيق',
+        appSettings: 'لهذا التطبيق',
         saving: 'جاري الحفظ...',
         screenshot: 'لقطة شاشة',
         screenshotAlt: 'لقطة شاشة',

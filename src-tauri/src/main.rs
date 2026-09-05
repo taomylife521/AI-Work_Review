@@ -1409,6 +1409,13 @@ fn recording_loop_decision(
     }
 }
 
+fn should_run_ocr(elapsed_since_ocr: Option<Duration>, screenshot_interval: u64) -> bool {
+    match elapsed_since_ocr {
+        None => true,
+        Some(elapsed) => elapsed >= Duration::from_secs(screenshot_interval),
+    }
+}
+
 fn monitoring_poll_interval_ms_for_platform(is_macos: bool) -> u64 {
     if is_macos {
         1500
@@ -2162,6 +2169,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
 
     // 合并路径的截图哈希去重：用 Arc 共享给异步任务，避免 static 跨活动污染
     let merge_screenshot_hash = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let mut last_ocr_time: Option<std::time::Instant> = None;
 
     // 锁屏检测器（无内部状态，复用同一实例避免重复分配）
     let screen_lock_monitor = screen_lock::ScreenLockMonitor::new();
@@ -2653,6 +2661,14 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                     )
                 };
                 let category = classification.base_category.clone();
+                let should_run_ocr = screenshots_enabled
+                    && should_run_ocr(
+                        last_ocr_time.map(|last| last.elapsed()),
+                        screenshot_interval,
+                    );
+                if should_run_ocr {
+                    last_ocr_time = Some(std::time::Instant::now());
+                }
 
                 // 先检查是否有可合并的记录（在截屏之前判断，避免不必要的截图保存）
                 let latest_activity = {
@@ -2852,6 +2868,14 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
 
                         tokio::spawn(async move {
                             use std::sync::atomic::Ordering;
+
+                            if !should_run_ocr {
+                                if let Some(temp_path) = temporary_ocr_source_path {
+                                    let _ = std::fs::remove_file(temp_path);
+                                }
+                                let _ = std::fs::remove_file(latest_capture_path);
+                                return;
+                            }
 
                             // 非阻塞获取 permit，满载时跳过 OCR 避免任务堆积
                             let _permit = match ocr_sem.try_acquire_owned() {
@@ -3065,6 +3089,13 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                                         let state_clone = state.clone();
                                         let ocr_sem = ocr_semaphore.clone();
                                         tokio::spawn(async move {
+                                            if !should_run_ocr {
+                                                if let Some(temp_path) = temporary_ocr_source_path {
+                                                    let _ = std::fs::remove_file(temp_path);
+                                                }
+                                                return;
+                                            }
+
                                             // 非阻塞获取 permit，满载时跳过 OCR
                                             let _permit = match ocr_sem.try_acquire_owned() {
                                                 Ok(p) => p,
@@ -4718,9 +4749,9 @@ mod tests {
         should_initialize_avatar_input, should_initialize_startup_permissions,
         should_merge_contiguous_activity, should_persist_merge_update, should_prevent_exit,
         should_probe_browser_url_before_change_detection, should_request_screen_capture_permission,
-        should_run_startup_cleanup, should_skip_system_window, tray_recording_toggle_action,
-        tray_recording_toggle_label, AvatarNudgeRuntime, BreakReminderRuntime, BreakReminderSignal,
-        MainWindowCloseBehavior, RecordingToggleAction,
+        should_run_ocr, should_run_startup_cleanup, should_skip_system_window,
+        tray_recording_toggle_action, tray_recording_toggle_label, AvatarNudgeRuntime,
+        BreakReminderRuntime, BreakReminderSignal, MainWindowCloseBehavior, RecordingToggleAction,
     };
     use crate::avatar_engine::{
         apply_avatar_visual_settings, default_avatar_state, derive_avatar_state,
@@ -4791,6 +4822,13 @@ mod tests {
         assert!(decision.should_continue);
         assert!(!decision.reset_capture_clock);
         assert_eq!(decision.screenshot_interval, 30);
+    }
+
+    #[test]
+    fn ocr应遵循截图间隔且首次立即执行() {
+        assert!(should_run_ocr(None, 30));
+        assert!(!should_run_ocr(Some(Duration::from_secs(29)), 30));
+        assert!(should_run_ocr(Some(Duration::from_secs(30)), 30));
     }
 
     #[test]

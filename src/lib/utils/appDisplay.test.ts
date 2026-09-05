@@ -142,3 +142,22 @@ test('应用图标应使用浏览器默认高质量插值', async () => {
   assert.match(rule, /image-rendering:\s*auto/);
   assert.doesNotMatch(rule, /-webkit-optimize-contrast/);
 });
+
+test('展示层应剥离 Windows 挂起窗口的未响应后缀', async () => {
+  const { stripNotRespondingSuffix, getPreferredTimelineAppName } = await import('./appDisplay.ts');
+
+  assert.equal(stripNotRespondingSuffix('ChatGPT（未响应）'), 'ChatGPT');
+  assert.equal(stripNotRespondingSuffix('任务管理器 (未响应)'), '任务管理器');
+  assert.equal(stripNotRespondingSuffix('Notepad (Not Responding)'), 'Notepad');
+  assert.equal(stripNotRespondingSuffix('正常标题'), '正常标题');
+  assert.equal(
+    stripNotRespondingSuffix('（未响应）的历史记录'),
+    '（未响应）的历史记录',
+  );
+
+  // 旧版本已把后缀存入 app_name 的记录，展示时也应清洗
+  assert.equal(
+    getPreferredTimelineAppName({ app_name: 'ChatGPT（未响应）', window_title: '' }),
+    'ChatGPT',
+  );
+});

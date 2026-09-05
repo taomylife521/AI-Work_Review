@@ -46,6 +46,24 @@ test('语义分类 store 应对已知语义分类使用当前语言翻译而不�
   );
 });
 
+test('分类选择器应把当前分类单独拆出并保持其余顺序', async () => {
+  const { splitCategoriesForPicker } = await import('./categories.ts');
+  const categories = [
+    { key: 'idle', name: '摸鱼', color: '#6366f1', icon: '💤', is_system: true },
+    { key: 'development', name: '开发工具', color: '#3b82f6', icon: '💻', is_system: true },
+    { key: 'browser', name: '浏览器', color: '#22c55e', icon: '🌐', is_system: true },
+    { key: 'custom-1', name: '1', color: '#6366f1', icon: '🏷️', is_system: false },
+  ];
+
+  const picked = splitCategoriesForPicker(categories, 'browser');
+  assert.equal(picked.current?.key, 'browser');
+  assert.deepEqual(picked.others.map((item) => item.key), ['idle', 'development', 'custom-1']);
+
+  const missing = splitCategoriesForPicker(categories, 'missing');
+  assert.equal(missing.current, null);
+  assert.deepEqual(missing.others.map((item) => item.key), ['idle', 'development', 'browser', 'custom-1']);
+});
+
 test('分类 Store 应保留刷新容错、同步快照读取和颜色回退行为', async () => {
   const source = await readFile(typescriptStoreUrl, 'utf8');
 

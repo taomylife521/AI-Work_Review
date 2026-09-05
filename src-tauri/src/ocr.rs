@@ -408,6 +408,12 @@ if __name__ == "__main__":
 
     /// 从图片中提取文字
     pub fn extract_text(&self, image_path: &Path) -> Result<Option<OcrResult>> {
+        // Windows 原生 OCR 每次识别都会启动 PowerShell；区域补救会把单次任务放大为 4 个进程。
+        #[cfg(target_os = "windows")]
+        if self.preferred_engine == OcrEngine::WindowsOCR {
+            return self.extract_text_once(image_path);
+        }
+
         execute_ocr_pipeline_with(image_path, |path| self.extract_text_once(path))
     }
 
@@ -629,6 +635,8 @@ try {{
             Command::new(&powershell_path)
                 .args([
                     "-NoProfile",
+                    "-WindowStyle",
+                    "Hidden",
                     "-Sta",
                     "-ExecutionPolicy",
                     "Bypass",

@@ -1525,12 +1525,14 @@
       {/each}
     {:else}
       <!-- 改版 KPI：总投入 / 工作时长 / 专注峰值 / 娱乐占比（原浏览器时长、应用数两卡移除） -->
+      <!-- data-kpi-card：供 ui-style-c 紧凑样式精准命中数值/标签，不误伤 subtitle -->
       <StatsCard
         title={overviewTotalActivityTitle}
         value={formatDurationLocalized(stats.total_duration, { compact: true })}
         icon="duration"
         color="indigo"
         subtitle={totalDeltaSubtitle}
+        dataKpiCard
       />
       <StatsCard
         title={overviewWorkDurationTitle}
@@ -1538,6 +1540,7 @@
         icon="focus"
         color="emerald"
         subtitle={workShareSubtitle}
+        dataKpiCard
       />
       <StatsCard
         title={t('overview.peakFocus')}
@@ -1545,6 +1548,7 @@
         icon="duration"
         color="blue"
         subtitle={peakWindowSubtitle}
+        dataKpiCard
       />
       <StatsCard
         title={t('overview.entertainmentShare')}
@@ -1552,6 +1556,7 @@
         icon="apps"
         color="rose"
         subtitle={entertainmentDeltaSubtitle}
+        dataKpiCard
       />
     {/if}
   </div>

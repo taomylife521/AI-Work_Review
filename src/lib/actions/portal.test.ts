@@ -7,7 +7,7 @@ const srcRoot = fileURLToPath(new URL('../../', import.meta.url));
 
 test('固定定位浮层应通过 portalToBody 移挂 body，规避 backdrop-filter 包含块劫持', async () => {
   const overlayHosts = [
-    { file: 'routes/timeline/Timeline.svelte', min: 2 },
+    { file: 'routes/timeline/Timeline.svelte', min: 3 },
     { file: 'routes/Overview.svelte', min: 1 },
     { file: 'routes/timeline/HourlySummaryDrawer.svelte', min: 1 },
     { file: 'routes/report/Report.svelte', min: 3 },

@@ -217,6 +217,8 @@ export default {
       detail: {
         appCategory: '应用默认分类',
         appCategoryHelp: '修改后会同步更新该应用的历史记录',
+        appCategoryPendingConfirm: '再次点击「{category}」确认，将同步更新该应用的历史记录',
+        appSettings: '对此应用',
         saving: '保存中...',
         screenshot: '屏幕截图',
         screenshotAlt: '屏幕截图',

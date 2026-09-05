@@ -280,6 +280,13 @@ async fn embed_texts(
                     .chars()
                     .take(300)
                     .collect();
+                // 模型未拉取是最常见的部署遗漏：404 + not found 时直接给出安装命令
+                if status.as_u16() == 404 && body.contains("not found") {
+                    return Err(AppError::Analysis(format!(
+                        "嵌入模型 {model} 未安装：请在终端执行 ollama pull {model} 后重试（原始错误：HTTP {status}: {body}）",
+                        model = config.model
+                    )));
+                }
                 return Err(AppError::Analysis(format!(
                     "Ollama 嵌入返回 HTTP {status}: {body}"
                 )));

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
+  import { invoke } from '@tauri-apps/api/core';
   import { locale, t } from '$lib/i18n/index.ts';
 
   interface AppPrivacyRule {
@@ -15,6 +16,11 @@
 
   interface PrivacyConfig {
     privacy: PrivacySettings;
+  }
+
+  interface PrivacyChangeDetail {
+    autosaved: true;
+    config: PrivacyConfig;
   }
 
   interface PrivacyLevelConfig {
@@ -33,7 +39,7 @@
   export let recentApps: string[] = [];
   
   const dispatch = createEventDispatcher<{
-    change: PrivacyConfig;
+    change: PrivacyConfig | PrivacyChangeDetail;
     'refresh-apps': void;
   }>();
   $: currentLocale = $locale;
@@ -55,6 +61,8 @@
   let newKeyword = '';
   let showDomainInput = false;
   let newDomain = '';
+  let keywordSaveQueue: Promise<void> = Promise.resolve();
+  let keywordRevision = 0;
 
   // 三种策略只表达记录方式，不使用大面积语义色。
   const privacyLevelConfigs: PrivacyLevelConfig[] = [
@@ -120,6 +128,19 @@
     dispatch('change', config);
   }
 
+  function persistKeywordChange() {
+    const revision = ++keywordRevision;
+    dispatch('change', config);
+    keywordSaveQueue = keywordSaveQueue
+      .then(() => invoke<void>('save_config', { config }))
+      .then(() => {
+        if (revision === keywordRevision) {
+          dispatch('change', { autosaved: true, config });
+        }
+      })
+      .catch((error) => console.error('保存敏感词失败:', error));
+  }
+
   function addKeyword() {
     if (!newKeyword.trim()) return;
     // 避免重复添加
@@ -133,14 +154,14 @@
     ];
     newKeyword = '';
     showKeywordInput = false;
-    dispatch('change', config);
+    persistKeywordChange();
   }
 
   function removeKeyword(index: number) {
     const keywords = [...config.privacy.excluded_keywords];
     keywords.splice(index, 1);
     config.privacy.excluded_keywords = keywords;
-    dispatch('change', config);
+    persistKeywordChange();
   }
 
   // 域名黑名单管理

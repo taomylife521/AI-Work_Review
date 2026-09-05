@@ -131,3 +131,21 @@ export function hexToRGBA(hex: string | null | undefined, alpha: number): string
   const b = parseInt(hex.slice(5, 7), 16);
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
+
+/** 把当前分类提到选择器最前，其余保持原有顺序。 */
+export function splitCategoriesForPicker(
+  categories: readonly CategoryInfo[],
+  currentKey: string | null | undefined,
+): { current: CategoryInfo | null; others: CategoryInfo[] } {
+  const key = currentKey || 'other';
+  let current: CategoryInfo | null = null;
+  const others: CategoryInfo[] = [];
+  for (const category of categories) {
+    if (current === null && category.key === key) {
+      current = category;
+      continue;
+    }
+    others.push(category);
+  }
+  return { current, others };
+}
