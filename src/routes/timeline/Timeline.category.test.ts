@@ -1,6 +1,47 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { parse } from 'svelte/compiler';
+
+test('所有非系统分类均应独立提供管理入口，不经过分类选择和历史同步', async () => {
+  const source = await readFile(new URL('./Timeline.svelte', import.meta.url), 'utf8');
+  const start = source.indexOf('{#each allCategories as cat (cat.key)}');
+  const end = source.indexOf('{/each}', start) + '{/each}'.length;
+  const html = parse(source.slice(start, end)).html;
+  assert.ok(html.children);
+  const each = html.children[0];
+  assert.ok(each.children);
+  const group = each.children.find((node) => node.type === 'Element');
+  assert.ok(group?.children);
+  assert.equal(group.name, 'span', '管理按钮不能嵌套在分类选择按钮内');
+  assert.ok(!group.attributes.some((attr: { type: string }) => attr.type === 'EventHandler'));
+  const branches = group.children.filter((node) => node.type === 'IfBlock');
+  assert.equal(branches.length, 2, '当前分类展示与非系统分类管理必须为并列条件');
+  assert.equal(branches[0].expression.operator, '===');
+  assert.equal(branches[0].expression.right.name, 'currentCategoryKey');
+  const management = branches[1];
+  assert.equal(management.expression.operator, '!');
+  assert.equal(management.expression.argument.object.name, 'cat');
+  assert.equal(management.expression.argument.property.name, 'is_system');
+  assert.ok(management.children);
+  const actions = management.children.find((node) => node.type === 'Element');
+  assert.ok(actions?.children);
+  const buttons = actions.children.filter((node) => node.type === 'Element');
+  assert.equal(buttons.length, 2);
+  for (const button of buttons) {
+    assert.equal(button.name, 'button');
+    const disabled = button.attributes.find((attr: { name: string }) => attr.name === 'disabled');
+    assert.equal(disabled.value[0].expression.name, 'categorySaving');
+  }
+  const markup = source.slice(start, end);
+  const managementSource = markup.slice(management.start, management.end);
+  assert.match(managementSource, /startRenameCategory\(cat\)/);
+  assert.match(managementSource, /prepareCategoryConfirmation\(\)/);
+  assert.match(managementSource, /pendingDeleteCategory = \{ key: cat.key, name: getCategoryDisplayName\(cat\) \}/);
+  assert.doesNotMatch(managementSource, /selectActivityCategory|doChangeAppCategory|syncHistory|invoke\(/);
+  assert.match(source, /function startRenameCategory\(cat: CategoryInfo\): void \{\s*clearPendingChip\(\)/);
+  assert.match(source, /function prepareCategoryConfirmation\(\): void \{\s*clearPendingChip\(\)/);
+});
 
 test('时间线详情应支持修改应用默认分类并二次确认后回填历史', async () => {
   const source = await readFile(new URL('./Timeline.svelte', import.meta.url), 'utf8');

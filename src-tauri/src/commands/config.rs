@@ -101,6 +101,22 @@ fn to_absolute_path(path: &Path) -> Result<PathBuf, AppError> {
     }
 }
 
+fn resolve_migration_target(
+    current_dir: &Path,
+    requested_path: &Path,
+) -> Result<PathBuf, AppError> {
+    std::fs::create_dir_all(requested_path)?;
+    let target_dir = requested_path.canonicalize()?;
+    if target_dir != current_dir
+        && (target_dir.starts_with(current_dir) || current_dir.starts_with(&target_dir))
+    {
+        return Err(AppError::Config(
+            "新旧数据目录不能互为父子目录，请选择独立目录".to_string(),
+        ));
+    }
+    Ok(target_dir)
+}
+
 fn ensure_target_dir_ready(target_dir: &Path) -> Result<bool, AppError> {
     std::fs::create_dir_all(target_dir)?;
 
@@ -231,32 +247,17 @@ pub async fn change_data_dir(
     let requested_path = to_absolute_path(Path::new(requested_dir))?;
     let current_dir = {
         let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-        state
-            .data_dir
-            .canonicalize()
-            .unwrap_or_else(|_| state.data_dir.clone())
+        state.data_dir.canonicalize()?
     };
 
-    if requested_path == current_dir {
+    let target_dir = resolve_migration_target(&current_dir, &requested_path)?;
+    if target_dir == current_dir {
         return Ok(serde_json::json!({
             "dataDir": current_dir.to_string_lossy().to_string(),
             "copiedFiles": 0,
             "message": "数据目录未变化",
         }));
     }
-
-    if requested_path.starts_with(&current_dir) || current_dir.starts_with(&requested_path) {
-        return Err(AppError::Config(
-            "新旧数据目录不能互为父子目录，请选择独立目录".to_string(),
-        ));
-    }
-
-    let target_dir = {
-        std::fs::create_dir_all(&requested_path)?;
-        requested_path
-            .canonicalize()
-            .unwrap_or_else(|_| requested_path.clone())
-    };
 
     // 先清空目标目录中已有的受管条目（必须在 backup_to 之前，否则会删掉刚备份的数据库）
     let replaced_existing_data = ensure_target_dir_ready(&target_dir)?;
@@ -370,6 +371,52 @@ pub async fn cleanup_old_data_dir(
         "preservedEntries": preserved_entries,
         "message": message,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_migration_target;
+
+    #[test]
+    fn 迁移应按真实路径拒绝父子目录并识别当前目录别名() {
+        let root = std::env::temp_dir().join(format!("migration-path-{}", uuid::Uuid::new_v4()));
+        let current = root.join("current");
+        std::fs::create_dir_all(current.join("screenshots")).unwrap();
+        let current = current.canonicalize().unwrap();
+        let root = root.canonicalize().unwrap();
+
+        assert_eq!(
+            resolve_migration_target(&current, &current).unwrap(),
+            current
+        );
+        assert!(resolve_migration_target(&current, &root).is_err());
+        assert!(resolve_migration_target(&current, &current.join("screenshots/new")).is_err());
+        assert_eq!(
+            resolve_migration_target(&current, &root.join("sibling")).unwrap(),
+            root.join("sibling"),
+        );
+        assert!(resolve_migration_target(
+            &current,
+            &root.join("sibling/../current/screenshots/new"),
+        )
+        .is_err());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            symlink(&current, root.join("same-alias")).unwrap();
+            symlink(current.join("screenshots"), root.join("child-alias")).unwrap();
+            symlink(&root, root.join("parent-alias")).unwrap();
+            assert_eq!(
+                resolve_migration_target(&current, &root.join("same-alias")).unwrap(),
+                current,
+            );
+            assert!(resolve_migration_target(&current, &root.join("child-alias/new")).is_err());
+            assert!(resolve_migration_target(&current, &root.join("parent-alias")).is_err());
+        }
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 /// 在系统文件管理器中打开数据目录

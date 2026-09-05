@@ -241,6 +241,7 @@
   let renameCategoryIcon = '🏷️';
 
   function startRenameCategory(cat: CategoryInfo): void {
+    clearPendingChip();
     showCreateCategory = false;
     renameCategoryKey = cat.key;
     renameCategoryName = cat.name;
@@ -326,6 +327,7 @@
   // 进入分类操作前，先把焦点交还给稳定存在的分类入口。
   // 保存完成后焦点无人接管时，恢复到分类入口。
   function prepareCategoryConfirmation(): void {
+    clearPendingChip();
     showCreateCategory = false;
     showRenameCategory = false;
     categoryTrigger?.focus();
@@ -1779,14 +1781,29 @@
           >
             <div class="timeline-category-chips">
               {#each allCategories as cat (cat.key)}
+                <span class="timeline-category-chip-group">
                 {#if cat.key === currentCategoryKey}
-                  <!-- 当前分类：纯状态展示，非系统分类提供重命名/删除 -->
+                  <!-- 当前分类仅展示状态，管理入口与选择按钮并列。 -->
                   <span
                     class="timeline-category-chip timeline-category-chip-current"
                     style={`--chip-color: ${cat.color}`}
                   >
                     <span class="timeline-category-dot" style={`background-color: ${cat.color}`}></span>
                     <span class="timeline-category-chip-name">{getCategoryDisplayName(cat)}</span>
+                  </span>
+                {:else}
+                  <button
+                    type="button"
+                    class="timeline-category-chip"
+                    class:timeline-category-chip-pending={pendingChipCategory === cat.key}
+                    disabled={categorySaving}
+                    style={`--chip-color: ${cat.color}`}
+                    on:click={() => selectActivityCategory(cat.key)}
+                  >
+                    <span class="timeline-category-dot" style={`background-color: ${cat.color}`}></span>
+                    <span class="timeline-category-chip-name">{getCategoryDisplayName(cat)}</span>
+                  </button>
+                {/if}
                     {#if !cat.is_system}
                       <span class="timeline-category-chip-actions">
                         <button
@@ -1812,20 +1829,7 @@
                         </button>
                       </span>
                     {/if}
-                  </span>
-                {:else}
-                  <button
-                    type="button"
-                    class="timeline-category-chip"
-                    class:timeline-category-chip-pending={pendingChipCategory === cat.key}
-                    disabled={categorySaving}
-                    style={`--chip-color: ${cat.color}`}
-                    on:click={() => selectActivityCategory(cat.key)}
-                  >
-                    <span class="timeline-category-dot" style={`background-color: ${cat.color}`}></span>
-                    <span class="timeline-category-chip-name">{getCategoryDisplayName(cat)}</span>
-                  </button>
-                {/if}
+                </span>
               {/each}
               <button
                 type="button"
@@ -3091,6 +3095,12 @@
     align-items: center;
     flex: 0 0 auto;
     margin-inline-start: auto;
+  }
+
+  .timeline-category-chip-group {
+    max-width: 100%;
+    display: inline-flex;
+    align-items: center;
   }
 
   .timeline-category-chip-actions button {

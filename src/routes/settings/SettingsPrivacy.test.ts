@@ -80,11 +80,48 @@ test('敏感词增删后应立即持久化，避免重启恢复默认值', async
   ]);
 
   assert.match(source, /function persistKeywordChange\(\)/);
-  assert.match(source, /invoke(?:<[^>]+>)?\('save_config', \{ config \}\)/);
+  assert.match(source, /invoke(?:<[^>]+>)?\('save_config', \{ config: JSON\.parse\(savedConfig\) \}\)/);
   assert.match(source, /revision === keywordRevision/);
   assert.match(source, /autosaved: true/);
   assert.match(settingsSource, /<SettingsPrivacy[\s\S]*?on:change=\{handleSettingsChange\}/);
   assert.equal((source.match(/persistKeywordChange\(\)/g) || []).length, 3);
+});
+
+test('敏感词保存完成不得清除请求期间其他配置修改的未保存标记', async () => {
+  const source = await readPrivacySource();
+  const functionSource = source.match(/  function persistKeywordChange\(\) \{[\s\S]*?\n  \}/)?.[0];
+  assert.ok(functionSource);
+  const runSave = new Function('config', 'invoke', 'dispatch', `
+    let keywordRevision = 0;
+    let keywordSaveQueue = Promise.resolve();
+    ${functionSource.replace('invoke<void>', 'invoke')}
+    persistKeywordChange();
+    return keywordSaveQueue;
+  `);
+
+  for (const editDuringSave of [false, true]) {
+    const config = { privacy: { excluded_keywords: ['secret'], excluded_domains: [] as string[] } };
+    let dirty = false;
+    let persisted: typeof config | undefined;
+    let finishSave!: () => void;
+    const completion = runSave(
+      config,
+      (_command: string, args: { config: typeof config }) => {
+        persisted = args.config;
+        return new Promise<void>((resolve) => { finishSave = resolve; });
+      },
+      (_event: string, detail: { autosaved?: boolean }) => { dirty = !detail.autosaved; },
+    );
+    await Promise.resolve();
+    if (editDuringSave) {
+      config.privacy.excluded_domains.push('private.example');
+      dirty = true;
+    }
+    finishSave();
+    await completion;
+    assert.deepEqual(persisted?.privacy.excluded_domains, []);
+    assert.equal(dirty, editDuringSave);
+  }
 });
 
 const appCssUrl = new URL('../../app.css', import.meta.url);

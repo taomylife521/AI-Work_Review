@@ -1409,11 +1409,16 @@ fn recording_loop_decision(
     }
 }
 
-fn should_run_ocr(elapsed_since_ocr: Option<Duration>, screenshot_interval: u64) -> bool {
-    match elapsed_since_ocr {
-        None => true,
-        Some(elapsed) => elapsed >= Duration::from_secs(screenshot_interval),
-    }
+fn should_run_ocr(
+    is_new_activity: bool,
+    elapsed_since_ocr: Option<Duration>,
+    screenshot_interval: u64,
+) -> bool {
+    is_new_activity
+        || match elapsed_since_ocr {
+            None => true,
+            Some(elapsed) => elapsed >= Duration::from_secs(screenshot_interval),
+        }
 }
 
 fn monitoring_poll_interval_ms_for_platform(is_macos: bool) -> u64 {
@@ -2661,14 +2666,6 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                     )
                 };
                 let category = classification.base_category.clone();
-                let should_run_ocr = screenshots_enabled
-                    && should_run_ocr(
-                        last_ocr_time.map(|last| last.elapsed()),
-                        screenshot_interval,
-                    );
-                if should_run_ocr {
-                    last_ocr_time = Some(std::time::Instant::now());
-                }
 
                 // 先检查是否有可合并的记录（在截屏之前判断，避免不必要的截图保存）
                 let latest_activity = {
@@ -2728,6 +2725,14 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                 } else {
                     false
                 };
+
+                // 新会话必须保留首次 OCR，冷却只限制连续会话的重复识别。
+                let should_run_ocr = screenshots_enabled
+                    && should_run_ocr(
+                        !is_merge,
+                        last_ocr_time.map(|last| last.elapsed()),
+                        screenshot_interval,
+                    );
 
                 if is_merge {
                     // === 合并路径：不保存截图，只做 OCR ===
@@ -2855,6 +2860,9 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
 
                     // 对截图执行 OCR；若已成功合并，则保留最新截图并清理旧截图
                     if let Some(screenshot) = screenshot_result {
+                        if should_run_ocr {
+                            last_ocr_time = Some(std::time::Instant::now());
+                        }
                         let latest_capture_path =
                             latest_archive_path.unwrap_or_else(|| screenshot.path.clone());
                         let state_clone = state.clone();
@@ -3086,16 +3094,10 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                                         );
 
                                         // 异步 OCR（新建活动的截图已保存，不删除）
+                                        last_ocr_time = Some(std::time::Instant::now());
                                         let state_clone = state.clone();
                                         let ocr_sem = ocr_semaphore.clone();
                                         tokio::spawn(async move {
-                                            if !should_run_ocr {
-                                                if let Some(temp_path) = temporary_ocr_source_path {
-                                                    let _ = std::fs::remove_file(temp_path);
-                                                }
-                                                return;
-                                            }
-
                                             // 非阻塞获取 permit，满载时跳过 OCR
                                             let _permit = match ocr_sem.try_acquire_owned() {
                                                 Ok(p) => p,
@@ -4826,9 +4828,11 @@ mod tests {
 
     #[test]
     fn ocr应遵循截图间隔且首次立即执行() {
-        assert!(should_run_ocr(None, 30));
-        assert!(!should_run_ocr(Some(Duration::from_secs(29)), 30));
-        assert!(should_run_ocr(Some(Duration::from_secs(30)), 30));
+        assert!(should_run_ocr(false, None, 30));
+        assert!(!should_run_ocr(false, Some(Duration::from_secs(29)), 30));
+        assert!(should_run_ocr(false, Some(Duration::from_secs(30)), 30));
+        assert!(should_run_ocr(true, Some(Duration::from_secs(5)), 30));
+        assert!(should_run_ocr(true, Some(Duration::ZERO), 30));
     }
 
     #[test]

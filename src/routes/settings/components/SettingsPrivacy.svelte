@@ -132,9 +132,11 @@
     const revision = ++keywordRevision;
     dispatch('change', config);
     keywordSaveQueue = keywordSaveQueue
-      .then(() => invoke<void>('save_config', { config }))
-      .then(() => {
-        if (revision === keywordRevision) {
+      .then(async () => {
+        const savedConfig = JSON.stringify(config);
+        await invoke<void>('save_config', { config: JSON.parse(savedConfig) });
+        // 保存期间其他隐私项或标签页的修改仍需保留未保存状态。
+        if (revision === keywordRevision && JSON.stringify(config) === savedConfig) {
           dispatch('change', { autosaved: true, config });
         }
       })
