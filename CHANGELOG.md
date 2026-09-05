@@ -7,14 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### 修复
-- **紧凑模式概览 KPI 副标题过大**（#172）：简洁风格的样式覆盖选择器过宽（命中卡片内所有 `p`/`span`），把「较上周同日 +5时20分」等副标题也放大到与数值相同（1.55rem）；改为通过 `data-kpi-card` 标记精准命中数值与标签，副标题恢复 12px，三种视觉风格字号一致。
-- **浮层被裁/错位（v1.1.2 玻璃化回归）**：主窗口玻璃壳层的 `backdrop-filter` 会把内部 `position: fixed` 浮层的包含块从视口劫持为壳层本身，导致按视口坐标定位的浮层整体偏移、底部超出窗口被裁——时间线详情抽屉里的分类弹层、时段摘要抽屉、概览分类弹层、日报段落编辑/预设/批量导出弹窗均受影响。新增 `portalToBody` action 把这些浮层移挂 `document.body`，fixed 恢复视口包含块，层级回归全局比较。
+## [1.1.3-rc.1] - 2026-09-05
 
-### 变更
-- **时间线活动详情**：抽屉改为截图为主——窗口标题作图注，当前分类单独钉在标签最前（自定义分类的改名/删除收在这颗标签内），其余分类与新建在下一行，记录策略收入「对此应用」折叠区；去掉会盖住截图的分类下拉管理面板。
-- **时间线详情分类区打磨**：当前分类不再使用独立大芯片（信息与标签列表重复、约占抽屉三分之一空间），改为全部分类平铺一组胶囊标签、当前项高亮并提供内联重命名/删除；修改分类从全屏确认弹窗改为**二次点击确认**（首次点击进入待确认态并显示提示行，3 秒内再次点击同一标签才应用同步历史记录；删除分类与隐私规则仍保留确认层）；新建分类的表情选择由 28 个收敛为 8 个常用项，编辑器更紧凑。
-- **安全公告评估关闭**：五条 unsound 类 RustSec 跟踪 Issue（#167-#171：anyhow / event-listener / glib / memmap2 / rand）经 `cargo tree --target all` 依赖路径评估，确认触发条件在本项目均不可达（自有代码不调用受影响 API，相关 crate 均为传递依赖，rand 0.7 仅存在于构建依赖链），全部评估关闭；unsound / 漏洞类公告继续按 Issue 跟踪。
+This is a release candidate for testing, not a stable release. Back up your data before installing, especially before testing data-directory migration. RC releases are not marked as Latest and are not offered through the stable automatic-update endpoint.
+
+### Fixed
+- Restore viewport positioning for overlays affected by the glass-style window shell, including timeline drawers, category controls, and report dialogs.
+- Keep compact overview KPI subtitles at their intended size (#172).
+- Resize oversized Windows OCR inputs to the native engine limit within the existing process and map text boxes back to the original image.
+- Allow the first OCR pass for a new activity even while the repeated-capture cooldown is active. Existing OCR concurrency limits still apply.
+- Preserve unsaved configuration changes made while privacy keyword autosaves are in flight.
+- Validate canonical data-directory paths before migration cleanup or copying, rejecting parent/child targets reached through aliases or symbolic links.
+- Allow every custom category to be renamed or deleted without first applying it to an application or rewriting activity history.
+- Save AI settings before semantic indexing and clarify embedding configuration errors.
+
+### Changed
+- Simplify screenshot-focused timeline details and inline category selection. Applying a category uses a second-click confirmation; deletion and privacy-rule changes retain confirmation dialogs.
+- Normalize Windows application titles and reduce native OCR process overhead.
+- Close the five assessed RustSec unsoundness tracking issues (#167-#171); this does not claim that upstream advisories are fixed. Security and unsoundness advisories remain tracked.
+- Accept strict `vMAJOR.MINOR.PATCH-rc.N` release tags and publish them as GitHub prereleases without replacing the stable Latest release.
+
+### Validation Still Required
+- Windows native OCR on ordinary, 4K, and multi-monitor captures, including hidden PowerShell execution.
+- Fast application switching, privacy-save persistence after restart, and category-management interactions.
+- Migration with disposable data, including dangerous target rejection and interruption recovery.
+- Native installer builds, launch checks, and upgrade testing from 1.1.2 on supported platforms.
 
 ## [1.1.2] - 2026-08-22
 

@@ -42,3 +42,14 @@ Release body 形如：
 4. CI 自动在 Release body 顶部加入 `English / 繁體中文` 切换链接。
 
 某版本若没有 en/tw 文件，Release body 就只有中文主体（向后兼容，不会报错）。
+
+## Release Candidates
+
+- RC tags use `vMAJOR.MINOR.PATCH-rc.N`, for example `v1.1.3-rc.1`. Leading zeros in numeric components are rejected.
+- Synchronize `package.json`, `package-lock.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and `Cargo.lock` before tagging.
+- Add a matching changelog section, including known validation gaps. The 1.1.3 RC notes are written in English directly in `CHANGELOG.md`.
+- Commit and push the prepared changes to `main`. Only after approving publication, create and push the RC tag at the current `origin/main` commit.
+- The existing five-platform build matrix and all release gates also apply to RCs. A release is published only after all build jobs succeed.
+- RC releases set `prerelease: true` and `makeLatest: false`. Stable clients retain their existing `/releases/latest/download/` endpoints; testers install RC assets manually. RC installations also remain on the stable update endpoint.
+- Test with backed-up or disposable data. Verify Windows OCR, fast application switching, privacy saves after restart, category management, data migration, and installer upgrades before promoting to a stable version.
+- Promotion requires a separate stable version bump and tag; do not relabel the RC release or move an existing tag.

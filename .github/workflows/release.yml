@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
 
 jobs:
   preflight:
@@ -30,8 +31,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "Tag 必须是严格 SemVer：vMAJOR.MINOR.PATCH" >&2
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$ ]]; then
+            echo "Expected vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-rc.N without leading zeros" >&2
             exit 1
           fi
 
@@ -571,4 +572,5 @@ jobs:
           artifacts: "all-artifacts/**/*.AppImage,all-artifacts/**/*.deb,all-artifacts/**/*.rpm,all-artifacts/**/*.exe,all-artifacts/**/*.exe.sig,all-artifacts/**/*.dmg,all-artifacts/**/*.app.tar.gz,all-artifacts/**/*.app.tar.gz.sig,all-artifacts/**/Work_Review_portable_*.zip,updater.json,updater-ghproxy.json,updater-ghp.json"
           artifactErrorsFailBuild: true
           replacesArtifacts: true
-          makeLatest: legacy
+          prerelease: ${{ contains(github.ref_name, '-rc.') }}
+          makeLatest: ${{ contains(github.ref_name, '-rc.') && 'false' || 'legacy' }}

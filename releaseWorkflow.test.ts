@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 
 test('Release workflow 应在构建前执行类型检查、前端测试并使用 npm ci', () => {
   const source = readFileSync(new URL('./.github/workflows/release.yml', import.meta.url), 'utf8');
@@ -44,16 +45,36 @@ test('Release workflow 应校验严格 SemVer、五处版本一致并只允许�
   assert.match(source, /name:\s*Validate release tag and version/);
   assert.ok(bashPattern, '应能读取发布工作流中的 SemVer 校验表达式');
   const strictSemver = new RegExp(bashPattern);
-  for (const valid of ['v0.0.0', 'v1.1.1', 'v12.34.56']) {
+  for (const valid of ['v0.0.0', 'v1.1.1', 'v12.34.56', 'v1.1.3-rc.1', 'v1.1.3-rc.10']) {
     assert.match(valid, strictSemver);
   }
-  for (const invalid of ['v01.2.3', 'v1.02.3', 'v1.2.03', 'v1.2', '1.2.3']) {
+  for (const invalid of ['v01.2.3', 'v1.02.3', 'v1.2.03', 'v1.2', '1.2.3', 'v1.1.3-rc.01', 'v1.1.3-rc.', 'v1.1.3-beta.1', 'v1.1.3-rc.1.extra']) {
     assert.doesNotMatch(invalid, strictSemver);
   }
   assert.match(source, /npm run test:frontend/);
   assert.match(source, /git fetch origin main/);
   assert.match(source, /git rev-parse origin\/main/);
   assert.match(source, /GITHUB_REF_NAME/);
+});
+
+test('RC releases use prerelease metadata and cannot replace the stable latest release', () => {
+  const source = readFileSync(new URL('./.github/workflows/release.yml', import.meta.url), 'utf8');
+  const pattern = source.match(/if \[\[ ! "\$GITHUB_REF_NAME" =~ (\^\S+\$) \]\]; then/)?.[1];
+  assert.ok(pattern);
+  assert.ok(source.includes("- 'v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'"));
+  assert.ok(source.includes("prerelease: ${{ contains(github.ref_name, '-rc.') }}"));
+  assert.ok(source.includes("makeLatest: ${{ contains(github.ref_name, '-rc.') && 'false' || 'legacy' }}"));
+  for (const [tag, status] of [['v1.1.3', 0], ['v1.1.3-rc.1', 0], ['v1.1.3-rc.01', 1], ['v1.1.3-rc.1+meta', 1]] as const) {
+    const result: SpawnSyncReturns<string> = spawnSync('bash', ['-c', `[[ "$GITHUB_REF_NAME" =~ ${pattern} ]]`], {
+      env: { ...process.env, GITHUB_REF_NAME: tag },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, status, `${tag}: ${result.error ?? result.stderr}`);
+  }
+  const config = JSON.parse(readFileSync(new URL('./src-tauri/tauri.conf.json', import.meta.url), 'utf8'));
+  for (const endpoint of config.plugins.updater.endpoints) {
+    assert.ok(endpoint.includes('/releases/latest/download/'));
+  }
 });
 
 test('官方 Actions 应使用 Node 24 运行时版本', () => {
